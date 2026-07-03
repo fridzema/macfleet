@@ -2,8 +2,8 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import FleetSidebar from '../../src/components/FleetSidebar.vue'
-import { useFleet } from '../../src/stores/fleet'
 import { api } from '../../src/shared/api'
+import { useFleet } from '../../src/stores/fleet'
 
 vi.spyOn(api, 'listVms').mockResolvedValue([])
 

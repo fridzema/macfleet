@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import FleetSidebar from '../components/FleetSidebar.vue'
-import VmDetail from '../components/VmDetail.vue'
 import LogPane from '../components/LogPane.vue'
+import VmDetail from '../components/VmDetail.vue'
 
 const selected = ref<string | null>(null)
 </script>

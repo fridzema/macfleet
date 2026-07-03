@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useFleet } from '../../src/stores/fleet'
 import { api } from '../../src/shared/api'
+import { useFleet } from '../../src/stores/fleet'
 
 beforeEach(() => setActivePinia(createPinia()))
 

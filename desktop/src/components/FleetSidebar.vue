@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useFleet } from '../stores/fleet'
 import type { Vm } from '../shared/api'
+import { useFleet } from '../stores/fleet'
 
 const store = useFleet()
-const emit = defineEmits<{ (e: 'select', name: string): void }>()
+const emit = defineEmits<(e: 'select', name: string) => void>()
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
