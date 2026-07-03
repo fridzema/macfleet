@@ -5,6 +5,8 @@ mod state;
 
 use std::process::{Child, Command};
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
 struct Sidecar(Mutex<Option<Child>>);
@@ -47,6 +49,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .spawn()
                 .ok();
             app.manage(Sidecar(Mutex::new(child)));
+
+            let show = MenuItem::with_id(app, "show", "Show macfleet", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
         .build(tauri::generate_context!())?
