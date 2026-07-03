@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 
 from macfleet.vm import Runner, Tart, _run, fullname
@@ -14,6 +15,10 @@ SSH_OPTS = [
     "-o", "BatchMode=yes",
     "-o", "ConnectTimeout=8",
 ]
+
+
+def _spawn(argv: list[str]) -> None:
+    subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def ssh_cmd(ip: str, remote_cmd: str) -> list[str]:
@@ -29,9 +34,11 @@ def scp_pull_cmd(ip: str, remote: str, local: str) -> list[str]:
 
 
 class Fleet:
-    def __init__(self, tart: Tart | None = None, run: Runner = _run) -> None:
+    def __init__(self, tart: Tart | None = None, run: Runner = _run,
+                 spawn: Callable[[list[str]], None] = _spawn) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
+        self._spawn = spawn
 
     def up(self, name: str) -> None:
         target = fullname(name)
@@ -39,8 +46,7 @@ class Fleet:
         if target not in existing:
             self.tart.clone("mf-golden", target)
         # background `tart run` so it doesn't block the caller
-        subprocess.Popen(["tart", "run", target, "--no-graphics"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._spawn(["tart", "run", target, "--no-graphics"])
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))

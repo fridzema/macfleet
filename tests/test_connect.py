@@ -28,15 +28,13 @@ def test_scp_push_cmd_shape():
 
 def test_up_clones_golden_and_starts():
     seen = []
-    def script(argv):
+    def tart_run(argv):
         seen.append(argv)
-        if argv[:2] == ["tart", "list"]:
-            return "[]"  # empty JSON array
-        return ""
-    fleet = Fleet(tart=Tart(run=fake_runner(script)),
-                  run=fake_runner(script))
+        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+    fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
     fleet.up("web")
     assert ["tart", "clone", "mf-golden", "mf-web"] in seen
+    assert ["tart", "run", "mf-web", "--no-graphics"] in seen
 
 
 def test_computer_blocked_without_env(monkeypatch):
