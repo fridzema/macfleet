@@ -12,6 +12,8 @@ def test_script_installs_server_and_launchd():
     assert "computer_server" in s
     assert "LaunchAgents" in s
     assert ":8000" in s or "--port 8000" in s
+    assert "uv pip install" in s
+    assert "-m pip install" not in s
 
 
 def test_script_is_idempotent_guarded():

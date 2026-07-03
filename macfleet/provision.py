@@ -28,9 +28,9 @@ sudo killall -HUP mDNSResponder || true
 # 2. uv (idempotent)
 command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
-# 3. cua-computer-server venv (idempotent)
+# 3. cua-computer-server venv (idempotent). `uv venv` has no pip; install via `uv pip`.
 test -d "$HOME/cs-venv" || uv venv "$HOME/cs-venv"
-"$HOME/cs-venv/bin/python" -m pip install --quiet cua-computer-server
+uv pip install --python "$HOME/cs-venv/bin/python" --quiet cua-computer-server
 # 4. launchd unit -> server on :8000 at boot
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$HOME/Library/LaunchAgents/com.macfleet.computerserver.plist" <<'PLIST'
