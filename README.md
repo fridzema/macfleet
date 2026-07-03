@@ -47,6 +47,10 @@ uv run macfleet bake                # print the golden-image bake checklist
 uv run macfleet serve               # start the local API (for the future desktop app)
 ```
 
+`up` returns as soon as `tart run` is launched — it does not wait for SSH to come up.
+The guest takes roughly 30s to boot, so an `ssh` run immediately after `up` may need a
+short wait/retry (this is why `scripts/bake.sh` sleeps before `ssh-copy-id`).
+
 ## Computer-use safety gate
 
 Computer-use control (screenshot/click/type via `Fleet.computer()`) is disabled by
