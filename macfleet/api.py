@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from macfleet.connect import Fleet
@@ -25,6 +26,9 @@ class KeyRequest(BaseModel):
 def build_app(fleet: Fleet | None = None) -> FastAPI:
     fleet = fleet or Fleet()
     api = FastAPI(title="macfleet")
+    api.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
 
     @api.get("/vms")
     def list_vms() -> list[dict]:
@@ -54,6 +58,10 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
     @api.get("/vms/{name}/status")
     def status(name: str) -> dict:
         return {"healthy": fleet.status(name)}
+
+    @api.get("/vms/{name}/logs")
+    def logs(name: str, lines: int = 100) -> dict:
+        return {"lines": fleet.logs(name, lines)}
 
     @api.post("/vms/{name}/screenshot")
     def screenshot(name: str) -> dict:

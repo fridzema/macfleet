@@ -25,3 +25,10 @@ def test_script_is_idempotent_guarded():
 def test_bake_steps_mention_tcc():
     steps = bake_steps()
     assert any("TCC" in s or "Accessibility" in s for s in steps)
+
+
+def test_plist_writes_log_file():
+    from macfleet.provision import render_provision_script, SERVER_LOG
+    s = render_provision_script()
+    assert SERVER_LOG in s
+    assert "StandardOutPath" in s
