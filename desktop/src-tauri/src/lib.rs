@@ -3,6 +3,12 @@ mod error;
 mod handlers;
 mod state;
 
+use std::process::{Child, Command};
+use std::sync::Mutex;
+use tauri::Manager;
+
+struct Sidecar(Mutex<Option<Child>>);
+
 /// # Errors
 ///
 /// Returns an error if the Tauri runtime fails to initialize or run.
@@ -32,6 +38,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             handlers::greet_checked,
             handlers::get_app_info
         ])
-        .run(tauri::generate_context!())?;
+        .setup(|app| {
+            // Spawn the Python engine's local API as a managed sidecar.
+            // In dev the app runs from `desktop/`, so the engine repo root is `..`.
+            let child = Command::new("uv")
+                .args(["run", "macfleet", "serve", "--port", "8765"])
+                .current_dir("..")
+                .spawn()
+                .ok();
+            app.manage(Sidecar(Mutex::new(child)));
+            Ok(())
+        })
+        .build(tauri::generate_context!())?
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(sc) = app_handle.try_state::<Sidecar>() {
+                    if let Some(mut child) = sc.0.lock().unwrap().take() {
+                        let _ = child.kill();
+                    }
+                }
+            }
+        });
     Ok(())
 }
