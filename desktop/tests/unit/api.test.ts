@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, API_BASE } from '../../src/shared/api'
+import { API_BASE, api } from '../../src/shared/api'
 
 afterEach(() => vi.restoreAllMocks())
 
 function mockFetch(status: number, body: unknown) {
   return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    }),
   )
 }
 
