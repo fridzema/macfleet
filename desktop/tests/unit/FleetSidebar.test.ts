@@ -22,4 +22,14 @@ describe('FleetSidebar', () => {
     await rows[0].trigger('click')
     expect(wrapper.emitted('select')?.[0]).toEqual(['a'])
   })
+
+  it('up form submits store.up with the entered name', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const store = useFleet()
+    const up = vi.spyOn(store, 'up').mockResolvedValue()
+    const wrapper = mount(FleetSidebar)
+    await wrapper.find('[data-test="up-name"]').setValue('web')
+    await wrapper.find('[data-test="up-form"]').trigger('submit')
+    expect(up).toHaveBeenCalledWith('web')
+  })
 })
