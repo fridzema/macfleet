@@ -2,6 +2,7 @@ from __future__ import annotations
 
 DNS_SERVERS = "1.1.1.1 8.8.8.8"
 NET_SERVICE = "Ethernet"
+SERVER_LOG = "/Users/admin/Library/Logs/macfleet-computerserver.log"
 
 _PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -15,6 +16,8 @@ _PLIST = """<?xml version="1.0" encoding="UTF-8"?>
     <string>--port</string><string>8000</string>
   </array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/admin/Library/Logs/macfleet-computerserver.log</string>
+  <key>StandardErrorPath</key><string>/Users/admin/Library/Logs/macfleet-computerserver.log</string>
 </dict></plist>
 """
 
