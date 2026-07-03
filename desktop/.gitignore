@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Tauri
+src-tauri/target/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Affinity lock files
+*.af~lock~
+
+# Test
+test-results/
+playwright-report/
+coverage/
+
+# Worktrees
+.worktrees/
+
+# Env
+.env
+.env.local
+
+# Plans
+docs/plans/

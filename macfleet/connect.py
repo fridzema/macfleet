@@ -73,6 +73,11 @@ class Fleet:
         except Exception:
             return False
 
+    def logs(self, name: str, lines: int = 100) -> str:
+        from macfleet.provision import SERVER_LOG
+
+        return self.ssh(name, f"tail -n {int(lines)} {SERVER_LOG} 2>/dev/null || true")
+
     def computer(self, name: str) -> Any:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
             raise RuntimeError(

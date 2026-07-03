@@ -1,0 +1,22 @@
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx commitlint --edit {1}
+
+pre-commit:
+  parallel: true
+  commands:
+    eslint:
+      glob: '*.vue'
+      run: bunx eslint {staged_files}
+    biome:
+      glob: '*.{js,ts,vue,css,json}'
+      run: bunx biome check {staged_files}
+    # Clippy requires whole-crate context — runs full check even for single-file changes.
+    # To skip pre-commit hooks: LEFTHOOK=0 git commit -m "message"
+    clippy:
+      glob: '*.rs'
+      run: cd src-tauri && cargo clippy -- -D warnings
+    rustfmt:
+      glob: '*.rs'
+      run: cd src-tauri && cargo fmt -- --check
