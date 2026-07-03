@@ -15,8 +15,7 @@
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test": "vitest run && playwright test",
-    "prepare": "lefthook install"
+    "test": "vitest run && playwright test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
