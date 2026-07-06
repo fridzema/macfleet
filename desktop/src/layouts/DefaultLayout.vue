@@ -9,8 +9,8 @@ const { isDark, toggleDark } = useDarkMode()
   <div class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
     <nav class="flex items-center gap-4 border-b border-gray-200 px-6 py-3 dark:border-gray-800">
       <RouterLink to="/" class="flex items-center gap-2 font-bold text-gray-900 dark:text-gray-100">
-        <img src="/icon.svg" alt="OxideDock" class="size-6" />
-        OxideDock
+        <img src="/icon.svg" alt="macfleet" class="size-6" />
+        macfleet
       </RouterLink>
       <RouterLink
         to="/about"
