@@ -16,9 +16,10 @@ describe('fleet store', () => {
     expect(s.error).toBeNull()
   })
 
-  it('refresh drops non-fleet VMs (base/OCI images)', async () => {
+  it('refresh drops non-fleet VMs (base/OCI images) and the golden template', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([
       { name: 'mf-a', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-golden', state: 'stopped', source: 'local', healthy: false },
       { name: 'cua-tahoe', state: 'stopped', source: 'local', healthy: false },
       {
         name: 'ghcr.io/cirruslabs/macos-tahoe-base:latest',

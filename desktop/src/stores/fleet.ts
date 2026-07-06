@@ -8,8 +8,11 @@ export const useFleet = defineStore('fleet', () => {
 
   async function refresh(): Promise<void> {
     try {
-      // Only mf- fleet VMs are operable; base/OCI images can't be controlled.
-      vms.value = (await api.listVms()).filter((v) => v.name.startsWith('mf-'))
+      // Only mf- fleet VMs are operable; base/OCI images can't be controlled, and
+      // mf-golden is the read-only clone template, not a work VM.
+      vms.value = (await api.listVms()).filter(
+        (v) => v.name.startsWith('mf-') && v.name !== 'mf-golden',
+      )
       error.value = null
     } catch (e) {
       error.value = String(e)
