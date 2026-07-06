@@ -2649,6 +2649,7 @@ dependencies = [
 name = "oxidedock"
 version = "0.8.0"
 dependencies = [
+ "libc",
  "log",
  "serde",
  "serde_json",
