@@ -14,8 +14,8 @@ describe('AboutPage', () => {
   it('renders title and description', async () => {
     const wrapper = mount(AboutPage)
     await flushPromises()
-    expect(wrapper.text()).toContain('About OxideDock')
-    expect(wrapper.text()).toContain('desktop application foundation')
+    expect(wrapper.text()).toContain('About macfleet')
+    expect(wrapper.text()).toContain('disposable macOS')
     expect(wrapper.text()).toContain('v1.2.3')
   })
 
