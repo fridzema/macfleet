@@ -7,8 +7,8 @@ import { api } from '../../src/shared/api'
 beforeEach(() => setActivePinia(createPinia()))
 afterEach(() => vi.restoreAllMocks())
 
-const running = { name: 'web', running: true, state: 'running' }
-const stopped = { name: 'web', running: false, state: 'stopped' }
+const running = { name: 'web', state: 'running', healthy: true }
+const stopped = { name: 'web', state: 'stopped', healthy: false }
 
 describe('VmDetail', () => {
   it('renders the polled screenshot as a data URI', async () => {
