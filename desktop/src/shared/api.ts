@@ -7,6 +7,14 @@ export interface Vm {
   healthy: boolean
 }
 
+export type VmStatus = 'running' | 'booting' | 'stopped'
+
+/** running = up + server healthy; booting = up but server not answering yet. */
+export function vmStatus(vm: Pick<Vm, 'state' | 'healthy'>): VmStatus {
+  if (vm.state === 'running') return vm.healthy ? 'running' : 'booting'
+  return 'stopped'
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init)
   if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}`)

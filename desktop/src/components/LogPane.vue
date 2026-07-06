@@ -16,11 +16,9 @@ async function poll() {
 function start() {
   if (timer) clearInterval(timer)
   timer = null
-  // Logs come from the guest over SSH; only reachable when the VM is running.
-  if (!props.running) {
-    text.value = ''
-    return
-  }
+  text.value = ''
+  // Logs come from the guest over SSH; only reachable while the VM runs.
+  if (!props.running) return
   poll()
   timer = setInterval(poll, 2000)
 }
@@ -29,5 +27,10 @@ onBeforeUnmount(() => timer && clearInterval(timer))
 </script>
 
 <template>
-  <pre class="h-40 overflow-auto rounded border border-neutral-800 bg-black/30 p-2 text-xs">{{ text }}</pre>
+  <section class="shrink-0 border-t border-zinc-200 dark:border-zinc-800">
+    <div class="px-4 pt-2 text-xs font-medium tracking-wide text-zinc-500 uppercase">Logs</div>
+    <pre
+      class="mx-4 mt-1 mb-4 h-32 overflow-auto rounded-md border border-zinc-200 bg-zinc-100/50 p-2.5 font-mono text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400"
+    >{{ running ? text || 'waiting for logs…' : 'VM not running' }}</pre>
+  </section>
 </template>
