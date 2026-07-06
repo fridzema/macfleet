@@ -12,13 +12,15 @@ class FakeComputer:
 
 
 class FakeFleet:
-    def __init__(self, vms=None, healthy=("a",), computer_obj=None, computer_error=None):
+    def __init__(self, vms=None, healthy=("a",), computer_obj=None, computer_error=None,
+                 up_error=None):
         self.tart = self
         self.calls = []
         self._vms = list(vms) if vms is not None else [VmInfo("mf-a", "running", "local")]
         self._healthy = set(healthy)
         self._computer_obj = computer_obj
         self._computer_error = computer_error
+        self._up_error = up_error
 
     def list(self):  # stands in for tart.list()
         return self._vms
@@ -27,6 +29,8 @@ class FakeFleet:
         return name in self._healthy
 
     def up(self, name):
+        if self._up_error is not None:
+            raise self._up_error
         self.calls.append(("up", name))
 
     def down(self, name):
@@ -61,6 +65,17 @@ def test_up_endpoint():
     r = TestClient(build_app(fake)).post("/vms/web/up")
     assert r.status_code == 200
     assert ("up", "web") in fake.calls
+
+
+def test_up_missing_golden_returns_409_with_cors():
+    # `tart clone mf-golden ...` fails when the golden image isn't baked -> RuntimeError.
+    # The app-level handler must turn it into a 409 that still carries the CORS header,
+    # not a bare 500 (which drops CORS and shows up as an unhandled fetch error).
+    fake = FakeFleet(up_error=RuntimeError('tart clone mf-golden mf-test failed: does not exist'))
+    r = TestClient(build_app(fake)).post("/vms/test/up", headers={"Origin": "http://localhost:1420"})
+    assert r.status_code == 409
+    assert r.headers.get("access-control-allow-origin") == "*"
+    assert "mf-golden" in r.json()["detail"]
 
 
 def test_down_endpoint():
