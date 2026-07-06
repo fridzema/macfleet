@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import FleetSidebar from '../components/FleetSidebar.vue'
 import LogPane from '../components/LogPane.vue'
 import VmDetail from '../components/VmDetail.vue'
-import { vmStatus } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 
 const store = useFleet()
@@ -13,7 +12,6 @@ const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 // Resolve the selection against the live (polled) list so the detail pane tracks
 // state changes — a booting VM starts streaming once healthy; a stopped one stops.
 const selectedVm = computed(() => store.vms.find((v) => short(v.name) === selected.value) ?? null)
-const running = computed(() => !!selectedVm.value && vmStatus(selectedVm.value) === 'running')
 
 // Drop the selection if its VM disappears (nuked).
 watch(
@@ -31,11 +29,11 @@ watch(
       <template v-if="selectedVm">
         <VmDetail
           :name="selected!"
-          :running="running"
           :state="selectedVm.state"
+          :healthy="selectedVm.healthy"
           @close="selected = null"
         />
-        <LogPane :name="selected!" :running="running" />
+        <LogPane :name="selected!" :running="selectedVm.state === 'running'" />
       </template>
       <div v-else class="grid flex-1 place-items-center px-6 text-center">
         <div class="space-y-1">

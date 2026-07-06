@@ -22,6 +22,21 @@ describe('FleetSidebar', () => {
     wrapper.unmount()
   })
 
+  it('shows a disabled "creating" row for a pending VM', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    await flushPromises()
+    store.pending = ['building']
+    await flushPromises()
+    const rows = wrapper.findAll('[data-test="vm-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('building')
+    expect(rows[0].text()).toContain('creating')
+    expect(rows[0].attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('up form submits store.up with the entered name', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()

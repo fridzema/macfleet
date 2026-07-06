@@ -117,9 +117,11 @@ class Fleet:
         return self._run(ssh_cmd(self.ip(name), remote_cmd)).stdout
 
     def status(self, name: str) -> bool:
+        # Short timeout: this runs on every /vms poll, so a slow/contended guest must
+        # fail fast rather than stall the whole fleet list.
         try:
             with urllib.request.urlopen(
-                f"http://{self.ip(name)}:{SERVER_PORT}/status", timeout=4
+                f"http://{self.ip(name)}:{SERVER_PORT}/status", timeout=2
             ) as resp:
                 return b"ok" in resp.read()
         except Exception:
