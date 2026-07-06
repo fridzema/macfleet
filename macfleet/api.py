@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import base64
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from macfleet.connect import Fleet
@@ -29,6 +30,13 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
     api.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
+
+    @api.exception_handler(RuntimeError)
+    async def _runtime_error(_request: Request, exc: RuntimeError) -> JSONResponse:
+        # tart/ssh shell-outs raise RuntimeError (e.g. missing golden image, VM not
+        # reachable). Return a clean 409 so the response flows back through the CORS
+        # middleware with its headers, instead of a bare 500 that drops them.
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     @api.get("/vms")
     def list_vms() -> list[dict]:
