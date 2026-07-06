@@ -48,7 +48,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // killing only `uv` would orphan it (leaking the server across restarts).
             let mut cmd = Command::new("uv");
             cmd.args(["run", "macfleet", "serve", "--port", "8765"])
-                .current_dir("..");
+                .current_dir("..")
+                // Enable computer-use control. Safe: Fleet.computer() only ever targets
+                // fleet VMs over their guest IP, never the host. This is the app's purpose.
+                .env("MACFLEET_ALLOW_CONTROL", "1");
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;

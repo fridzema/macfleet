@@ -34,7 +34,7 @@ describe('DefaultLayout', () => {
 
   it('renders nav with logo and links', () => {
     const wrapper = mount(DefaultLayout, { global: { stubs: routerStubs } })
-    expect(wrapper.text()).toContain('OxideDock')
+    expect(wrapper.text()).toContain('macfleet')
     expect(wrapper.find('a[href="/about"]').text()).toBe('About')
   })
 

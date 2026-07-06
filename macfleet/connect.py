@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 import subprocess
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
@@ -31,6 +34,55 @@ def scp_push_cmd(ip: str, local: str, remote: str) -> list[str]:
 
 def scp_pull_cmd(ip: str, remote: str, local: str) -> list[str]:
     return ["scp", *SSH_OPTS, f"{GUEST_USER}@{ip}:{remote}", local]
+
+
+class GuestControl:
+    """Computer-use client that drives a VM's in-guest `cua-computer-server` over its
+    HTTP `/cmd` endpoint. Keeps a tiny, dependency-free surface (screenshot/click/type/
+    key) so the API and desktop don't depend on the heavy `cua-computer` client."""
+
+    def __init__(self, base_url: str, opener: Callable[..., Any] = urllib.request.urlopen):
+        self._base = base_url.rstrip("/")
+        self._open = opener
+
+    def _cmd(self, command: str, **params: Any) -> dict:
+        body = json.dumps({"command": command, "params": params}).encode()
+        req = urllib.request.Request(
+            f"{self._base}/cmd", data=body, headers={"content-type": "application/json"}
+        )
+        try:
+            with self._open(req, timeout=30) as resp:
+                raw = resp.read().decode()
+        except (urllib.error.URLError, OSError) as exc:
+            raise RuntimeError(f"computer-server unreachable: {exc}") from exc
+        # /cmd streams Server-Sent Events: one or more `data: {json}` lines.
+        result: dict = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if not line.startswith("{"):
+                continue
+            result = json.loads(line)
+            if not result.get("success", True):
+                raise RuntimeError(result.get("error", f"{command} failed"))
+        return result
+
+    def screenshot(self) -> bytes:
+        return base64.b64decode(self._cmd("screenshot")["image_data"])
+
+    def click(self, x: int, y: int) -> None:
+        self._cmd("left_click", x=x, y=y)
+
+    def type(self, text: str) -> None:
+        self._cmd("type_text", text=text)
+
+    def key(self, combo: str) -> None:
+        keys = [k.strip() for k in combo.replace("-", "+").split("+") if k.strip()]
+        if len(keys) > 1:
+            self._cmd("hotkey", keys=keys)
+        elif keys:
+            self._cmd("press_key", key=keys[0])
 
 
 class Fleet:
@@ -78,11 +130,9 @@ class Fleet:
 
         return self.ssh(name, f"tail -n {int(lines)} {SERVER_LOG} 2>/dev/null || true")
 
-    def computer(self, name: str) -> Any:
+    def computer(self, name: str) -> GuestControl:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
             raise RuntimeError(
                 "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only)."
             )
-        from computer import Computer  # lazy: only when [control] extra installed
-
-        return Computer(os_type="macos", host=self.ip(name), port=SERVER_PORT)
+        return GuestControl(f"http://{self.ip(name)}:{SERVER_PORT}")
