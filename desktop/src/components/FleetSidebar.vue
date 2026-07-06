@@ -1,19 +1,33 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import type { Vm } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 
 const store = useFleet()
-const emit = defineEmits<(e: 'select', name: string) => void>()
+const emit = defineEmits<(e: 'select', sel: { name: string; running: boolean }) => void>()
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
+// The Rust sidecar spawns `macfleet serve` after the window opens, so the first
+// fetch can race a not-yet-listening port. Retry until it answers, then stop.
+let retry: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  store.refresh()
+  const tick = async () => {
+    await store.refresh()
+    if (!store.error && retry) {
+      clearInterval(retry)
+      retry = null
+    }
+  }
+  tick()
+  retry = setInterval(tick, 1000)
+})
+onUnmounted(() => {
+  if (retry) clearInterval(retry)
 })
 
 function select(vm: Vm) {
-  emit('select', short(vm.name))
+  emit('select', { name: short(vm.name), running: vm.state === 'running' && vm.healthy })
 }
 
 const newName = ref('')

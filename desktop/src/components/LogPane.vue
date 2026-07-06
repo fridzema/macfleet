@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../shared/api'
 
-const props = defineProps<{ name: string }>()
+const props = defineProps<{ name: string; running: boolean }>()
 const text = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -15,10 +15,16 @@ async function poll() {
 }
 function start() {
   if (timer) clearInterval(timer)
+  timer = null
+  // Logs come from the guest over SSH; only reachable when the VM is running.
+  if (!props.running) {
+    text.value = ''
+    return
+  }
   poll()
   timer = setInterval(poll, 2000)
 }
-watch(() => props.name, start, { immediate: true })
+watch(() => [props.name, props.running], start, { immediate: true })
 onBeforeUnmount(() => timer && clearInterval(timer))
 </script>
 

@@ -8,7 +8,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('VmDetail', () => {
   it('renders the polled screenshot as a data URI', async () => {
     vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
-    const wrapper = mount(VmDetail, { props: { name: 'web' } })
+    const wrapper = mount(VmDetail, { props: { name: 'web', running: true } })
     await vi.waitFor(() => {
       const src = wrapper.find('[data-test="shot"]').attributes('src')
       expect(src).toBe('data:image/png;base64,QUJD')
@@ -16,10 +16,38 @@ describe('VmDetail', () => {
     wrapper.unmount()
   })
 
+  it('does not poll a screenshot when the VM is not running', async () => {
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(VmDetail, { props: { name: 'web', running: false } })
+    await Promise.resolve()
+    expect(shot).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="shot"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not type into a VM that is not running', async () => {
+    const type = vi.spyOn(api, 'typeText').mockResolvedValue({})
+    const wrapper = mount(VmDetail, { props: { name: 'web', running: false } })
+    await wrapper.find('input').setValue('hello')
+    await wrapper.find('form').trigger('submit')
+    expect(type).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('surfaces a failed control action on err instead of rejecting', async () => {
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    vi.spyOn(api, 'typeText').mockRejectedValue(new Error('POST /vms/web/type -> 409'))
+    const wrapper = mount(VmDetail, { props: { name: 'web', running: true } })
+    await wrapper.find('input').setValue('hi')
+    await wrapper.find('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('409'))
+    wrapper.unmount()
+  })
+
   it('maps an image click to pixel coords and calls api.click', async () => {
     vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
     const click = vi.spyOn(api, 'click').mockResolvedValue({})
-    const wrapper = mount(VmDetail, { props: { name: 'web' } })
+    const wrapper = mount(VmDetail, { props: { name: 'web', running: true } })
     await vi.waitFor(() => {
       expect(wrapper.find('[data-test="shot"]').exists()).toBe(true)
     })
