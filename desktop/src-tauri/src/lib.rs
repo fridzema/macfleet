@@ -43,11 +43,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(|app| {
             // Spawn the Python engine's local API as a managed sidecar.
             // In dev the app runs from `desktop/`, so the engine repo root is `..`.
-            let child = Command::new("uv")
-                .args(["run", "macfleet", "serve", "--port", "8765"])
-                .current_dir("..")
-                .spawn()
-                .ok();
+            // Put it in its own process group so we can later kill the whole tree:
+            // `uv run` spawns a uvicorn grandchild that actually holds :8765, and
+            // killing only `uv` would orphan it (leaking the server across restarts).
+            let mut cmd = Command::new("uv");
+            cmd.args(["run", "macfleet", "serve", "--port", "8765"])
+                .current_dir("..");
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                // 0 => a new process group whose id equals the child's pid.
+                cmd.process_group(0);
+            }
+            let child = cmd.spawn().ok();
             app.manage(Sidecar(Mutex::new(child)));
 
             let show = MenuItem::with_id(app, "show", "Show macfleet", true, None::<&str>)?;
@@ -75,7 +83,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let tauri::RunEvent::Exit = event {
                 if let Some(sc) = app_handle.try_state::<Sidecar>() {
                     if let Some(mut child) = sc.0.lock().unwrap().take() {
-                        let _ = child.kill();
+                        // Kill the whole process group (uv -> python -> uvicorn), not
+                        // just `uv`, so the grandchild holding :8765 is released too.
+                        #[cfg(unix)]
+                        if let Ok(pid) = i32::try_from(child.id()) {
+                            // Negating the pid targets the process group (the child is
+                            // its leader via process_group(0) at spawn). SIGTERM lets
+                            // uvicorn shut down cleanly and free the port.
+                            unsafe {
+                                libc::kill(-pid, libc::SIGTERM);
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = child.kill();
+                        }
+                        let _ = child.wait();
                     }
                 }
             }
