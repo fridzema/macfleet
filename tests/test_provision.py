@@ -22,9 +22,23 @@ def test_script_is_idempotent_guarded():
     assert "command -v uv" in s
 
 
+def test_script_seeds_tcc_grants():
+    s = render_provision_script()
+    # TCC is granted headlessly via sqlite (SIP is off in the base image), not via VNC.
+    assert "kTCCServiceScreenCapture" in s
+    assert "kTCCServiceAccessibility" in s
+    assert 'sqlite3 "$TCC_DB"' in s
+    assert "csrutil status" in s  # guarded on SIP being disabled
+
+
 def test_bake_steps_mention_tcc():
     steps = bake_steps()
     assert any("TCC" in s or "Accessibility" in s for s in steps)
+
+
+def test_bake_steps_have_no_manual_gate():
+    # the whole point: baking is hands-off now
+    assert not any("MANUAL" in s for s in bake_steps())
 
 
 def test_plist_writes_log_file():

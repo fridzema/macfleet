@@ -4,7 +4,7 @@ import FleetSidebar from '../components/FleetSidebar.vue'
 import LogPane from '../components/LogPane.vue'
 import VmDetail from '../components/VmDetail.vue'
 
-const selected = ref<string | null>(null)
+const selected = ref<{ name: string; running: boolean } | null>(null)
 </script>
 
 <template>
@@ -12,8 +12,8 @@ const selected = ref<string | null>(null)
     <FleetSidebar @select="selected = $event" />
     <main class="flex flex-1 flex-col">
       <template v-if="selected">
-        <VmDetail :name="selected" />
-        <div class="p-2"><LogPane :name="selected" /></div>
+        <VmDetail :name="selected.name" :running="selected.running" />
+        <div class="p-2"><LogPane :name="selected.name" :running="selected.running" /></div>
       </template>
       <div v-else class="p-6 text-sm text-neutral-500">select a VM</div>
     </main>

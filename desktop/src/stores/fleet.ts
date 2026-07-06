@@ -8,25 +8,29 @@ export const useFleet = defineStore('fleet', () => {
 
   async function refresh(): Promise<void> {
     try {
-      vms.value = await api.listVms()
+      // Only mf- fleet VMs are operable; base/OCI images can't be controlled.
+      vms.value = (await api.listVms()).filter((v) => v.name.startsWith('mf-'))
       error.value = null
     } catch (e) {
       error.value = String(e)
     }
   }
 
-  async function up(name: string): Promise<void> {
-    await api.up(name)
-    await refresh()
+  // Surface API failures on `error` rather than rejecting into the caller's event
+  // handler (which Vue reports as an unhandled error). Refresh only on success so a
+  // failed op's message isn't cleared by the follow-up list fetch.
+  async function run(fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn()
+      await refresh()
+    } catch (e) {
+      error.value = String(e)
+    }
   }
-  async function down(name: string): Promise<void> {
-    await api.down(name)
-    await refresh()
-  }
-  async function nuke(name: string): Promise<void> {
-    await api.nuke(name)
-    await refresh()
-  }
+
+  const up = (name: string) => run(() => api.up(name))
+  const down = (name: string) => run(() => api.down(name))
+  const nuke = (name: string) => run(() => api.nuke(name))
 
   return { vms, error, refresh, up, down, nuke }
 })
