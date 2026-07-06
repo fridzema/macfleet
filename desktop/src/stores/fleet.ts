@@ -5,6 +5,9 @@ import { api, type Vm } from '../shared/api'
 export const useFleet = defineStore('fleet', () => {
   const vms = ref<Vm[]>([])
   const error = ref<string | null>(null)
+  // false until the first successful list — lets the UI show "connecting" during
+  // the sidecar cold-start instead of flashing a scary error.
+  const loaded = ref(false)
 
   async function refresh(): Promise<void> {
     try {
@@ -14,6 +17,7 @@ export const useFleet = defineStore('fleet', () => {
         (v) => v.name.startsWith('mf-') && v.name !== 'mf-golden',
       )
       error.value = null
+      loaded.value = true
     } catch (e) {
       error.value = String(e)
     }
@@ -35,5 +39,5 @@ export const useFleet = defineStore('fleet', () => {
   const down = (name: string) => run(() => api.down(name))
   const nuke = (name: string) => run(() => api.nuke(name))
 
-  return { vms, error, refresh, up, down, nuke }
+  return { vms, error, loaded, refresh, up, down, nuke }
 })
