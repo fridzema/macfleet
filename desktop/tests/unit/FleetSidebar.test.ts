@@ -20,7 +20,10 @@ describe('FleetSidebar', () => {
     const rows = wrapper.findAll('[data-test="vm-row"]')
     expect(rows).toHaveLength(2)
     await rows[0].trigger('click')
-    expect(wrapper.emitted('select')?.[0]).toEqual(['a'])
+    expect(wrapper.emitted('select')?.[0]).toEqual([{ name: 'a', running: true }])
+    // a stopped VM is reported as not running so the detail pane won't poll it
+    await rows[1].trigger('click')
+    expect(wrapper.emitted('select')?.[1]).toEqual([{ name: 'b', running: false }])
   })
 
   it('up form submits store.up with the entered name', async () => {

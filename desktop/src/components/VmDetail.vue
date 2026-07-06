@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../shared/api'
 
-const props = defineProps<{ name: string }>()
+const props = defineProps<{ name: string; running: boolean }>()
 
 const shot = ref<string | null>(null)
 const paused = ref(false)
@@ -23,6 +23,11 @@ async function poll() {
 
 function start() {
   stop()
+  // Only running+healthy VMs serve screenshots; skip polling otherwise.
+  if (!props.running) {
+    shot.value = null
+    return
+  }
   poll()
   timer = setInterval(poll, 750)
 }
@@ -31,9 +36,11 @@ function stop() {
   timer = null
 }
 
-watch(() => props.name, start, { immediate: true })
+watch(() => [props.name, props.running], start, { immediate: true })
 onBeforeUnmount(stop)
 
+// Control actions can fail (409 when control is disabled or the VM isn't ready).
+// Surface it on `err` instead of letting it reject into Vue's error handler.
 async function onImgClick(ev: MouseEvent) {
   const el = ev.target as HTMLImageElement
   const rect = el.getBoundingClientRect()
@@ -41,13 +48,22 @@ async function onImgClick(ev: MouseEvent) {
   const sy = el.naturalHeight / rect.height
   const x = Math.round((ev.clientX - rect.left) * sx)
   const y = Math.round((ev.clientY - rect.top) * sy)
-  await api.click(props.name, x, y)
+  try {
+    await api.click(props.name, x, y)
+    err.value = null
+  } catch (e) {
+    err.value = String(e)
+  }
 }
 
 async function sendType() {
-  if (typed.value) {
+  if (!props.running || !typed.value) return
+  try {
     await api.typeText(props.name, typed.value)
     typed.value = ''
+    err.value = null
+  } catch (e) {
+    err.value = String(e)
   }
 }
 </script>
@@ -74,10 +90,17 @@ async function sendType() {
     <form class="flex gap-2" @submit.prevent="sendType">
       <input
         v-model="typed"
-        placeholder="type into VM…"
-        class="flex-1 rounded border border-neutral-700 bg-transparent px-2 py-1"
+        :disabled="!running"
+        :placeholder="running ? 'type into VM…' : 'VM not running'"
+        class="flex-1 rounded border border-neutral-700 bg-transparent px-2 py-1 disabled:opacity-50"
       />
-      <button class="rounded border border-neutral-700 px-2 py-1" type="submit">send</button>
+      <button
+        :disabled="!running"
+        class="rounded border border-neutral-700 px-2 py-1 disabled:opacity-50"
+        type="submit"
+      >
+        send
+      </button>
     </form>
   </section>
 </template>
