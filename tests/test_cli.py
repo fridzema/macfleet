@@ -23,3 +23,19 @@ def test_up_invokes_fleet(monkeypatch):
 def test_bake_prints_checklist():
     result = runner.invoke(cli.app, ["bake", "--help"])
     assert result.exit_code == 0
+
+
+def test_snapshot_command(monkeypatch):
+    calls = {}
+
+    class FakeFleet:
+        tart = None
+        def snapshot(self, name, label):
+            calls["snap"] = (name, label)
+            return f"{name}-{label}"
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["snapshot", "web", "clean"])
+    assert result.exit_code == 0
+    assert calls["snap"] == ("web", "clean")
+    assert "web-clean" in result.stdout
