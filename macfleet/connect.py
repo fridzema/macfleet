@@ -201,3 +201,42 @@ class Fleet:
                 "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only)."
             )
         return GuestControl(f"http://{self.ip(name)}:{SERVER_PORT}")
+
+    def rename(self, old: str, new: str) -> None:
+        self.tart.rename(fullname(old), fullname(new))
+        self._leases.rename(fullname(old), fullname(new))
+
+    def duplicate(self, name: str, new: str) -> None:
+        src = fullname(name)
+        was_running = self._state(src) == "running"
+        if was_running:
+            try:
+                self.tart.suspend(src)
+            except RuntimeError:
+                self.tart.stop(src)
+        self.tart.clone(src, fullname(new))
+        if was_running:
+            self._spawn(["tart", "run", src, "--no-graphics"])
+            self._spawn(["tart", "run", fullname(new), "--no-graphics"])
+
+    def resources(self, name: str) -> dict:
+        c = self.tart.get_config(fullname(name))
+        return {"cpu": c["CPU"], "memory_mb": c["Memory"], "disk_gb": c["Disk"],
+                "display": c["Display"], "state": c["State"]}
+
+    def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
+                      disk_size: int | None = None, display: str | None = None) -> None:
+        if self.resources(name)["state"] == "running":
+            raise RuntimeError("stop the VM before changing resources")
+        self.tart.set_config(fullname(name), cpu=cpu, memory=memory,
+                             disk_size=disk_size, display=display)
+
+    def connection_info(self, name: str) -> dict:
+        ip = self.ip(name)
+        return {"ip": ip, "ssh": f"ssh {GUEST_USER}@{ip}",
+                "vnc": f"open vnc://{GUEST_USER}@{ip}",
+                "guest_server": f"http://{ip}:{SERVER_PORT}", "exec": True}
+
+    def exec(self, name: str, command: str) -> dict:
+        proc = self._run_nocheck(["tart", "exec", fullname(name), "/bin/sh", "-lc", command])
+        return {"stdout": proc.stdout, "exit_code": proc.returncode}
