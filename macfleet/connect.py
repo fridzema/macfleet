@@ -4,12 +4,14 @@ import base64
 import json
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from macfleet.vm import Runner, Tart, _run, fullname
+from macfleet.leases import Leases, default_state_path
+from macfleet.vm import Runner, Tart, _run, _run_nocheck, fullname, shortname
 
 GUEST_USER = "admin"
 SERVER_PORT = 8000
@@ -87,18 +89,54 @@ class GuestControl:
 
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
-                 spawn: Callable[[list[str]], None] = _spawn) -> None:
+                 spawn: Callable[[list[str]], None] = _spawn,
+                 run_nocheck: Runner = _run_nocheck,
+                 leases: Leases | None = None,
+                 clock: Callable[[], float] = time.time) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
+        self._run_nocheck = run_nocheck
+        self._leases = leases or Leases(default_state_path())
+        self._clock = clock
 
-    def up(self, name: str) -> None:
+    def _state(self, full: str) -> str:
+        return self.tart.get_config(full)["State"]
+
+    def suspend(self, name: str) -> None:
+        self.tart.suspend(fullname(name))
+
+    def resume(self, name: str) -> None:
+        self._spawn(["tart", "run", fullname(name), "--no-graphics"])
+
+    def create(self, name: str, from_snapshot: str | None = None,
+               ttl: float | None = None) -> None:
+        self.reap()
         target = fullname(name)
-        existing = {v.name for v in self.tart.list()}
-        if target not in existing:
-            self.tart.clone("mf-golden", target)
+        if target not in {v.name for v in self.tart.list()}:
+            src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
+            self.tart.clone(src, target)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
+        if ttl is not None:
+            self._leases.record(target, ttl)
+
+    def up(self, name: str) -> None:
+        self.create(name)
+
+    def reap(self) -> list[str]:
+        now = self._clock()
+        existing = {v.name for v in self.tart.list()}
+        reaped = []
+        for full in self._leases.expired(now):
+            if full in existing:
+                try:
+                    self.nuke(shortname(full))
+                except RuntimeError:
+                    pass
+            self._leases.drop(full)
+            reaped.append(full)
+        return reaped
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))
