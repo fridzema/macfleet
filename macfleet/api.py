@@ -25,6 +25,31 @@ class KeyRequest(BaseModel):
     combo: str
 
 
+class CreateRequest(BaseModel):
+    name: str
+    from_snapshot: str | None = None
+    ttl: float | None = None
+
+
+class LabelRequest(BaseModel):
+    label: str
+
+
+class RenameRequest(BaseModel):
+    new: str
+
+
+class ResourcesRequest(BaseModel):
+    cpu: int | None = None
+    memory: int | None = None
+    disk_size: int | None = None
+    display: str | None = None
+
+
+class ExecRequest(BaseModel):
+    command: str
+
+
 def build_app(fleet: Fleet | None = None) -> FastAPI:
     fleet = fleet or Fleet()
     api = FastAPI(title="macfleet")
@@ -57,6 +82,62 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
              "healthy": health.get(v.name, False)}
             for v in vms
         ]
+
+    @api.post("/vms")
+    def create(body: CreateRequest) -> dict:
+        fleet.create(body.name, from_snapshot=body.from_snapshot, ttl=body.ttl)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/suspend")
+    def suspend(name: str) -> dict:
+        fleet.suspend(name)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/resume")
+    def resume(name: str) -> dict:
+        fleet.resume(name)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/snapshot")
+    def snapshot(name: str, body: LabelRequest) -> dict:
+        return {"snapshot_id": fleet.snapshot(name, body.label)}
+
+    @api.get("/snapshots")
+    def list_snapshots() -> list[dict]:
+        return fleet.snapshots()
+
+    @api.delete("/snapshots/{snapshot_id}")
+    def delete_snapshot(snapshot_id: str) -> dict:
+        fleet.delete_snapshot(snapshot_id)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/rename")
+    def rename(name: str, body: RenameRequest) -> dict:
+        fleet.rename(name, body.new)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/duplicate")
+    def duplicate(name: str, body: RenameRequest) -> dict:
+        fleet.duplicate(name, body.new)
+        return {"ok": True}
+
+    @api.get("/vms/{name}/resources")
+    def get_resources(name: str) -> dict:
+        return fleet.resources(name)
+
+    @api.put("/vms/{name}/resources")
+    def put_resources(name: str, body: ResourcesRequest) -> dict:
+        fleet.set_resources(name, cpu=body.cpu, memory=body.memory,
+                            disk_size=body.disk_size, display=body.display)
+        return {"ok": True}
+
+    @api.get("/vms/{name}/connection")
+    def connection(name: str) -> dict:
+        return fleet.connection_info(name)
+
+    @api.post("/vms/{name}/exec")
+    def exec_cmd(name: str, body: ExecRequest) -> dict:
+        return fleet.exec(name, body.command)
 
     @api.post("/vms/{name}/up")
     def up(name: str) -> dict:

@@ -21,6 +21,7 @@ class FakeFleet:
         self._computer_obj = computer_obj
         self._computer_error = computer_error
         self._up_error = up_error
+        self.set_resources_error = None
 
     def list(self):  # stands in for tart.list()
         return self._vms
@@ -43,6 +44,46 @@ class FakeFleet:
         if self._computer_error is not None:
             raise self._computer_error
         return self._computer_obj
+
+    def create(self, name, from_snapshot=None, ttl=None):
+        self.calls.append(("create", name, from_snapshot, ttl))
+
+    def suspend(self, name):
+        self.calls.append(("suspend", name))
+
+    def resume(self, name):
+        self.calls.append(("resume", name))
+
+    def snapshot(self, name, label):
+        self.calls.append(("snapshot", name, label))
+        return f"{name}-{label}"
+
+    def snapshots(self):
+        return [{"id": "web-clean", "vm": "web", "label": "clean", "size": 1.0}]
+
+    def delete_snapshot(self, sid):
+        self.calls.append(("delete_snapshot", sid))
+
+    def rename(self, old, new):
+        self.calls.append(("rename", old, new))
+
+    def duplicate(self, name, new):
+        self.calls.append(("duplicate", name, new))
+
+    def resources(self, name):
+        return {"cpu": 4, "memory_mb": 8192, "disk_gb": 50, "display": "x", "state": "stopped"}
+
+    def set_resources(self, name, cpu=None, memory=None, disk_size=None, display=None):
+        if self.set_resources_error:
+            raise self.set_resources_error
+        self.calls.append(("set_resources", name, cpu, memory, disk_size, display))
+
+    def connection_info(self, name):
+        return {"ip": "1.2.3.4", "ssh": "ssh admin@1.2.3.4", "vnc": "open vnc://admin@1.2.3.4",
+                "guest_server": "http://1.2.3.4:8000", "exec": True}
+
+    def exec(self, name, command):
+        return {"stdout": "ok", "exit_code": 0}
 
 
 def test_list_vms_marks_health():
@@ -106,3 +147,49 @@ def test_screenshot_disabled_returns_409():
     fake = FakeFleet(computer_error=RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1"))
     r = TestClient(build_app(fake)).post("/vms/web/screenshot")
     assert r.status_code == 409
+
+
+def test_create_from_snapshot_with_ttl():
+    fake = FakeFleet()
+    r = TestClient(build_app(fake)).post("/vms", json={"name": "web", "from_snapshot": "base", "ttl": 60})
+    assert r.status_code == 200
+    assert ("create", "web", "base", 60) in fake.calls
+
+
+def test_suspend_resume_endpoints():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.post("/vms/web/suspend").json() == {"ok": True}
+    assert client.post("/vms/web/resume").json() == {"ok": True}
+    assert ("suspend", "web") in fake.calls and ("resume", "web") in fake.calls
+
+
+def test_snapshot_endpoints():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.post("/vms/web/snapshot", json={"label": "clean"}).json() == {"snapshot_id": "web-clean"}
+    assert client.get("/snapshots").json() == [{"id": "web-clean", "vm": "web", "label": "clean", "size": 1.0}]
+    assert client.delete("/snapshots/web-clean").json() == {"ok": True}
+
+
+def test_rename_duplicate_endpoints():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.post("/vms/web/rename", json={"new": "prod"}).json() == {"ok": True}
+    assert client.post("/vms/web/duplicate", json={"new": "web2"}).json() == {"ok": True}
+
+
+def test_resources_endpoints_and_409_when_running():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.get("/vms/web/resources").json()["cpu"] == 4
+    assert client.put("/vms/web/resources", json={"cpu": 8}).json() == {"ok": True}
+    fake.set_resources_error = RuntimeError("stop the VM before changing resources")
+    assert client.put("/vms/web/resources", json={"cpu": 8}).status_code == 409
+
+
+def test_connection_and_exec_endpoints():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.get("/vms/web/connection").json()["ssh"] == "ssh admin@1.2.3.4"
+    assert client.post("/vms/web/exec", json={"command": "uname"}).json() == {"stdout": "ok", "exit_code": 0}
