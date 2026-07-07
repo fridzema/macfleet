@@ -1,7 +1,10 @@
 # macfleet — VM management primitives + MCP server
 
 **Date:** 2026-07-07
-**Status:** Design approved, pending spec review
+**Status:** Approved — ready for implementation planning
+**Resolved decisions:** snapshot naming `mfsnap-<vm>-<label>` (opaque id authoritative);
+`mcp` ships as an optional `[mcp]` extra (`uv run --extra mcp macfleet-mcp`); `up` is
+kept and delegates to `create` (no deprecation).
 **Scope:** One spec covering (1) VM-management primitives in the engine + HTTP API and
 (2) an MCP server exposing them, so both humans and AI agents can quickly spin up,
 snapshot, and drive throwaway macOS test VMs. Desktop UI for these features is a
