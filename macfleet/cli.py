@@ -52,6 +52,65 @@ def bake() -> None:
 
 
 @app.command()
+def suspend(name: str) -> None:
+    """Suspend mf-<name> (freeze running state)."""
+    _fleet().suspend(name)
+
+
+@app.command()
+def resume(name: str) -> None:
+    """Resume a suspended mf-<name>."""
+    _fleet().resume(name)
+
+
+@app.command()
+def snapshot(name: str, label: str) -> None:
+    """Snapshot mf-<name>; prints the snapshot id."""
+    typer.echo(_fleet().snapshot(name, label))
+
+
+@app.command()
+def snapshots() -> None:
+    """List snapshots."""
+    for s in _fleet().snapshots():
+        typer.echo(f"{s['id']:24} {s['size']}G")
+
+
+@app.command()
+def clone(snapshot_id: str, name: str) -> None:
+    """Create mf-<name> from a snapshot (resumes captured state)."""
+    _fleet().create(name, from_snapshot=snapshot_id)
+    typer.echo(f"up: mf-{name}")
+
+
+@app.command()
+def rename(old: str, new: str) -> None:
+    """Rename mf-<old> to mf-<new>."""
+    _fleet().rename(old, new)
+
+
+@app.command()
+def duplicate(name: str, new: str) -> None:
+    """Duplicate mf-<name> to mf-<new>."""
+    _fleet().duplicate(name, new)
+
+
+@app.command()
+def exec(name: str, command: str) -> None:
+    """Run a shell command in mf-<name> via the guest agent."""
+    out = _fleet().exec(name, command)
+    typer.echo(out["stdout"], nl=False)
+    raise typer.Exit(out["exit_code"])
+
+
+@app.command()
+def connect(name: str) -> None:
+    """Print how to connect to mf-<name>."""
+    for k, v in _fleet().connection_info(name).items():
+        typer.echo(f"{k}: {v}")
+
+
+@app.command()
 def serve(port: int = 8765) -> None:
     """Start the local API for the desktop app."""
     import uvicorn
