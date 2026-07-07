@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from macfleet.leases import Leases, default_state_path
@@ -137,6 +138,20 @@ class Fleet:
             self._leases.drop(full)
             reaped.append(full)
         return reaped
+
+    def list_vms(self) -> list[dict]:
+        self.reap()
+        vms = self.tart.list()
+        # Health-check running VMs concurrently — each check is a network round-trip to
+        # the guest, so doing them sequentially made /vms scale with fleet size and stall
+        # under screenshot load. Parallel keeps the list responsive.
+        running = [v for v in vms if v.state == "running"]
+        health: dict[str, bool] = {}
+        if running:
+            with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
+                health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
+        return [{"name": v.name, "state": v.state, "source": v.source,
+                 "healthy": health.get(v.name, False)} for v in vms]
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))

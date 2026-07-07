@@ -180,6 +180,24 @@ def test_reap_deletes_expired(tmp_path):
     assert lease.expired(1e12) == []
 
 
+def test_list_vms_reaps_first_and_marks_health(tmp_path):
+    fleet, calls, _, lease = _fleet(
+        tmp_path,
+        vms=[VmInfo("mf-old", "running", "local"), VmInfo("mf-web", "stopped", "local")],
+        clock_val=2000.0,
+    )
+    lease.record("mf-old", ttl=-1)  # already expired at t=2000
+    vms = fleet.list_vms()
+    # reap() ran first: the expired VM was stopped/deleted before the listing logic.
+    assert ["tart", "delete", "mf-old"] in calls
+    assert lease.expired(1e12) == []
+    # structure: name/state/source/healthy for every VM `tart list` returned.
+    assert vms == [
+        {"name": "mf-old", "state": "running", "source": "local", "healthy": False},
+        {"name": "mf-web", "state": "stopped", "source": "local", "healthy": False},
+    ]
+
+
 # --- Fleet snapshots: suspend->clone->resume, clean-disk fallback ---
 
 
