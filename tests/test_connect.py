@@ -224,3 +224,78 @@ def test_delete_snapshot(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path)
     fleet.delete_snapshot("web-clean")
     assert ["tart", "delete", "mfsnap-web-clean"] in calls
+
+
+# --- Fleet identity, resources, access ---
+
+
+def test_rename_moves_vm_and_lease(tmp_path):
+    fleet, calls, _, lease = _fleet(tmp_path)
+    lease.record("mf-web", ttl=999)
+    fleet.rename("web", "prod")
+    assert ["tart", "rename", "mf-web", "mf-prod"] in calls
+    assert lease.expired(1e12) == ["mf-prod"]
+
+
+def test_duplicate_stateful(tmp_path):
+    fleet, calls, spawned, _ = _fleet(tmp_path)  # _state -> running
+    fleet.duplicate("web", "web2")
+    assert ["tart", "clone", "mf-web", "mf-web2"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+    assert ["tart", "run", "mf-web2", "--no-graphics"] in spawned
+
+
+def test_resources_parses_get(tmp_path):
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 0,
+            '{"CPU":6,"Memory":16384,"Disk":80,"Display":"1920x1080","State":"stopped"}', "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    assert fleet.resources("web") == {"cpu": 6, "memory_mb": 16384, "disk_gb": 80,
+                                      "display": "1920x1080", "state": "stopped"}
+
+
+def test_set_resources_rejects_running(tmp_path):
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+    from macfleet.leases import Leases
+    import pytest
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    with pytest.raises(RuntimeError, match="stop the VM"):
+        fleet.set_resources("web", cpu=8)
+
+
+def test_set_resources_sets_when_stopped(tmp_path):
+    calls = []
+    def run(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet.set_resources("web", cpu=8, memory=16384)
+    assert calls[-1] == ["tart", "set", "mf-web", "--cpu", "8", "--memory", "16384"]
+
+
+def test_connection_info(tmp_path):
+    def run(argv):
+        if argv[:2] == ["tart", "ip"]:
+            return subprocess.CompletedProcess(argv, 0, "192.168.64.9\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    info = fleet.connection_info("web")
+    assert info["ip"] == "192.168.64.9"
+    assert info["ssh"] == "ssh admin@192.168.64.9"
+    assert info["guest_server"] == "http://192.168.64.9:8000"
+    assert info["exec"] is True
+
+
+def test_exec_returns_stdout_and_exit_code(tmp_path):
+    def nocheck(argv):
+        assert argv[:3] == ["tart", "exec", "mf-web"]
+        assert argv[3:] == ["/bin/sh", "-lc", "echo hi"]
+        return subprocess.CompletedProcess(argv, 2, "hi\n", "")
+    from macfleet.leases import Leases
+    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+                  run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    assert fleet.exec("web", "echo hi") == {"stdout": "hi\n", "exit_code": 2}
