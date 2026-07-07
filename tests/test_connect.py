@@ -191,11 +191,23 @@ def test_list_vms_reaps_first_and_marks_health(tmp_path):
     # reap() ran first: the expired VM was stopped/deleted before the listing logic.
     assert ["tart", "delete", "mf-old"] in calls
     assert lease.expired(1e12) == []
-    # structure: name/state/source/healthy for every VM `tart list` returned.
+    # structure: name/state/source/healthy for every VM `tart list` returned, minus
+    # anything reap() just deleted.
     assert vms == [
-        {"name": "mf-old", "state": "running", "source": "local", "healthy": False},
         {"name": "mf-web", "state": "stopped", "source": "local", "healthy": False},
     ]
+
+
+def test_list_vms_shells_out_to_tart_list_once(tmp_path):
+    # Hot path: list_vms() must not re-list after reap() already fetched the listing.
+    fleet, calls, _, _ = _fleet(
+        tmp_path,
+        vms=[VmInfo("mf-web", "stopped", "local")],
+        clock_val=2000.0,
+    )
+    fleet.list_vms()
+    tart_list_calls = [c for c in calls if c[:2] == ["tart", "list"]]
+    assert len(tart_list_calls) == 1
 
 
 # --- Fleet snapshots: suspend->clone->resume, clean-disk fallback ---
@@ -271,6 +283,15 @@ def test_resources_parses_get(tmp_path):
     fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
     assert fleet.resources("web") == {"cpu": 6, "memory_mb": 16384, "disk_gb": 80,
                                       "display": "1920x1080", "state": "stopped"}
+
+
+def test_resources_missing_key_raises_runtime_error(tmp_path):
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    with pytest.raises(RuntimeError, match="unexpected tart get output"):
+        fleet.resources("web")
 
 
 def test_set_resources_rejects_running(tmp_path):

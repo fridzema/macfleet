@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +12,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from macfleet.connect import Fleet
+
+logger = logging.getLogger(__name__)
 
 
 class ClickRequest(BaseModel):
@@ -48,9 +54,28 @@ class ExecRequest(BaseModel):
     command: str
 
 
-def build_app(fleet: Fleet | None = None) -> FastAPI:
+def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAPI:
     fleet = fleet or Fleet()
-    api = FastAPI(title="macfleet")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Backstop: list_vms()/create() reap lazily, but an idle fleet with no API
+        # traffic would never sweep expired leases. This interval task covers that gap.
+        async def _reap_loop() -> None:
+            while True:
+                await asyncio.sleep(reap_interval)
+                try:
+                    await asyncio.to_thread(fleet.reap)
+                except Exception:
+                    logger.exception("reap backstop failed")
+
+        task = asyncio.create_task(_reap_loop())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    api = FastAPI(title="macfleet", lifespan=lifespan)
     api.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
@@ -65,6 +90,10 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
     @api.get("/vms")
     def list_vms() -> list[dict]:
         return fleet.list_vms()
+
+    @api.post("/reap")
+    def reap() -> dict:
+        return {"reaped": fleet.reap()}
 
     @api.post("/vms")
     def create(body: CreateRequest) -> dict:

@@ -32,6 +32,13 @@ def nuke(name: str) -> None:
 
 
 @app.command()
+def reap() -> None:
+    """Delete VMs whose TTL lease has expired."""
+    for name in _fleet().reap():
+        typer.echo(name)
+
+
+@app.command()
 def ls() -> None:
     """List fleet VMs."""
     for v in _fleet().tart.list():

@@ -25,6 +25,17 @@ def test_bake_prints_checklist():
     assert result.exit_code == 0
 
 
+def test_reap_command(monkeypatch):
+    class FakeFleet:
+        def reap(self):
+            return ["mf-old", "mf-stale"]
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["reap"])
+    assert result.exit_code == 0
+    assert result.stdout == "mf-old\nmf-stale\n"
+
+
 def test_snapshot_command(monkeypatch):
     calls = {}
 
