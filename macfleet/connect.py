@@ -4,12 +4,15 @@ import base64
 import json
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from macfleet.vm import Runner, Tart, _run, fullname
+from macfleet.leases import Leases, default_state_path
+from macfleet.vm import Runner, Tart, VmInfo, _run, _run_nocheck, fullname, shortname
 
 GUEST_USER = "admin"
 SERVER_PORT = 8000
@@ -87,18 +90,69 @@ class GuestControl:
 
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
-                 spawn: Callable[[list[str]], None] = _spawn) -> None:
+                 spawn: Callable[[list[str]], None] = _spawn,
+                 run_nocheck: Runner = _run_nocheck,
+                 leases: Leases | None = None,
+                 clock: Callable[[], float] = time.time) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
+        self._run_nocheck = run_nocheck
+        self._leases = leases or Leases(default_state_path())
+        self._clock = clock
 
-    def up(self, name: str) -> None:
+    def _state(self, full: str) -> str:
+        return self.tart.get_config(full)["State"]
+
+    def suspend(self, name: str) -> None:
+        self.tart.suspend(fullname(name))
+
+    def resume(self, name: str) -> None:
+        self._spawn(["tart", "run", fullname(name), "--no-graphics"])
+
+    def create(self, name: str, from_snapshot: str | None = None,
+               ttl: float | None = None) -> None:
+        self.reap()
         target = fullname(name)
-        existing = {v.name for v in self.tart.list()}
-        if target not in existing:
-            self.tart.clone("mf-golden", target)
+        if target not in {v.name for v in self.tart.list()}:
+            src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
+            self.tart.clone(src, target)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
+        if ttl is not None:
+            self._leases.record(target, ttl)
+
+    def up(self, name: str) -> None:
+        self.create(name)
+
+    def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
+        now = self._clock()
+        names = {v.name for v in (existing if existing is not None else self.tart.list())}
+        reaped = []
+        for full in self._leases.expired(now):
+            if full in names:
+                try:
+                    self.nuke(shortname(full))
+                except RuntimeError:
+                    pass
+            self._leases.drop(full)
+            reaped.append(full)
+        return reaped
+
+    def list_vms(self) -> list[dict]:
+        vms = self.tart.list()
+        reaped = set(self.reap(existing=vms))
+        vms = [v for v in vms if v.name not in reaped]
+        # Health-check running VMs concurrently — each check is a network round-trip to
+        # the guest, so doing them sequentially made /vms scale with fleet size and stall
+        # under screenshot load. Parallel keeps the list responsive.
+        running = [v for v in vms if v.state == "running"]
+        health: dict[str, bool] = {}
+        if running:
+            with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
+                health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
+        return [{"name": v.name, "state": v.state, "source": v.source,
+                 "healthy": health.get(v.name, False)} for v in vms]
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))
@@ -132,9 +186,80 @@ class Fleet:
 
         return self.ssh(name, f"tail -n {int(lines)} {SERVER_LOG} 2>/dev/null || true")
 
+    def snapshot(self, name: str, label: str) -> str:
+        src = fullname(name)
+        was_running = self._state(src) == "running"
+        if was_running:
+            try:
+                self.tart.suspend(src)
+            except RuntimeError:
+                self.tart.stop(src)  # clean-disk fallback if the image can't suspend
+        self.tart.clone(src, f"mfsnap-{shortname(name)}-{label}")
+        if was_running:
+            self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
+        return f"{shortname(name)}-{label}"
+
+    def snapshots(self) -> list[dict]:
+        out = []
+        for v in self.tart.list():
+            if v.name.startswith("mfsnap-"):
+                sid = v.name[len("mfsnap-"):]
+                vm, _, label = sid.partition("-")
+                out.append({"id": sid, "vm": vm, "label": label, "size": v.size})
+        return out
+
+    def delete_snapshot(self, snapshot_id: str) -> None:
+        self.tart.delete(f"mfsnap-{snapshot_id}")
+
     def computer(self, name: str) -> GuestControl:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
             raise RuntimeError(
                 "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only)."
             )
         return GuestControl(f"http://{self.ip(name)}:{SERVER_PORT}")
+
+    def rename(self, old: str, new: str) -> None:
+        self.tart.rename(fullname(old), fullname(new))
+        self._leases.rename(fullname(old), fullname(new))
+
+    def duplicate(self, name: str, new: str) -> None:
+        src = fullname(name)
+        was_running = self._state(src) == "running"
+        if was_running:
+            try:
+                self.tart.suspend(src)
+            except RuntimeError:
+                self.tart.stop(src)
+        self.tart.clone(src, fullname(new))
+        if was_running:
+            self._spawn(["tart", "run", src, "--no-graphics"])
+            self._spawn(["tart", "run", fullname(new), "--no-graphics"])
+
+    def resources(self, name: str) -> dict:
+        c = self.tart.get_config(fullname(name))
+
+        def get(key: str) -> Any:
+            try:
+                return c[key]
+            except KeyError:
+                raise RuntimeError(f"unexpected tart get output: missing {key}") from None
+
+        return {"cpu": get("CPU"), "memory_mb": get("Memory"), "disk_gb": get("Disk"),
+                "display": get("Display"), "state": get("State")}
+
+    def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
+                      disk_size: int | None = None, display: str | None = None) -> None:
+        if self.resources(name)["state"] == "running":
+            raise RuntimeError("stop the VM before changing resources")
+        self.tart.set_config(fullname(name), cpu=cpu, memory=memory,
+                             disk_size=disk_size, display=display)
+
+    def connection_info(self, name: str) -> dict:
+        ip = self.ip(name)
+        return {"ip": ip, "ssh": f"ssh {GUEST_USER}@{ip}",
+                "vnc": f"open vnc://{GUEST_USER}@{ip}",
+                "guest_server": f"http://{ip}:{SERVER_PORT}", "exec": True}
+
+    def exec(self, name: str, command: str) -> dict:
+        proc = self._run_nocheck(["tart", "exec", fullname(name), "/bin/sh", "-lc", command])
+        return {"stdout": proc.stdout, "exit_code": proc.returncode}
