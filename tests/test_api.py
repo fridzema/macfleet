@@ -29,6 +29,12 @@ class FakeFleet:
     def status(self, name):
         return name in self._healthy
 
+    def list_vms(self):
+        return [
+            {"name": "mf-a", "state": "running", "source": "local", "healthy": True},
+            {"name": "mf-b", "state": "stopped", "source": "local", "healthy": False},
+        ]
+
     def up(self, name):
         if self._up_error is not None:
             raise self._up_error
@@ -86,19 +92,16 @@ class FakeFleet:
         return {"stdout": "ok", "exit_code": 0}
 
 
-def test_list_vms_marks_health():
+def test_list_vms_delegates_to_fleet():
+    # Health-marking logic itself is covered by Fleet.list_vms tests (test_connect.py);
+    # the route is a thin passthrough to fleet.list_vms().
     client = TestClient(build_app(FakeFleet()))
     r = client.get("/vms")
     assert r.status_code == 200
+    assert r.json() == FakeFleet().list_vms()
     body = r.json()
-    assert body[0]["name"] == "mf-a"
-    assert body[0]["healthy"] is True
-
-
-def test_list_marks_non_running_unhealthy():
-    fleet = FakeFleet(vms=[VmInfo("mf-b", "stopped", "local")], healthy=("b",))
-    body = TestClient(build_app(fleet)).get("/vms").json()
-    assert body[0]["healthy"] is False
+    assert body[0]["healthy"] is True   # running VM stays healthy
+    assert body[1]["healthy"] is False  # stopped VM stays unhealthy
 
 
 def test_up_endpoint():

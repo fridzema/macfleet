@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +8,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from macfleet.connect import Fleet
-from macfleet.vm import shortname
 
 
 class ClickRequest(BaseModel):
@@ -66,22 +64,7 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
 
     @api.get("/vms")
     def list_vms() -> list[dict]:
-        vms = fleet.tart.list()
-        # Health-check running VMs concurrently — each check is a network round-trip to
-        # the guest, so doing them sequentially made /vms scale with fleet size and stall
-        # under screenshot load. Parallel keeps the list responsive.
-        running = [v for v in vms if v.state == "running"]
-        health: dict[str, bool] = {}
-        if running:
-            with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
-                health = dict(
-                    pool.map(lambda v: (v.name, fleet.status(shortname(v.name))), running)
-                )
-        return [
-            {"name": v.name, "state": v.state, "source": v.source,
-             "healthy": health.get(v.name, False)}
-            for v in vms
-        ]
+        return fleet.list_vms()
 
     @api.post("/vms")
     def create(body: CreateRequest) -> dict:
