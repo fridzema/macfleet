@@ -178,3 +178,49 @@ def test_reap_deletes_expired(tmp_path):
     assert reaped == ["mf-old"]
     assert ["tart", "delete", "mf-old"] in calls
     assert lease.expired(1e12) == []
+
+
+# --- Fleet snapshots: suspend->clone->resume, clean-disk fallback ---
+
+
+def test_snapshot_running_vm_suspends_clones_resumes(tmp_path):
+    fleet, calls, spawned, _ = _fleet(tmp_path)  # _state returns "running" via fake
+    sid = fleet.snapshot("web", "clean")
+    assert sid == "web-clean"
+    assert calls.index(["tart", "suspend", "mf-web"]) < calls.index(["tart", "clone", "mf-web", "mfsnap-web-clean"])
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned  # resumed original
+
+
+def test_snapshot_falls_back_to_stop_when_suspend_fails(tmp_path):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, '{"State":"running"}', "")
+        if argv[:2] == ["tart", "suspend"]:
+            raise RuntimeError("suspend unsupported")
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+    fleet.snapshot("web", "clean")
+    assert ["tart", "stop", "mf-web"] in calls  # clean-disk fallback
+
+
+def test_snapshots_lists_and_parses(tmp_path):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[
+        VmInfo("mfsnap-web-clean", "stopped", "local", 3.2),
+        VmInfo("mf-web", "running", "local"),
+    ])
+    snaps = fleet.snapshots()
+    assert snaps == [{"id": "web-clean", "vm": "web", "label": "clean", "size": 3.2}]
+
+
+def test_delete_snapshot(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path)
+    fleet.delete_snapshot("web-clean")
+    assert ["tart", "delete", "mfsnap-web-clean"] in calls

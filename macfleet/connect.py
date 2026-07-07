@@ -170,6 +170,31 @@ class Fleet:
 
         return self.ssh(name, f"tail -n {int(lines)} {SERVER_LOG} 2>/dev/null || true")
 
+    def snapshot(self, name: str, label: str) -> str:
+        src = fullname(name)
+        was_running = self._state(src) == "running"
+        if was_running:
+            try:
+                self.tart.suspend(src)
+            except RuntimeError:
+                self.tart.stop(src)  # clean-disk fallback if the image can't suspend
+        self.tart.clone(src, f"mfsnap-{shortname(name)}-{label}")
+        if was_running:
+            self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
+        return f"{shortname(name)}-{label}"
+
+    def snapshots(self) -> list[dict]:
+        out = []
+        for v in self.tart.list():
+            if v.name.startswith("mfsnap-"):
+                sid = v.name[len("mfsnap-"):]
+                vm, _, label = sid.partition("-")
+                out.append({"id": sid, "vm": vm, "label": label, "size": v.size})
+        return out
+
+    def delete_snapshot(self, snapshot_id: str) -> None:
+        self.tart.delete(f"mfsnap-{snapshot_id}")
+
     def computer(self, name: str) -> GuestControl:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
             raise RuntimeError(
