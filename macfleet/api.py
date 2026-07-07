@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
-from concurrent.futures import ThreadPoolExecutor
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +12,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from macfleet.connect import Fleet
-from macfleet.vm import shortname
+
+logger = logging.getLogger(__name__)
 
 
 class ClickRequest(BaseModel):
@@ -25,9 +29,53 @@ class KeyRequest(BaseModel):
     combo: str
 
 
-def build_app(fleet: Fleet | None = None) -> FastAPI:
+class CreateRequest(BaseModel):
+    name: str
+    from_snapshot: str | None = None
+    ttl: float | None = None
+
+
+class LabelRequest(BaseModel):
+    label: str
+
+
+class RenameRequest(BaseModel):
+    new: str
+
+
+class ResourcesRequest(BaseModel):
+    cpu: int | None = None
+    memory: int | None = None
+    disk_size: int | None = None
+    display: str | None = None
+
+
+class ExecRequest(BaseModel):
+    command: str
+
+
+def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAPI:
     fleet = fleet or Fleet()
-    api = FastAPI(title="macfleet")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Backstop: list_vms()/create() reap lazily, but an idle fleet with no API
+        # traffic would never sweep expired leases. This interval task covers that gap.
+        async def _reap_loop() -> None:
+            while True:
+                await asyncio.sleep(reap_interval)
+                try:
+                    await asyncio.to_thread(fleet.reap)
+                except Exception:
+                    logger.exception("reap backstop failed")
+
+        task = asyncio.create_task(_reap_loop())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    api = FastAPI(title="macfleet", lifespan=lifespan)
     api.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
@@ -41,22 +89,67 @@ def build_app(fleet: Fleet | None = None) -> FastAPI:
 
     @api.get("/vms")
     def list_vms() -> list[dict]:
-        vms = fleet.tart.list()
-        # Health-check running VMs concurrently — each check is a network round-trip to
-        # the guest, so doing them sequentially made /vms scale with fleet size and stall
-        # under screenshot load. Parallel keeps the list responsive.
-        running = [v for v in vms if v.state == "running"]
-        health: dict[str, bool] = {}
-        if running:
-            with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
-                health = dict(
-                    pool.map(lambda v: (v.name, fleet.status(shortname(v.name))), running)
-                )
-        return [
-            {"name": v.name, "state": v.state, "source": v.source,
-             "healthy": health.get(v.name, False)}
-            for v in vms
-        ]
+        return fleet.list_vms()
+
+    @api.post("/reap")
+    def reap() -> dict:
+        return {"reaped": fleet.reap()}
+
+    @api.post("/vms")
+    def create(body: CreateRequest) -> dict:
+        fleet.create(body.name, from_snapshot=body.from_snapshot, ttl=body.ttl)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/suspend")
+    def suspend(name: str) -> dict:
+        fleet.suspend(name)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/resume")
+    def resume(name: str) -> dict:
+        fleet.resume(name)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/snapshot")
+    def snapshot(name: str, body: LabelRequest) -> dict:
+        return {"snapshot_id": fleet.snapshot(name, body.label)}
+
+    @api.get("/snapshots")
+    def list_snapshots() -> list[dict]:
+        return fleet.snapshots()
+
+    @api.delete("/snapshots/{snapshot_id}")
+    def delete_snapshot(snapshot_id: str) -> dict:
+        fleet.delete_snapshot(snapshot_id)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/rename")
+    def rename(name: str, body: RenameRequest) -> dict:
+        fleet.rename(name, body.new)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/duplicate")
+    def duplicate(name: str, body: RenameRequest) -> dict:
+        fleet.duplicate(name, body.new)
+        return {"ok": True}
+
+    @api.get("/vms/{name}/resources")
+    def get_resources(name: str) -> dict:
+        return fleet.resources(name)
+
+    @api.put("/vms/{name}/resources")
+    def put_resources(name: str, body: ResourcesRequest) -> dict:
+        fleet.set_resources(name, cpu=body.cpu, memory=body.memory,
+                            disk_size=body.disk_size, display=body.display)
+        return {"ok": True}
+
+    @api.get("/vms/{name}/connection")
+    def connection(name: str) -> dict:
+        return fleet.connection_info(name)
+
+    @api.post("/vms/{name}/exec")
+    def exec_cmd(name: str, body: ExecRequest) -> dict:
+        return fleet.exec(name, body.command)
 
     @api.post("/vms/{name}/up")
     def up(name: str) -> dict:
