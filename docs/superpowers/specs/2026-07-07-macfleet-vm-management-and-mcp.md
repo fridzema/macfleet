@@ -124,15 +124,17 @@ calls; all failures surface as `RuntimeError` (via `_run`).
 
 - **Store:** `~/.macfleet/state.json` →
   `{"leases": {"mf-<name>": {"expires_at": <unix>, "created_at": <unix>,
-  "source": "api"|"mcp"|"cli"}}}`. Atomic write (write-temp-then-rename) guarded by a
-  file lock (`fcntl.flock`); a corrupt/missing file is treated as empty (log + continue).
+  "source": "api"|"mcp"|"cli"}}}`. Atomic write (write-temp-then-rename); a corrupt/
+  missing file is treated as empty (log + continue). No file lock (YAGNI for this
+  low-frequency dev tool) — concurrent writers could in principle lose an update;
+  `fcntl.flock` is a documented fast-follow if that ever matters.
 - **Record:** `create(ttl=<seconds>)` writes `expires_at = now + ttl`.
 - **Reap:** `reap() -> list[str]` deletes each VM whose `expires_at < now` (if it still
   exists) and drops the lease entry. Idempotent — reaping an already-deleted VM is a
   no-op.
-- **Lazy sweep:** `list_vms()` calls `reap()` first (reusing its own `tart list` fetch, so
-  the sweep costs no extra shell-out), so abandoned agent VMs are swept regardless of
-  which adapter is used, with no daemon. `macfleet serve` additionally runs `reap()` on an
+- **Lazy sweep:** `list_vms()` and `create()` call `reap()` first (`list_vms()` reuses its
+  own `tart list` fetch, so the sweep costs no extra shell-out there), so abandoned agent
+  VMs are swept regardless of which adapter is used, with no daemon. `macfleet serve` additionally runs `reap()` on an
   interval (asyncio background task, `to_thread`-dispatched so it can't block the event
   loop) as a backstop. `reap()` is also exposed directly via `POST /reap` and
   `macfleet reap`, for an explicit sweep on demand.
