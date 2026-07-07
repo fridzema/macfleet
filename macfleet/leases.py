@@ -28,8 +28,10 @@ class Leases:
             return {}
 
     def _save(self, leases: dict) -> None:
-        os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self._path))
+        d = os.path.dirname(self._path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=d or ".")
         try:
             with os.fdopen(fd, "w") as fh:
                 json.dump({"leases": leases}, fh)
@@ -45,7 +47,12 @@ class Leases:
         self._save(leases)
 
     def expired(self, now: float) -> list[str]:
-        return [n for n, lease in self._load().items() if lease["expires_at"] < now]
+        result = []
+        for n, lease in self._load().items():
+            expires_at = lease.get("expires_at")
+            if expires_at is not None and expires_at < now:
+                result.append(n)
+        return result
 
     def drop(self, name: str) -> None:
         leases = self._load()

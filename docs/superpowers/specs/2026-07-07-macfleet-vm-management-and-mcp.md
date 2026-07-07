@@ -130,9 +130,12 @@ calls; all failures surface as `RuntimeError` (via `_run`).
 - **Reap:** `reap() -> list[str]` deletes each VM whose `expires_at < now` (if it still
   exists) and drops the lease entry. Idempotent — reaping an already-deleted VM is a
   no-op.
-- **Lazy sweep:** `list_vms()` and `create()` call `reap()` first, so abandoned agent
-  VMs are swept regardless of which adapter is used, with no daemon. `macfleet serve`
-  additionally runs `reap()` on an interval (asyncio background task) as a backstop.
+- **Lazy sweep:** `list_vms()` calls `reap()` first (reusing its own `tart list` fetch, so
+  the sweep costs no extra shell-out), so abandoned agent VMs are swept regardless of
+  which adapter is used, with no daemon. `macfleet serve` additionally runs `reap()` on an
+  interval (asyncio background task, `to_thread`-dispatched so it can't block the event
+  loop) as a backstop. `reap()` is also exposed directly via `POST /reap` and
+  `macfleet reap`, for an explicit sweep on demand.
 - `nuke`/`delete` clears the VM's lease; `rename` moves it.
 
 Time is injected (`clock=time.time`) so the store is unit-testable without real time.
@@ -155,6 +158,7 @@ All wrapped by the existing `RuntimeError → 409` handler. The desktop app is u
 | `PUT /vms/{name}/resources` | `{cpu?, memory?, disk_size?, display?}` | `{ok}` / 409 if running |
 | `GET /vms/{name}/connection` | — | `{ip, ssh, vnc, guest_server, exec}` |
 | `POST /vms/{name}/exec` | `{command}` | `{stdout, exit_code}` |
+| `POST /reap` | — | `{reaped: [name, ...]}` |
 
 `POST /vms/{name}/up` is kept for back-compat (delegates to `create`).
 

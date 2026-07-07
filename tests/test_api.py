@@ -91,6 +91,10 @@ class FakeFleet:
     def exec(self, name, command):
         return {"stdout": "ok", "exit_code": 0}
 
+    def reap(self):
+        self.calls.append(("reap",))
+        return ["mf-old"]
+
 
 def test_list_vms_delegates_to_fleet():
     # Health-marking logic itself is covered by Fleet.list_vms tests (test_connect.py);
@@ -196,3 +200,11 @@ def test_connection_and_exec_endpoints():
     client = TestClient(build_app(fake))
     assert client.get("/vms/web/connection").json()["ssh"] == "ssh admin@1.2.3.4"
     assert client.post("/vms/web/exec", json={"command": "uname"}).json() == {"stdout": "ok", "exit_code": 0}
+
+
+def test_reap_endpoint():
+    fake = FakeFleet()
+    r = TestClient(build_app(fake)).post("/reap")
+    assert r.status_code == 200
+    assert r.json() == {"reaped": ["mf-old"]}
+    assert ("reap",) in fake.calls

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from macfleet.leases import Leases, default_state_path
-from macfleet.vm import Runner, Tart, _run, _run_nocheck, fullname, shortname
+from macfleet.vm import Runner, Tart, VmInfo, _run, _run_nocheck, fullname, shortname
 
 GUEST_USER = "admin"
 SERVER_PORT = 8000
@@ -125,12 +125,12 @@ class Fleet:
     def up(self, name: str) -> None:
         self.create(name)
 
-    def reap(self) -> list[str]:
+    def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
         now = self._clock()
-        existing = {v.name for v in self.tart.list()}
+        names = {v.name for v in (existing if existing is not None else self.tart.list())}
         reaped = []
         for full in self._leases.expired(now):
-            if full in existing:
+            if full in names:
                 try:
                     self.nuke(shortname(full))
                 except RuntimeError:
@@ -140,8 +140,9 @@ class Fleet:
         return reaped
 
     def list_vms(self) -> list[dict]:
-        self.reap()
         vms = self.tart.list()
+        reaped = set(self.reap(existing=vms))
+        vms = [v for v in vms if v.name not in reaped]
         # Health-check running VMs concurrently — each check is a network round-trip to
         # the guest, so doing them sequentially made /vms scale with fleet size and stall
         # under screenshot load. Parallel keeps the list responsive.
@@ -236,8 +237,15 @@ class Fleet:
 
     def resources(self, name: str) -> dict:
         c = self.tart.get_config(fullname(name))
-        return {"cpu": c["CPU"], "memory_mb": c["Memory"], "disk_gb": c["Disk"],
-                "display": c["Display"], "state": c["State"]}
+
+        def get(key: str) -> Any:
+            try:
+                return c[key]
+            except KeyError:
+                raise RuntimeError(f"unexpected tart get output: missing {key}") from None
+
+        return {"cpu": get("CPU"), "memory_mb": get("Memory"), "disk_gb": get("Disk"),
+                "display": get("Display"), "state": get("State")}
 
     def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
                       disk_size: int | None = None, display: str | None = None) -> None:

@@ -55,6 +55,7 @@ uv run macfleet rename web web3     # rename mf-web to mf-web3
 uv run macfleet duplicate web3 web4 # duplicate mf-web3 to mf-web4
 uv run macfleet exec web "sw_vers"  # run a shell command in mf-web via the guest agent
 uv run macfleet connect web         # print how to connect to mf-web
+uv run macfleet reap                # delete VMs whose TTL lease has expired
 ```
 
 `up` returns as soon as `tart run` is launched — it does not wait for SSH to come up.
@@ -69,7 +70,9 @@ cold boot. `macfleet snapshot <name> <label>` captures one; `macfleet clone
 <snapshot-id> <name>` spins up a new VM from it. If a VM can't suspend cleanly,
 `snapshot`/`duplicate` fall back to stop-then-clone (a clean-disk copy instead of a
 resumed one). `macfleet up`/`create` also accept a TTL lease so short-lived VMs are
-reaped automatically instead of accumulating.
+reaped automatically instead of accumulating. Reaping is lazy (`list_vms()` sweeps on
+every call) with `macfleet serve` additionally running it on a 60s interval as a
+backstop, and `macfleet reap` / `POST /reap` trigger a sweep on demand.
 
 ## Computer-use safety gate
 
