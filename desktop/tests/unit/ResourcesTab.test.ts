@@ -320,4 +320,67 @@ describe('ResourcesTab — live metrics', () => {
     expect(fetchMetrics).not.toHaveBeenCalledWith('web')
     wrapper.unmount()
   })
+
+  it('discards a stale metrics response that resolves late after switching to another running VM', async () => {
+    const store = useFleet()
+    store.vms = [
+      vm({ name: 'mf-web', state: 'running', healthy: true }),
+      vm({ name: 'mf-db', state: 'running', healthy: true }),
+    ]
+    store.resources = {
+      web: resources({ state: 'running' }),
+      db: resources({ state: 'running', cpu: 2 }),
+    }
+    let resolveOld: (v: Metrics) => void = () => {}
+    vi.spyOn(api, 'metrics')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          }),
+      )
+      .mockResolvedValue(metrics({ cpu_pct: 7, mem_used_mb: 1024, mem_total_mb: 8192 }))
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+    // 'web' poll is now in flight, unresolved.
+
+    await wrapper.setProps({ name: 'db' })
+    await flushPromises()
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('7% load')
+
+    // The stale 'web' request finally settles — its data must not clobber 'db's card.
+    resolveOld(metrics({ cpu_pct: 99, mem_used_mb: 9999, mem_total_mb: 9999 }))
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('7% load')
+    expect(wrapper.find('[data-test="card-cpu"]').text()).not.toContain('99')
+    wrapper.unmount()
+  })
+
+  it('discards a stale metrics response that resolves late after the VM has stopped', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'mf-web', state: 'running', healthy: true })]
+    store.resources = { web: resources({ state: 'running' }) }
+    let resolveOld: (v: Metrics) => void = () => {}
+    vi.spyOn(api, 'metrics').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        }),
+    )
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+    // Poll is in flight when the VM stops.
+
+    store.vms = [vm({ name: 'mf-web', state: 'stopped' })]
+    await flushPromises()
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('configured')
+
+    resolveOld(metrics({ cpu_pct: 99, mem_used_mb: 9999, mem_total_mb: 9999 }))
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('configured')
+    expect(wrapper.find('[data-test="card-cpu"]').text()).not.toContain('99')
+    wrapper.unmount()
+  })
 })
