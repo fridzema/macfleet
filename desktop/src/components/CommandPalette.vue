@@ -50,7 +50,7 @@ function onKeydown(e: KeyboardEvent): void {
   <div
     v-if="ui.open"
     data-test="palette-backdrop"
-    class="fixed inset-0 z-50 flex justify-center pt-[12vh] backdrop-blur-[3px]"
+    class="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] backdrop-blur-[3px]"
     style="background: rgba(0, 0, 0, 0.5)"
     @click="ui.closePalette()"
   >
@@ -81,7 +81,7 @@ function onKeydown(e: KeyboardEvent): void {
           :key="item.id"
           type="button"
           data-test="palette-item"
-          class="flex w-full items-center gap-3 rounded-[9px] border-none px-[11px] py-2.5 text-left text-[13px]"
+          class="flex w-full items-center gap-3 rounded-[9px] border-none px-[11px] py-[9px] text-left text-[13px]"
           :class="i === ui.index ? 'bg-[var(--bg-elev2)]' : 'bg-transparent'"
           @click="item.run()"
           @mouseenter="ui.index = i"
