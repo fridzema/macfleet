@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { useDarkMode } from '../../src/composables/useDarkMode'
-import { useToasts } from '../../src/composables/useToasts'
+import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { useFleet } from '../../src/stores/fleet'
 import { fuzzy, useUi } from '../../src/stores/ui'
 
@@ -14,6 +14,8 @@ let toggleDark: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // No-op scheduler so store-triggered toasts leave no real timer dangling.
+  setToastScheduler(() => {})
   toggleDark = vi.fn()
   vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(false), toggleDark })
   useToasts().toasts.value = []
@@ -118,6 +120,19 @@ describe('ui store — paletteItems', () => {
     expect(groups).not.toContain('Danger')
   })
 
+  it('selecting a VM populates the palette VM commands (selectVm is the source of truth)', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const ui = useUi()
+    // Before selection: no per-VM commands.
+    expect(ui.paletteItems.some((i) => i.group === 'VM')).toBe(false)
+    // selectVm drives the palette's per-VM group into existence.
+    ui.selectVm('web')
+    const vmIds = ui.paletteItems.filter((i) => i.group === 'VM').map((i) => i.id)
+    expect(vmIds).toEqual(['snap', 'susp', 'dup', 'ren', 'res', 'conn', 'term', 'log'])
+    expect(ui.paletteItems.some((i) => i.id === 'del')).toBe(true)
+  })
+
   it('adds VM + Danger items for the selected VM', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
@@ -177,26 +192,29 @@ describe('ui store — paletteItems', () => {
     expect(duplicate).toHaveBeenCalledWith('web')
   })
 
-  it('rename item prompts for a new name and calls fleet.rename', () => {
+  it('rename item arms inline rename via store flags — no browser prompt, no immediate rename', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
     const rename = vi.spyOn(fleet, 'rename').mockResolvedValue()
-    vi.spyOn(window, 'prompt').mockReturnValue('prod')
+    const prompt = vi.spyOn(window, 'prompt')
     const ui = useUi()
     ui.selectVm('web')
     ui.paletteItems.find((i) => i.id === 'ren')?.run()
-    expect(rename).toHaveBeenCalledWith('web', 'prod')
+    expect(ui.renaming).toBe(true)
+    expect(ui.renameValue).toBe('web') // prefilled with the current name
+    expect(ui.selectedVm).toBe('web')
+    expect(ui.confirmDeleteVm).toBe(false)
+    expect(prompt).not.toHaveBeenCalled()
+    expect(rename).not.toHaveBeenCalled() // execution happens in the inline UI later
   })
 
-  it('rename item does nothing when the prompt is cancelled', () => {
+  it('cancelRename clears the renaming flag', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
-    const rename = vi.spyOn(fleet, 'rename').mockResolvedValue()
-    vi.spyOn(window, 'prompt').mockReturnValue(null)
     const ui = useUi()
-    ui.selectVm('web')
-    ui.paletteItems.find((i) => i.id === 'ren')?.run()
-    expect(rename).not.toHaveBeenCalled()
+    ui.startRename('web')
+    ui.cancelRename()
+    expect(ui.renaming).toBe(false)
   })
 
   it('resize/connect/terminal/logs items switch the fleet tab', () => {
@@ -214,26 +232,28 @@ describe('ui store — paletteItems', () => {
     expect(fleet.selectedTab).toBe('logs')
   })
 
-  it('delete item confirms before calling fleet.nuke', () => {
+  it('delete item arms the two-step confirm flag — no browser dialog, no immediate nuke', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
     const nuke = vi.spyOn(fleet, 'nuke').mockResolvedValue()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirm = vi.spyOn(window, 'confirm')
     const ui = useUi()
     ui.selectVm('web')
     ui.paletteItems.find((i) => i.id === 'del')?.run()
-    expect(nuke).toHaveBeenCalledWith('web')
+    expect(ui.confirmDeleteVm).toBe(true)
+    expect(ui.selectedVm).toBe('web')
+    expect(ui.renaming).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(nuke).not.toHaveBeenCalled() // deletion happens after the UI confirm step
   })
 
-  it('delete item does nothing when the confirm is declined', () => {
+  it('cancelDeleteVm clears the confirm flag', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
-    const nuke = vi.spyOn(fleet, 'nuke').mockResolvedValue()
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     const ui = useUi()
-    ui.selectVm('web')
-    ui.paletteItems.find((i) => i.id === 'del')?.run()
-    expect(nuke).not.toHaveBeenCalled()
+    ui.askDeleteVm('web')
+    ui.cancelDeleteVm()
+    expect(ui.confirmDeleteVm).toBe(false)
   })
 
   it('lists every other VM under "Go to", and switching updates selectedVm', () => {

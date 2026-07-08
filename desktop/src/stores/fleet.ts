@@ -149,13 +149,15 @@ export const useFleet = defineStore('fleet', () => {
 
   async function duplicate(name: string): Promise<void> {
     const newName = `${name}-copy`
-    // Optimistic: show the clone as "creating" immediately, like `up`/`create`.
+    // Optimistic: show the clone as "creating" immediately, like `up`/`create`. Only a
+    // START toast — readiness is conveyed by the pending row flipping to "running" once
+    // the polled list catches up, NOT a premature toast (the clone's `tart run` is
+    // non-blocking, so the VM is still booting when `api.duplicate` resolves).
     if (!pending.value.includes(newName)) pending.value = [...pending.value, newName]
     toast(`Duplicating ${name}…`, '⧉')
     try {
       await api.duplicate(name, newName)
       await refresh()
-      toast(`${newName} ready`, '✓')
     } catch (e) {
       error.value = String(e)
       pending.value = pending.value.filter((n) => n !== newName)

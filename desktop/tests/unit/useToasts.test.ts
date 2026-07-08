@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useToasts } from '../../src/composables/useToasts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 
 beforeEach(() => {
   // Module-level singleton — clear between tests.
@@ -57,5 +57,19 @@ describe('useToasts', () => {
     a.add('shared')
     expect(b.toasts.value).toHaveLength(1)
     expect(b.toasts.value[0].msg).toBe('shared')
+  })
+})
+
+describe('setToastScheduler', () => {
+  // Restore the real setTimeout scheduler so this override doesn't bleed into
+  // whatever runs next in-module.
+  afterEach(() => setToastScheduler((run, ms) => setTimeout(run, ms)))
+
+  it('overrides the scheduler used by the parameterless useToasts()', () => {
+    const schedule = vi.fn()
+    setToastScheduler(schedule)
+    const { add } = useToasts() // no explicit scheduler -> uses the injected default
+    add('hi')
+    expect(schedule).toHaveBeenCalledWith(expect.any(Function), 2600)
   })
 })
