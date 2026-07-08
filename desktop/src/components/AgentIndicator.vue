@@ -36,10 +36,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </span>
       AI agents
     </button>
+    <!-- Transparent full-screen backdrop closes the popover on an outside click, same
+         pattern as CommandPalette's backdrop — just invisible, since this is a small
+         header dropdown rather than a modal. -->
+    <div v-if="open" data-test="agent-backdrop" class="fixed inset-0 z-10" @click="open = false" />
     <div
       v-if="open"
       data-test="agent-popover"
-      class="absolute top-[38px] right-0 z-20 w-[300px] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-elev)] p-1.5 shadow-[var(--shadow)]"
+      class="absolute top-[38px] right-0 z-20 w-[300px] animate-[mfin_0.14s_ease] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-elev)] p-1.5 shadow-[var(--shadow)]"
     >
       <div
         class="px-2.5 pt-2 pb-1.5 text-[11px] font-semibold tracking-[.06em] text-[var(--text-faint)] uppercase"

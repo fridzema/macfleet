@@ -69,7 +69,9 @@ const statusMeta = computed(() => {
 // the Resources tab (Task 11) can reuse the same data instead of a second round trip.
 watch(
   () => props.name,
-  (name) => store.fetchResources(name),
+  (name) => {
+    if (!store.resources[name]) store.fetchResources(name)
+  },
   { immediate: true },
 )
 const resources = computed(() => store.resources[props.name])

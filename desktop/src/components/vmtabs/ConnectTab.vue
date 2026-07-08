@@ -43,16 +43,18 @@ const items = computed<ConnectItem[]>(() => {
   ]
 })
 
-// comp `copyField` (design source line 582): copy, flash "✓ Copied" for a beat, toast.
+// comp `copyField` (design source line 582): copy, flash "✓ Copied" for a beat, toast —
+// but only once the clipboard write actually succeeds. A real WKWebView can reject this
+// (permission denied) either synchronously or asynchronously; either way that must not
+// be reported to the user as a successful copy.
 const copied = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
-function copyField(key: string, value: string): void {
+async function copyField(key: string, value: string): Promise<void> {
   try {
-    // A real WKWebView can reject this asynchronously (permission denied) — swallow it
-    // so that doesn't surface as an unhandled promise rejection; the UI still confirms.
-    navigator.clipboard.writeText(value).catch(() => {})
+    await navigator.clipboard.writeText(value)
   } catch {
-    // Clipboard API unavailable — still confirm, matching the comp.
+    toast('Failed to copy to clipboard', '⚠')
+    return
   }
   copied.value = key
   if (copiedTimer) clearTimeout(copiedTimer)
