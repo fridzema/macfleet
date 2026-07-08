@@ -46,78 +46,6 @@ describe('fleet store', () => {
     expect(s.vms[0].name).toBe('mf-a')
   })
 
-  it('up calls api then refreshes', async () => {
-    const up = vi.spyOn(api, 'up').mockResolvedValue({})
-    vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const s = useFleet()
-    await s.up('web')
-    expect(up).toHaveBeenCalledWith('web')
-  })
-
-  it('marks a VM pending immediately, before the up call resolves', async () => {
-    let release = () => {}
-    vi.spyOn(api, 'up').mockImplementation(
-      () =>
-        new Promise((r) => {
-          release = () => r({})
-        }),
-    )
-    vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const s = useFleet()
-    const p = s.up('web')
-    // pending is set synchronously so the sidebar shows a "creating" row at once
-    expect(s.pending).toContain('web')
-    release()
-    await p
-  })
-
-  it('does not add a duplicate pending entry when up is called again before it resolves', async () => {
-    const releases: (() => void)[] = []
-    vi.spyOn(api, 'up').mockImplementation(
-      () =>
-        new Promise((r) => {
-          releases.push(() => r({}))
-        }),
-    )
-    vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const s = useFleet()
-    const p1 = s.up('web')
-    const p2 = s.up('web')
-    expect(s.pending.filter((n) => n === 'web')).toHaveLength(1)
-    for (const release of releases) release()
-    await Promise.all([p1, p2])
-  })
-
-  it('prunes pending once the VM shows up running', async () => {
-    vi.spyOn(api, 'up').mockResolvedValue({})
-    vi.spyOn(api, 'listVms').mockResolvedValue([
-      { name: 'mf-web', state: 'running', source: 'local', healthy: false },
-    ])
-    const s = useFleet()
-    await s.up('web')
-    expect(s.pending).not.toContain('web')
-    expect(s.vms.map((v) => v.name)).toContain('mf-web')
-  })
-
-  it('keeps pending while the VM is not yet running', async () => {
-    vi.spyOn(api, 'up').mockResolvedValue({})
-    vi.spyOn(api, 'listVms').mockResolvedValue([
-      { name: 'mf-web', state: 'stopped', source: 'local', healthy: false },
-    ])
-    const s = useFleet()
-    await s.up('web')
-    expect(s.pending).toContain('web')
-  })
-
-  it('drops pending when up fails', async () => {
-    vi.spyOn(api, 'up').mockRejectedValue(new Error('boom'))
-    vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const s = useFleet()
-    await s.up('web')
-    expect(s.pending).not.toContain('web')
-    expect(s.error).toContain('boom')
-  })
-
   it('holds a running VM healthy across a single health miss', async () => {
     const vm = (healthy: boolean) => [{ name: 'mf-a', state: 'running', source: 'local', healthy }]
     const list = vi.spyOn(api, 'listVms')
@@ -139,17 +67,6 @@ describe('fleet store', () => {
     const s = useFleet()
     await s.refresh()
     expect(s.vms[0].healthy).toBe(false)
-  })
-
-  it('up surfaces API errors on error instead of rejecting', async () => {
-    vi.spyOn(api, 'up').mockRejectedValue(new Error('409'))
-    const refresh = vi.spyOn(api, 'listVms').mockResolvedValue([])
-    refresh.mockClear() // call count accumulates across this file's shared spy
-    const s = useFleet()
-    await expect(s.up('test')).resolves.toBeUndefined()
-    expect(s.error).toContain('409')
-    // a failed up must not clear the error via a follow-up refresh
-    expect(refresh).not.toHaveBeenCalled()
   })
 
   it('refresh records errors', async () => {

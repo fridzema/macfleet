@@ -62,12 +62,6 @@ describe('api', () => {
     expect(JSON.parse(init?.body as string)).toEqual({ name: 'mf-a' })
   })
 
-  it('up POSTs /vms/{n}/up', async () => {
-    const f = mockFetch(200, { ok: true })
-    await api.up('mf-a')
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/up`, { method: 'POST' })
-  })
-
   it('down POSTs /vms/{n}/down', async () => {
     const f = mockFetch(200, { ok: true })
     await api.down('mf-a')
@@ -223,5 +217,25 @@ describe('api', () => {
     const res = await api.host()
     expect(f).toHaveBeenCalledWith(`${API_BASE}/host`, undefined)
     expect(res).toEqual({ total_mem_gb: 32, cpu_count: 8, name: 'MacBook' })
+  })
+
+  it('agentsActivity GETs /agents/activity with a limit', async () => {
+    const f = mockFetch(200, [{ who: 'agent-1', action: 'create', target: 'mf-a', ts: 123 }])
+    const res = await api.agentsActivity(5)
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/agents/activity?limit=5`, undefined)
+    expect(res[0].who).toBe('agent-1')
+  })
+
+  it('agentsActivity GETs /agents/activity with no query when limit is omitted', async () => {
+    const f = mockFetch(200, [])
+    await api.agentsActivity()
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/agents/activity`, undefined)
+  })
+
+  it('metrics GETs /vms/{n}/metrics', async () => {
+    const f = mockFetch(200, { cpu_pct: 12.5, mem_used_mb: 512, mem_total_mb: 4096 })
+    const res = await api.metrics('web')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/web/metrics`, undefined)
+    expect(res).toEqual({ cpu_pct: 12.5, mem_used_mb: 512, mem_total_mb: 4096 })
   })
 })

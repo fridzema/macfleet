@@ -183,18 +183,6 @@ export const useFleet = defineStore('fleet', () => {
     }
   }
 
-  async function up(name: string): Promise<void> {
-    // Optimistic: show the VM as "creating" the instant the user asks for it.
-    if (!pending.value.includes(name)) pending.value = [...pending.value, name]
-    try {
-      await api.up(name)
-      await refresh()
-    } catch (e) {
-      error.value = String(e)
-      pending.value = pending.value.filter((n) => n !== name)
-    }
-  }
-
   // Surface API failures on `error` rather than rejecting into the caller's event
   // handler (which Vue reports as an unhandled error). `errorToast`, when given, is
   // shown to the user too — used by mutations the user directly triggered.
@@ -230,7 +218,7 @@ export const useFleet = defineStore('fleet', () => {
 
   async function duplicate(name: string): Promise<void> {
     const newName = `${name}-copy`
-    // Optimistic: show the clone as "creating" immediately, like `up`/`create`. Only a
+    // Optimistic: show the clone as "creating" immediately, like `create`. Only a
     // START toast — readiness is conveyed by the pending row flipping to "running" once
     // the polled list catches up, NOT a premature toast (the clone's `tart run` is
     // non-blocking, so the VM is still booting when `api.duplicate` resolves).
@@ -327,7 +315,6 @@ export const useFleet = defineStore('fleet', () => {
     fetchHost,
     fetchResources,
     setResources,
-    up,
     down,
     nuke,
     suspend,
