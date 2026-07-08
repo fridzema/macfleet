@@ -130,7 +130,7 @@ describe('VmDetail — tab bar', () => {
 
     await wrapper.find('[data-test="tab-resources"]').trigger('click')
     expect(store.selectedTab).toBe('resources')
-    expect(wrapper.text()).toContain('Resources — coming in Task 11')
+    expect(wrapper.text()).toContain('Stop the VM to change vCPU, RAM or display')
 
     await wrapper.find('[data-test="tab-connect"]').trigger('click')
     expect(store.selectedTab).toBe('connect')
