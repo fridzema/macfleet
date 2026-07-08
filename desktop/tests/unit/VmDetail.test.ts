@@ -23,6 +23,10 @@ beforeEach(() => {
     display: '1920x1080',
     state: 'running',
   })
+  // The tabbed detail renders the real LogsTab/ScreenTab, so switching tabs would
+  // otherwise issue a real fetch to the sidecar — mock both to keep unit tests fake-only.
+  vi.spyOn(api, 'logs').mockResolvedValue({ lines: '' })
+  vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: '' })
 })
 
 afterEach(() => vi.restoreAllMocks())
