@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  [data-mf]{ 
+    --bg:#09090b; --bg-elev:#0e0e11; --bg-elev2:#161619; --bg-hover:#1c1c20;
+    --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13);
+    --text:#e7e7ea; --text-dim:#a0a0a8; --text-faint:#6c6c76;
+    --emerald:#10b981; --emerald-soft:rgba(16,185,129,.14);
+    --amber:#f59e0b; --amber-soft:rgba(245,158,11,.14);
+    --red:#f0555a; --red-soft:rgba(240,85,90,.13);
+    --idle:#6c6c76; --violet:#8b8bf5;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.28);
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Monaco,'Cascadia Code',monospace;
+  }
+  [data-mf][data-theme="light"]{
+    --bg:#f6f6f7; --bg-elev:#ffffff; --bg-elev2:#ffffff; --bg-hover:#f0f0f2;
+    --border:rgba(0,0,0,.085); --border-strong:rgba(0,0,0,.16);
+    --text:#18181b; --text-dim:#52525b; --text-faint:#8b8b93;
+    --emerald:#059669; --emerald-soft:rgba(5,150,105,.11);
+    --amber:#d97706; --amber-soft:rgba(217,119,6,.12);
+    --red:#dc3b41; --red-soft:rgba(220,59,65,.09);
+    --idle:#9a9aa2; --violet:#6d6df0;
+    --shadow:0 1px 2px rgba(0,0,0,.06),0 10px 30px rgba(0,0,0,.09);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#09090b}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--emerald);text-decoration:none} a:hover{color:var(--emerald);opacity:.8}
+  input,button,select,textarea{font-family:inherit}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-track{background:transparent}
+  :focus-visible{outline:2px solid var(--emerald);outline-offset:1px;border-radius:4px}
+  button{cursor:pointer}
+  @keyframes mfpulse{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--amber-soft)}50%{opacity:.45;box-shadow:0 0 0 5px transparent}}
+  @keyframes mfspin{to{transform:rotate(360deg)}}
+  @keyframes mfglow{0%,100%{box-shadow:0 0 0 1px var(--border-strong),0 0 14px -2px var(--emerald)}50%{box-shadow:0 0 0 1px var(--border-strong),0 0 22px 1px var(--emerald)}}
+  @keyframes mfblink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes mfring{0%{transform:scale(.4);opacity:.7}100%{transform:scale(1.9);opacity:0}}
+  @keyframes mfin{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+  @keyframes mfdot{0%,100%{opacity:.35}50%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+</helmet>
+
+<div data-mf="1" data-theme="{{ theme }}" style="height:100vh;width:100vw;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font-size:13px;overflow:hidden">
+
+  <!-- ============ HEADER ============ -->
+  <header style="height:52px;flex:0 0 52px;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--border);background:var(--bg-elev);position:relative;z-index:5">
+    <div style="display:flex;align-items:center;gap:9px;flex:0 0 auto">
+      <div style="width:26px;height:26px;border-radius:7px;background:linear-gradient(150deg,var(--emerald),#0b7a5c);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px -2px var(--emerald)">
+        <div style="width:11px;height:11px;border:2px solid #fff;border-radius:3px;position:relative"><div style="position:absolute;inset:1.5px;background:#fff;opacity:.5;border-radius:1px"></div></div>
+      </div>
+      <div style="font-weight:650;letter-spacing:-.02em;font-size:14px">macfleet</div>
+    </div>
+
+    <div style="flex:1;max-width:400px;position:relative">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:12px">⌕</span>
+      <input value="{{ search }}" onInput="{{ onSearch }}" placeholder="Search fleet, snapshots, actions…" style="width:100%;height:32px;padding:0 10px 0 28px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;outline:none" />
+    </div>
+
+    <button onClick="{{ openPalette }}" style="height:32px;display:flex;align-items:center;gap:8px;padding:0 8px 0 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:12px">
+      <span>Command palette</span>
+      <kbd style="font-family:var(--mono);font-size:11px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:5px;padding:2px 5px;color:var(--text-dim)">⌘K</kbd>
+    </button>
+
+    <div style="flex:1"></div>
+
+    <div title="Host capacity" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 11px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);font-variant-numeric:tabular-nums">
+      <span style="width:6px;height:6px;border-radius:50%;background:var(--emerald)"></span>
+      fleet {{ cap.running }} · {{ cap.mem }}
+    </div>
+
+    <div style="position:relative">
+      <button onClick="{{ toggleAgent }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 11px;background:var(--emerald-soft);border:1px solid transparent;border-radius:8px;color:var(--emerald);font-size:12px;font-weight:550">
+        <span style="position:relative;display:inline-flex"><span style="width:7px;height:7px;border-radius:50%;background:var(--emerald)"></span><span style="position:absolute;inset:-3px;border-radius:50%;background:var(--emerald);opacity:.3;animation:mfdot 1.6s ease-in-out infinite"></span></span>
+        {{ agentCount }} AI agents
+      </button>
+      <sc-if value="{{ agentOpen }}">
+        <div style="position:absolute;right:0;top:38px;width:300px;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow);padding:6px;animation:mfin .14s ease;z-index:20">
+          <div style="padding:8px 10px 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:600">Agent activity</div>
+          <sc-for list="{{ agents }}" as="a" hint-placeholder-count="3">
+            <div style="display:flex;gap:9px;padding:8px 10px;border-radius:8px;align-items:flex-start">
+              <span style="margin-top:3px;width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:{{ a.color }}"></span>
+              <div style="min-width:0;flex:1">
+                <div style="font-size:12.5px"><span style="font-family:var(--mono);color:var(--text)">{{ a.who }}</span> <span style="color:var(--text-dim)">{{ a.action }}</span></div>
+                <div style="font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-top:2px">{{ a.target }} · {{ a.ago }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <button onClick="{{ toggleTheme }}" title="Toggle theme" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:14px">{{ themeIcon }}</button>
+  </header>
+
+  <!-- ============ BODY ============ -->
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- ---- SIDEBAR ---- -->
+    <aside style="width:288px;flex:0 0 288px;border-right:1px solid var(--border);background:var(--bg-elev);display:flex;flex-direction:column;min-height:0">
+      <div style="flex:1;overflow-y:auto;padding:12px 10px 8px">
+
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 6px 8px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:650">Fleet</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">{{ vmCount }}</div>
+        </div>
+
+        <sc-for list="{{ vmsView }}" as="vm" hint-placeholder-count="6">
+          <button onClick="{{ vm.onSelect }}" style="{{ vm.rowStyle }}">
+            <span style="{{ vm.dotStyle }}"></span>
+            <span style="flex:1;min-width:0;text-align:left">
+              <span style="display:block;font-family:var(--mono);font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ vm.name }}</span>
+              <span style="display:block;font-size:11px;color:var(--text-faint);margin-top:1px">{{ vm.stateLabel }}</span>
+            </span>
+            <sc-if value="{{ vm.hasTtl }}">
+              <span style="font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-variant-numeric:tabular-nums;white-space:nowrap">⏱ {{ vm.ttlText }}</span>
+            </sc-if>
+            <sc-if value="{{ vm.spin }}">
+              <span style="width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--amber);border-radius:50%;animation:mfspin .7s linear infinite"></span>
+            </sc-if>
+          </button>
+        </sc-for>
+
+        <sc-if value="{{ fleetEmpty }}">
+          <div style="padding:16px 8px;text-align:center;color:var(--text-faint);font-size:12px">No matches</div>
+        </sc-if>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 6px 8px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);font-weight:650">Snapshots</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">{{ snapCount }}</div>
+        </div>
+
+        <sc-for list="{{ snapsView }}" as="sn" hint-placeholder-count="3">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 8px 8px 10px;border-radius:9px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg-elev2)">
+            <div style="flex:1;min-width:0">
+              <div style="font-family:var(--mono);font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">◈ {{ sn.label }}</div>
+              <div style="font-size:10.5px;color:var(--text-faint);margin-top:2px;font-family:var(--mono)">{{ sn.source }} · {{ sn.size }} · {{ sn.age }}</div>
+            </div>
+            <button onClick="{{ sn.onNew }}" title="New VM from this snapshot" style="flex:0 0 auto;height:26px;padding:0 9px;font-size:11px;font-weight:550;background:var(--emerald-soft);color:var(--emerald);border:none;border-radius:7px;white-space:nowrap">＋ VM</button>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- Create panel -->
+      <div style="flex:0 0 auto;border-top:1px solid var(--border);padding:11px 12px;background:var(--bg-elev)">
+        <div style="display:flex;gap:7px">
+          <input value="{{ createName }}" onInput="{{ onCreateName }}" placeholder="new-vm-name" style="flex:1;min-width:0;height:34px;padding:0 10px;font-family:var(--mono);font-size:12.5px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none" />
+          <button onClick="{{ createVM }}" style="flex:0 0 auto;height:34px;padding:0 14px;font-size:12.5px;font-weight:600;background:var(--emerald);color:#04130d;border:none;border-radius:8px;display:flex;align-items:center;gap:6px">⚡ Spin up</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+          <button onClick="{{ toggleAdvanced }}" style="background:none;border:none;color:var(--text-dim);font-size:11.5px;padding:2px 0;display:flex;align-items:center;gap:5px">{{ advChevron }} Advanced options</button>
+          <span style="font-size:11px;color:var(--text-faint)">resumes in ~2s</span>
+        </div>
+        <sc-if value="{{ advancedOpen }}">
+          <div style="margin-top:9px;display:flex;flex-direction:column;gap:9px;animation:mfin .14s ease">
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">Source</span>
+              <select value="{{ createSource }}" onChange="{{ onCreateSource }}" style="height:32px;padding:0 8px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-family:var(--mono)">
+                <option value="golden">Golden image (macOS 14.5)</option>
+                <sc-for list="{{ snapsView }}" as="sn" hint-placeholder-count="2"><option value="{{ sn.id }}">Snapshot · {{ sn.label }}</option></sc-for>
+              </select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">Resources</span>
+              <select value="{{ createPreset }}" onChange="{{ onCreatePreset }}" style="height:32px;padding:0 8px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-family:var(--mono)">
+                <option value="light">Light · 2 vCPU · 4 GB</option>
+                <option value="standard">Standard · 4 vCPU · 8 GB</option>
+                <option value="heavy">Heavy · 8 vCPU · 16 GB</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" checked="{{ createTTL }}" onChange="{{ onCreateTTL }}" style="width:15px;height:15px;accent-color:var(--emerald)" />
+              <span style="font-size:12px;color:var(--text-dim)">Auto-delete after <span style="font-family:var(--mono);color:var(--text)">10m</span> (TTL lease)</span>
+            </label>
+          </div>
+        </sc-if>
+      </div>
+    </aside>
+
+    <!-- ---- MAIN DETAIL ---- -->
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)">
+
+      <sc-if value="{{ hasSelection }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+
+          <!-- detail header -->
+          <div style="flex:0 0 auto;padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:11px;min-width:0">
+              <span style="{{ sel.dotStyle }}"></span>
+              <sc-if value="{{ renaming }}">
+                <input value="{{ renameValue }}" onInput="{{ onRename }}" onKeyDown="{{ onRenameKey }}" style="font-family:var(--mono);font-size:16px;font-weight:600;background:var(--bg-elev2);border:1px solid var(--emerald);border-radius:7px;padding:3px 8px;color:var(--text);outline:none;width:220px" />
+              </sc-if>
+              <sc-if value="{{ notRenaming }}">
+                <div onClick="{{ startRename }}" title="Click to rename" style="font-family:var(--mono);font-size:16px;font-weight:600;letter-spacing:-.01em;cursor:text">{{ sel.name }}</div>
+              </sc-if>
+              <span style="{{ sel.badgeStyle }}">{{ sel.stateLabel }}</span>
+            </div>
+
+            <div style="display:flex;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">
+              <span style="padding:3px 8px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:6px">{{ sel.vcpu }} vCPU</span>
+              <span style="padding:3px 8px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:6px">{{ sel.ram }} GB</span>
+              <span style="padding:3px 8px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:6px">{{ sel.disk }} GB</span>
+            </div>
+
+            <div style="flex:1"></div>
+
+            <div style="display:flex;gap:6px;align-items:center">
+              <button onClick="{{ suspendResume }}" style="{{ btnGhost }}">{{ sel.suspendLabel }}</button>
+              <button onClick="{{ snapshotVM }}" style="{{ btnGhost }}">◈ Snapshot</button>
+              <button onClick="{{ duplicateVM }}" style="{{ btnGhost }}">⧉ Duplicate</button>
+              <button onClick="{{ connectShortcut }}" style="{{ btnPrimary }}">↔ Connect</button>
+              <sc-if value="{{ notConfirmDelete }}">
+                <button onClick="{{ askDelete }}" title="Delete" style="{{ btnDanger }}">🗑</button>
+              </sc-if>
+              <sc-if value="{{ confirmDelete }}">
+                <div style="display:flex;gap:5px;align-items:center;padding:0 4px 0 10px;background:var(--red-soft);border-radius:8px;height:30px;animation:mfin .12s ease">
+                  <span style="font-size:11.5px;color:var(--red);font-weight:550">Delete?</span>
+                  <button onClick="{{ doDelete }}" style="height:22px;padding:0 9px;font-size:11px;font-weight:600;background:var(--red);color:#fff;border:none;border-radius:6px">Yes</button>
+                  <button onClick="{{ cancelDelete }}" style="height:22px;padding:0 8px;font-size:11px;background:transparent;color:var(--text-dim);border:none;border-radius:6px">No</button>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+
+          <!-- tabs -->
+          <div style="flex:0 0 auto;display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--border)">
+            <sc-for list="{{ tabsView }}" as="tb" hint-placeholder-count="5">
+              <button onClick="{{ tb.onClick }}" style="{{ tb.style }}">{{ tb.label }}</button>
+            </sc-for>
+          </div>
+
+          <!-- tab body -->
+          <div style="flex:1;min-height:0;overflow:auto;padding:18px">
+
+            <!-- SCREEN -->
+            <sc-if value="{{ isScreen }}">
+              <div style="max-width:920px;margin:0 auto">
+                <div onClick="{{ onScreenClick }}" style="{{ screenFrameStyle }}">
+                  <!-- fake macOS desktop -->
+                  <sc-if value="{{ screenLive }}">
+                    <div style="position:absolute;inset:0;background:radial-gradient(120% 120% at 30% 10%,#3a4b8a 0%,#25306b 40%,#161a3d 100%)">
+                      <div style="height:22px;display:flex;align-items:center;gap:14px;padding:0 10px;background:rgba(0,0,0,.32);backdrop-filter:blur(8px);font-size:11px;color:#fff">
+                        <span></span><span style="font-weight:600">Finder</span><span style="opacity:.8">File</span><span style="opacity:.8">Edit</span><span style="opacity:.8">View</span>
+                        <span style="flex:1"></span><span style="font-family:var(--mono);opacity:.9">100%</span><span style="opacity:.9">📶</span><span style="font-family:var(--mono);opacity:.9">{{ clock }}</span>
+                      </div>
+                      <div style="position:absolute;left:38px;top:64px;width:52%;height:56%;background:rgba(30,32,44,.92);border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 24px 60px -12px rgba(0,0,0,.6);overflow:hidden">
+                        <div style="height:30px;display:flex;align-items:center;gap:7px;padding:0 11px;background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.08)">
+                          <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57"></span><span style="width:11px;height:11px;border-radius:50%;background:#febc2e"></span><span style="width:11px;height:11px;border-radius:50%;background:#28c840"></span>
+                          <span style="margin-left:8px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.7)">admin — zsh — 80×24</span>
+                        </div>
+                        <div style="padding:11px 13px;font-family:var(--mono);font-size:11px;line-height:1.7;color:#d8f5e8">
+                          <div><span style="color:#5eead4">admin@{{ sel.name }}</span> ~ % xcodebuild test</div>
+                          <div style="color:#9fb3c8">▸ Building target · sign · notarize…</div>
+                          <div style="color:#7ee787">✓ Test suite passed — 214 / 214</div>
+                          <div><span style="color:#5eead4">admin@{{ sel.name }}</span> ~ % <span style="display:inline-block;width:7px;height:13px;background:#7ee787;vertical-align:-2px;animation:mfblink 1.1s step-end infinite"></span></div>
+                        </div>
+                      </div>
+                      <div style="position:absolute;right:32px;top:82px;width:30%;height:38%;background:rgba(245,245,247,.96);border-radius:10px;box-shadow:0 20px 50px -12px rgba(0,0,0,.5);overflow:hidden">
+                        <div style="height:26px;background:#e7e7ea;display:flex;align-items:center;gap:6px;padding:0 10px"><span style="width:9px;height:9px;border-radius:50%;background:#ff5f57"></span><span style="width:9px;height:9px;border-radius:50%;background:#febc2e"></span><span style="width:9px;height:9px;border-radius:50%;background:#28c840"></span></div>
+                        <div style="padding:12px 14px"><div style="width:60%;height:8px;background:#c9c9cf;border-radius:4px"></div><div style="width:90%;height:8px;background:#d9d9df;border-radius:4px;margin-top:9px"></div><div style="width:75%;height:8px;background:#d9d9df;border-radius:4px;margin-top:9px"></div></div>
+                      </div>
+                      <div style="position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:8px;padding:7px 12px;background:rgba(255,255,255,.16);backdrop-filter:blur(14px);border-radius:16px;border:1px solid rgba(255,255,255,.18)">
+                        <span style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#4f9dff,#2a6fdb)"></span>
+                        <span style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#3ad07a,#0f9b52)"></span>
+                        <span style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#ffb54f,#e07a00)"></span>
+                        <span style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#c48bff,#7a3ad0)"></span>
+                        <span style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#8b8b93,#54545c)"></span>
+                      </div>
+                      <!-- typed chip -->
+                      <sc-if value="{{ showTyped }}">
+                        <div style="position:absolute;left:50%;top:44%;transform:translateX(-50%);padding:8px 14px;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.2);border-radius:9px;font-family:var(--mono);font-size:13px;color:#fff;animation:mfin .12s ease">⌨ {{ lastTyped }}</div>
+                      </sc-if>
+                      <!-- cursor -->
+                      <div style="{{ cursorStyle }}">
+                        <div style="position:absolute;inset:-8px;border-radius:50%;background:var(--emerald);opacity:.28;animation:mfring 1s ease-out infinite"></div>
+                        <div style="width:0;height:0;border-left:7px solid #fff;border-bottom:5px solid transparent;border-top:5px solid transparent;transform:rotate(-38deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))"></div>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ screenOverlay }}">
+                    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg-elev);color:var(--text-dim)">
+                      <sc-if value="{{ sel.spin }}"><div style="width:30px;height:30px;border:3px solid var(--border-strong);border-top-color:var(--amber);border-radius:50%;animation:mfspin .8s linear infinite"></div></sc-if>
+                      <div style="font-size:14px;font-weight:550;color:var(--text)">{{ screenMsg }}</div>
+                      <div style="font-size:12.5px;color:var(--text-faint);max-width:320px;text-align:center">{{ screenSub }}</div>
+                      <sc-if value="{{ screenHasAction }}"><button onClick="{{ suspendResume }}" style="{{ btnPrimary }}">{{ sel.suspendLabel }}</button></sc-if>
+                    </div>
+                  </sc-if>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:9px;margin-top:12px">
+                  <input value="{{ typeInput }}" onInput="{{ onTypeInput }}" onKeyDown="{{ onTypeKey }}" placeholder="Type into VM — text is sent as keystrokes…" style="flex:1;height:36px;padding:0 12px;font-family:var(--mono);font-size:12.5px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none" />
+                  <button onClick="{{ sendType }}" style="{{ btnGhost }}">⏎ Send</button>
+                  <button onClick="{{ togglePause }}" title="Pause stream" style="{{ btnGhost }}">{{ pauseLabel }}</button>
+                  <button onClick="{{ fullscreen }}" title="Fullscreen" style="{{ btnGhost }}">⛶</button>
+                </div>
+                <div style="margin-top:9px;font-size:11.5px;color:var(--text-faint);display:flex;align-items:center;gap:6px">Click anywhere on the screen to move & click the VM cursor. No SSH keys needed — control runs through the guest agent.</div>
+              </div>
+            </sc-if>
+
+            <!-- TERMINAL -->
+            <sc-if value="{{ isTerm }}">
+              <div style="max-width:920px;margin:0 auto;height:100%;display:flex;flex-direction:column">
+                <div style="flex:1;min-height:0;overflow:auto;background:var(--bg-elev);border:1px solid var(--border);border-radius:11px;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.65">
+                  <div style="color:var(--text-faint)">macfleet guest-agent · in-guest shell · {{ sel.name }} ({{ sel.os }})</div>
+                  <sc-for list="{{ termLines }}" as="ln" hint-placeholder-count="2">
+                    <div style="margin-top:9px">
+                      <div><span style="color:var(--emerald)">admin@{{ sel.name }}</span> <span style="color:var(--text-faint)">~ %</span> <span style="color:var(--text)">{{ ln.cmd }}</span></div>
+                      <div style="white-space:pre-wrap;color:var(--text-dim);margin-top:2px">{{ ln.out }}</div>
+                      <div style="font-size:11px;color:{{ ln.codeColor }};margin-top:2px">exit {{ ln.code }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+                  <span style="font-family:var(--mono);font-size:12.5px;color:var(--emerald)">admin@{{ sel.name }} ~ %</span>
+                  <input value="{{ termInput }}" onInput="{{ onTermInput }}" onKeyDown="{{ onTermKey }}" placeholder="run a command…" style="flex:1;height:34px;padding:0 10px;font-family:var(--mono);font-size:12.5px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none" />
+                  <button onClick="{{ runCommand }}" style="{{ btnPrimary }}">Run</button>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- LOGS -->
+            <sc-if value="{{ isLogs }}">
+              <div style="max-width:920px;margin:0 auto;height:100%;display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                  <div style="font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:var(--emerald);animation:mfdot 1.4s infinite"></span>tailing <span style="font-family:var(--mono);color:var(--text)">/var/log/guest.log</span></div>
+                  <button onClick="{{ togglePause }}" style="{{ btnGhost }}">{{ pauseLabel }}</button>
+                </div>
+                <div id="mf-logscroll" style="flex:1;min-height:0;overflow:auto;background:#000;border:1px solid var(--border);border-radius:11px;padding:12px 15px;font-family:var(--mono);font-size:11.5px;line-height:1.7">
+                  <sc-for list="{{ logLines }}" as="lg" hint-placeholder-count="12">
+                    <div style="display:flex;gap:10px"><span style="color:#4a5568;flex:0 0 auto">{{ lg.t }}</span><span style="color:{{ lg.color }};flex:0 0 auto;width:44px">{{ lg.level }}</span><span style="color:#cbd5e0">{{ lg.msg }}</span></div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- RESOURCES -->
+            <sc-if value="{{ isRes }}">
+              <div style="max-width:720px;margin:0 auto">
+                <sc-if value="{{ resLocked }}">
+                  <div style="display:flex;align-items:center;gap:9px;padding:10px 13px;background:var(--amber-soft);border-radius:9px;margin-bottom:16px;font-size:12.5px;color:var(--amber)">⚠ Stop the VM to change vCPU, RAM or display. Disk can only grow, and only while stopped.</div>
+                </sc-if>
+                <sc-if value="{{ resEditable }}">
+                  <div style="display:flex;align-items:center;gap:9px;padding:10px 13px;background:var(--emerald-soft);border-radius:9px;margin-bottom:16px;font-size:12.5px;color:var(--emerald)">✎ VM is stopped — resources are editable. Disk can only grow.</div>
+                </sc-if>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                  <div style="{{ metricCard }}">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">CPU</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums">{{ sel.vcpu }} <span style="font-size:13px;color:var(--text-faint)">vCPU</span></div>
+                    <div style="height:6px;background:var(--bg);border-radius:4px;margin-top:12px;overflow:hidden"><div style="{{ cpuBar }}"></div></div>
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:6px;font-family:var(--mono)">{{ sel.cpuText }} load</div>
+                  </div>
+                  <div style="{{ metricCard }}">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">Memory</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums">{{ sel.ram }} <span style="font-size:13px;color:var(--text-faint)">GB</span></div>
+                    <div style="height:6px;background:var(--bg);border-radius:4px;margin-top:12px;overflow:hidden"><div style="{{ memBar }}"></div></div>
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:6px;font-family:var(--mono)">{{ sel.memText }} used</div>
+                  </div>
+                  <div style="{{ metricCard }}">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">Disk</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums">{{ sel.disk }} <span style="font-size:13px;color:var(--text-faint)">GB</span></div>
+                    <div style="height:6px;background:var(--bg);border-radius:4px;margin-top:12px;overflow:hidden"><div style="{{ diskBar }}"></div></div>
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:6px;font-family:var(--mono)">{{ sel.diskText }} used</div>
+                  </div>
+                  <div style="{{ metricCard }}">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">Display</div>
+                    <div style="font-family:var(--mono);font-size:26px;font-weight:600;margin-top:6px">1512×982</div>
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:16px;font-family:var(--mono)">2× Retina · 60Hz</div>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- CONNECT -->
+            <sc-if value="{{ isConn }}">
+              <div style="max-width:720px;margin:0 auto">
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:16px">Everything you need to reach <span style="font-family:var(--mono);color:var(--text)">{{ sel.name }}</span>. In-guest <span style="font-family:var(--mono);color:var(--text)">exec</span> is always available — no SSH keys required.</div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ connectItems }}" as="ci" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--bg-elev);border:1px solid var(--border);border-radius:11px">
+                      <div style="flex:1;min-width:0">
+                        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:600">{{ ci.label }}</div>
+                        <div style="font-family:var(--mono);font-size:13px;color:var(--text);margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ci.value }}</div>
+                      </div>
+                      <button onClick="{{ ci.onCopy }}" style="{{ ci.copyStyle }}">{{ ci.copyLabel }}</button>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- empty state -->
+      <sc-if value="{{ noSelection }}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text-faint)">
+          <div style="width:52px;height:52px;border-radius:13px;border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:22px;opacity:.7">◱</div>
+          <div style="font-size:15px;font-weight:550;color:var(--text-dim)">{{ emptyTitle }}</div>
+          <div style="font-size:12.5px;max-width:280px;text-align:center">{{ emptySub }}</div>
+          <sc-if value="{{ fleetTotallyEmpty }}"><button onClick="{{ createVM }}" style="{{ btnPrimary }}">⚡ Spin up your first VM</button></sc-if>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+
+  <!-- ============ COMMAND PALETTE ============ -->
+  <sc-if value="{{ paletteOpen }}">
+    <div onClick="{{ closePalette }}" style="position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh">
+      <div onClick="{{ stop }}" style="width:min(600px,92vw);max-height:60vh;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:14px;box-shadow:0 20px 70px -10px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;animation:mfin .14s ease">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text-faint);font-size:15px">⌘</span>
+          <input id="mf-palinput" value="{{ paletteQuery }}" onInput="{{ onPaletteInput }}" placeholder="Type a command or search…" style="flex:1;background:none;border:none;outline:none;color:var(--text);font-size:15px" />
+          <kbd style="font-family:var(--mono);font-size:11px;color:var(--text-faint);border:1px solid var(--border);border-radius:5px;padding:2px 6px">esc</kbd>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:6px">
+          <sc-for list="{{ paletteView }}" as="p" hint-placeholder-count="6">
+            <button onClick="{{ p.onClick }}" onMouseEnter="{{ p.onHover }}" style="{{ p.style }}">
+              <span style="width:52px;flex:0 0 auto;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);text-align:left">{{ p.group }}</span>
+              <span style="flex:1;text-align:left;color:var(--text)">{{ p.label }}</span>
+              <sc-if value="{{ p.active }}"><kbd style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">↵</kbd></sc-if>
+            </button>
+          </sc-for>
+          <sc-if value="{{ paletteEmpty }}"><div style="padding:22px;text-align:center;color:var(--text-faint);font-size:13px">No matching commands</div></sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ TOASTS ============ -->
+  <div style="position:fixed;right:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:9px;align-items:flex-end">
+    <sc-for list="{{ toasts }}" as="t" hint-placeholder-count="0">
+      <div style="{{ t.style }}"><span style="font-size:14px">{{ t.icon }}</span><span>{{ t.msg }}</span></div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const vms = [
+      {id:'vm1',name:'ci-runner-01',state:'running',vcpu:4,ram:8,disk:50,diskUsed:41,ip:'192.168.64.12',ttl:null,cpu:34,memUsed:4.2,live:true,os:'macOS 14.5'},
+      {id:'vm2',name:'agent-sandbox',state:'running',vcpu:4,ram:8,disk:50,diskUsed:22,ip:'192.168.64.19',ttl:243,cpu:61,memUsed:5.6,live:false,os:'macOS 14.5'},
+      {id:'vm3',name:'safari-test-07',state:'booting',vcpu:2,ram:4,disk:40,diskUsed:12,ip:'192.168.64.24',ttl:null,cpu:0,memUsed:0,os:'macOS 14.5'},
+      {id:'vm4',name:'build-mac-14',state:'suspended',vcpu:8,ram:16,disk:80,diskUsed:63,ip:'192.168.64.31',ttl:null,cpu:0,memUsed:0,os:'macOS 14.5'},
+      {id:'vm5',name:'scratch-vm',state:'stopped',vcpu:2,ram:4,disk:40,diskUsed:8,ip:'—',ttl:null,cpu:0,memUsed:0,os:'macOS 14.5'},
+      {id:'vm6',name:'flaky-node-02',state:'error',vcpu:4,ram:8,disk:50,diskUsed:33,ip:'192.168.64.44',ttl:null,cpu:0,memUsed:0,os:'macOS 14.5'},
+    ];
+    const snapshots = [
+      {id:'snap1',label:'clean-ventura',source:'ci-runner-01',size:'18.2 GB',age:'2d'},
+      {id:'snap2',label:'xcode-15-ready',source:'build-mac-14',size:'24.6 GB',age:'6h'},
+      {id:'snap3',label:'notarize-signed',source:'ci-runner-01',size:'19.4 GB',age:'20m'},
+    ];
+    const mklog=(msgs)=>msgs.map((m,i)=>({t:this.ts(-(msgs.length-i)*3),level:m[0],msg:m[1]}));
+    this._idc=6; this._toastc=0;
+    this.state={
+      theme:'dark', vms, snapshots, selectedId:'vm1', tab:'screen',
+      paletteOpen:false, paletteQuery:'', paletteIndex:0,
+      advancedOpen:false, createName:'', createSource:'golden', createTTL:false, createPreset:'standard',
+      toasts:[], cursor:{x:52,y:46}, screenPaused:false, typeInput:'', lastTyped:'', showTyped:false,
+      termInput:'', renaming:false, renameValue:'', confirmDelete:false, copied:'', agentOpen:false, search:'',
+      clock:this.hhmm(),
+      term:{
+        vm1:[{cmd:'sw_vers',out:'ProductName:\t\tmacOS\nProductVersion:\t14.5\nBuildVersion:\t\t23F79',code:0},{cmd:'whoami',out:'admin',code:0}],
+        vm2:[{cmd:'uname -m',out:'arm64',code:0}],
+      },
+      logs:{
+        vm1:mklog([['INFO','guest-agent v2.4.1 ready on :7842'],['INFO','vm.resume snapshot=clean-ventura in 1.42s'],['INFO','display attached 1512x982@2x'],['INFO','exec id=a91 xcodebuild test'],['OK','test suite passed 214/214'],['INFO','heartbeat ok rtt=3ms']]),
+        vm2:mklog([['INFO','guest-agent v2.4.1 ready on :7842'],['INFO','mcp session opened agent=claude-code'],['INFO','exec id=b22 npm run e2e'],['WARN','retrying flaky spec checkout.spec'],['OK','e2e green 48/48'],['INFO','lease ttl=243s']]),
+        vm6:mklog([['INFO','guest-agent starting…'],['ERR','vz: guest failed to attach network device'],['ERR','healthcheck timeout after 30s'],['WARN','vm marked unhealthy']]),
+      },
+    };
+  }
+  // ---- helpers ----
+  hhmm(){const d=new Date();return (''+d.getHours()).padStart(2,'0')+':'+(''+d.getMinutes()).padStart(2,'0');}
+  ts(off){const d=new Date(Date.now()+off*1000);return (''+d.getHours()).padStart(2,'0')+':'+(''+d.getMinutes()).padStart(2,'0')+':'+(''+d.getSeconds()).padStart(2,'0');}
+  uid(){return 'vm'+(++this._idc);}
+  meta(s){return ({
+    running:{label:'Running',color:'var(--emerald)'},booting:{label:'Booting',color:'var(--amber)'},
+    creating:{label:'Creating',color:'var(--amber)'},suspended:{label:'Suspended',color:'var(--violet)'},
+    stopped:{label:'Stopped',color:'var(--idle)'},error:{label:'Unhealthy',color:'var(--red)'},
+  })[s]||{label:s,color:'var(--idle)'};}
+  toast(msg,icon){const id=++this._toastc;this.setState(s=>({toasts:[...s.toasts,{id,msg,icon:icon||'✓'}]}));setTimeout(()=>this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)})),2600);}
+  fuzzy(q,str){q=(q||'').toLowerCase();str=str.toLowerCase();if(!q)return true;let i=0;for(const c of str){if(c===q[i])i++;if(i>=q.length)return true;}return false;}
+
+  componentDidMount(){
+    this._key=(e)=>this.onKey(e); window.addEventListener('keydown',this._key);
+    this._ttl=setInterval(()=>{
+      this.setState(s=>{let expired=null;const vms=s.vms.map(v=>{if(v.ttl>0){const n=v.ttl-1;if(n<=0){expired=v.name;}return {...v,ttl:n};}return v;}).filter(v=>v.ttl!==0||v.ttl===null);
+        if(expired)setTimeout(()=>this.toast('Lease expired — '+expired+' deleted','⏱'),0);
+        return {vms,clock:this.hhmm()};});
+    },1000);
+    this._metric=setInterval(()=>{
+      if(this.state.screenPaused)return;
+      this.setState(s=>({vms:s.vms.map(v=>v.state==='running'?{...v,cpu:Math.max(4,Math.min(96,v.cpu+(Math.random()*16-8)|0)),memUsed:Math.max(1,Math.min(v.ram,+(v.memUsed+(Math.random()*.6-.3)).toFixed(1)))}:v)}));
+    },2000);
+    this._logs=setInterval(()=>{
+      if(this.state.screenPaused)return;
+      const pool=[['INFO','heartbeat ok rtt='+((Math.random()*5+1)|0)+'ms'],['INFO','exec id='+Math.random().toString(16).slice(2,5)+' completed code=0'],['OK','snapshot layer flushed'],['INFO','mcp tool call screenshot()'],['WARN','display refresh throttled'],['INFO','fs sync 12 files']];
+      this.setState(s=>{const logs={...s.logs};s.vms.filter(v=>v.state==='running').forEach(v=>{const m=pool[(Math.random()*pool.length)|0];const arr=(logs[v.id]||[]).concat({t:this.ts(0),level:m[0],msg:m[1]});logs[v.id]=arr.slice(-120);});return {logs};});
+      const el=document.getElementById('mf-logscroll');if(el)el.scrollTop=el.scrollHeight;
+    },1500);
+  }
+  componentWillUnmount(){window.removeEventListener('keydown',this._key);clearInterval(this._ttl);clearInterval(this._metric);clearInterval(this._logs);}
+
+  onKey(e){
+    const mod=e.metaKey||e.ctrlKey;
+    if(mod&&e.key.toLowerCase()==='k'){e.preventDefault();this.state.paletteOpen?this.closePalette():this.openPalette();return;}
+    if(this.state.paletteOpen){
+      const list=this.palette();
+      if(e.key==='Escape'){e.preventDefault();this.closePalette();}
+      else if(e.key==='ArrowDown'){e.preventDefault();this.setState(s=>({paletteIndex:Math.min(list.length-1,s.paletteIndex+1)}));}
+      else if(e.key==='ArrowUp'){e.preventDefault();this.setState(s=>({paletteIndex:Math.max(0,s.paletteIndex-1)}));}
+      else if(e.key==='Enter'){e.preventDefault();const it=list[this.state.paletteIndex];if(it)it.run();}
+      return;
+    }
+    if(e.key==='Escape'){if(this.state.confirmDelete)this.setState({confirmDelete:false});if(this.state.renaming)this.setState({renaming:false});if(this.state.agentOpen)this.setState({agentOpen:false});}
+  }
+
+  sel(){return this.state.vms.find(v=>v.id===this.state.selectedId);}
+  selectVM(id){this.setState({selectedId:id,tab:'screen',confirmDelete:false,renaming:false});}
+
+  openPalette(){this.setState({paletteOpen:true,paletteQuery:'',paletteIndex:0});setTimeout(()=>{const i=document.getElementById('mf-palinput');if(i)i.focus();},30);}
+  closePalette(){this.setState({paletteOpen:false});}
+  palette(){
+    const s=this.state,sel=this.sel(),a=[];const p=(id,label,group,run)=>a.push({id,label,group,run});
+    p('new','Spin up new VM (Golden image)','Create',()=>{this.closePalette();this.createVM();});
+    s.snapshots.forEach(sn=>p('nf'+sn.id,'New VM from snapshot · '+sn.label,'Create',()=>{this.closePalette();this.newFromSnapshot(sn);}));
+    if(sel){
+      p('snap','Snapshot '+sel.name,'VM',()=>{this.closePalette();this.snapshotVM();});
+      p('susp',(sel.state==='running'?'Suspend ':'Resume ')+sel.name,'VM',()=>{this.closePalette();this.suspendResume();});
+      p('dup','Duplicate '+sel.name,'VM',()=>{this.closePalette();this.duplicateVM();});
+      p('ren','Rename '+sel.name,'VM',()=>{this.closePalette();this.startRename();});
+      p('res','Resize '+sel.name,'VM',()=>{this.closePalette();this.setState({tab:'resources'});});
+      p('conn','Connect to '+sel.name,'VM',()=>{this.closePalette();this.setState({tab:'connect'});});
+      p('term','Open terminal','VM',()=>{this.closePalette();this.setState({tab:'terminal'});});
+      p('log','Open logs','VM',()=>{this.closePalette();this.setState({tab:'logs'});});
+      p('del','Delete '+sel.name,'Danger',()=>{this.closePalette();this.askDelete();});
+    }
+    s.vms.forEach(v=>{if(v.id!==s.selectedId)p('sw'+v.id,'Switch to '+v.name,'Go to',()=>this.selectVM(v.id));});
+    p('theme','Toggle '+(s.theme==='dark'?'light':'dark')+' theme','App',()=>{this.closePalette();this.toggleTheme();});
+    return a.filter(x=>this.fuzzy(s.paletteQuery,x.label));
+  }
+
+  toggleTheme(){this.setState(s=>({theme:s.theme==='dark'?'light':'dark'}));}
+
+  createVM(){
+    const s=this.state;const pre={light:[2,4,40],standard:[4,8,50],heavy:[8,16,80]}[s.createPreset];
+    const name=(s.createName||'vm-'+Math.random().toString(16).slice(2,6)).replace(/\s+/g,'-');
+    const id=this.uid();const fromSnap=s.createSource!=='golden'?s.snapshots.find(x=>x.id===s.createSource):null;
+    const vm={id,name,state:'creating',vcpu:pre[0],ram:pre[1],disk:pre[2],diskUsed:fromSnap?18:4,ip:'—',ttl:s.createTTL?600:null,cpu:0,memUsed:0,os:'macOS 14.5'};
+    this.setState(st=>({vms:[vm,...st.vms],selectedId:id,tab:'screen',createName:'',advancedOpen:false}));
+    this.toast(fromSnap?('Cloning from '+fromSnap.label+'…'):'Creating '+name+'…','⚡');
+    const delay=fromSnap?900:1600;
+    setTimeout(()=>{this.setState(st=>({vms:st.vms.map(v=>v.id===id?{...v,state:'running',ip:'192.168.64.'+((Math.random()*80+50)|0),cpu:12,memUsed:1.4}:v)}));this.toast(name+(fromSnap?' resumed in '+(delay/1000).toFixed(1)+'s':' ready'),'✓');},delay);
+  }
+  newFromSnapshot(sn){this.setState({createSource:sn.id,createName:sn.label.replace(/[^a-z0-9]+/gi,'-')+'-'+Math.random().toString(16).slice(2,5)});setTimeout(()=>this.createVM(),0);}
+
+  suspendResume(){const sel=this.sel();if(!sel)return;const to=sel.state==='running'?'suspended':'running';this.setState(s=>({vms:s.vms.map(v=>v.id===sel.id?{...v,state:to,cpu:to==='running'?18:0,memUsed:to==='running'?1.6:0}:v)}));this.toast(sel.name+(to==='suspended'?' suspended':' resumed in ~2s'),to==='suspended'?'⏸':'▶');}
+  snapshotVM(){const sel=this.sel();if(!sel)return;this.toast('Freezing state of '+sel.name+'…','◈');setTimeout(()=>{const id='snap'+Date.now();this.setState(s=>({snapshots:[{id,label:sel.name+'-snap',source:sel.name,size:(15+Math.random()*10).toFixed(1)+' GB',age:'just now'},...s.snapshots]}));this.toast('Snapshot saved','✓');},1100);}
+  duplicateVM(){const sel=this.sel();if(!sel)return;const id=this.uid();const name=sel.name+'-copy';this.setState(s=>({vms:[{...sel,id,name,state:'creating',ip:'—',ttl:null},...s.vms],selectedId:id,tab:'screen'}));this.toast('Duplicating '+sel.name+'…','⧉');setTimeout(()=>{this.setState(s=>({vms:s.vms.map(v=>v.id===id?{...v,state:'running',ip:'192.168.64.'+((Math.random()*80+50)|0),cpu:14,memUsed:1.5}:v)}));this.toast(name+' ready','✓');},900);}
+
+  startRename(){const sel=this.sel();this.setState({renaming:true,renameValue:sel?sel.name:''});}
+  commitRename(){const sel=this.sel();const nv=(this.state.renameValue||'').trim().replace(/\s+/g,'-');if(sel&&nv)this.setState(s=>({vms:s.vms.map(v=>v.id===sel.id?{...v,name:nv}:v),renaming:false}));else this.setState({renaming:false});}
+  askDelete(){this.setState({confirmDelete:true});}
+  doDelete(){const sel=this.sel();if(!sel)return;this.setState(s=>{const vms=s.vms.filter(v=>v.id!==sel.id);return {vms,selectedId:vms[0]?vms[0].id:null,confirmDelete:false};});this.toast(sel.name+' deleted','🗑');}
+
+  copyField(key,val){try{navigator.clipboard.writeText(val);}catch(e){}this.setState({copied:key});setTimeout(()=>this.setState(s=>s.copied===key?{copied:''}:{}),1300);this.toast('Copied to clipboard','✓');}
+
+  onScreenClick(e){const sel=this.sel();if(!sel||sel.state!=='running')return;const r=e.currentTarget.getBoundingClientRect();const x=Math.max(2,Math.min(98,((e.clientX-r.left)/r.width)*100));const y=Math.max(2,Math.min(98,((e.clientY-r.top)/r.height)*100));this.setState({cursor:{x,y}});this.toast('click → '+Math.round(x)+', '+Math.round(y),'☉');}
+  sendType(){const t=(this.state.typeInput||'').trim();if(!t)return;this.setState({lastTyped:t,showTyped:true,typeInput:''});this.toast('Sent keystrokes','⌨');clearTimeout(this._typet);this._typet=setTimeout(()=>this.setState({showTyped:false}),2200);}
+  togglePause(){this.setState(s=>({screenPaused:!s.screenPaused}));}
+  fullscreen(){this.toast('Fullscreen (demo)','⛶');}
+
+  runCommand(){const sel=this.sel();const cmd=(this.state.termInput||'').trim();if(!sel||!cmd)return;const out=this.execOut(cmd,sel);this.setState(s=>{const term={...s.term};term[sel.id]=(term[sel.id]||[]).concat({cmd,out:out.out,code:out.code});return {term,termInput:''};});}
+  execOut(cmd,sel){const c=cmd.split(/\s+/)[0];const m={
+    'ls':{out:'Applications\tDesktop\tDocuments\tDownloads\tLibrary',code:0},
+    'pwd':{out:'/Users/admin',code:0},'whoami':{out:'admin',code:0},'uname':{out:'Darwin',code:0},
+    'sw_vers':{out:'ProductName:\t\tmacOS\nProductVersion:\t14.5\nBuildVersion:\t\t23F79',code:0},
+    'hostname':{out:sel.name+'.local',code:0},'date':{out:new Date().toString(),code:0},
+    'sysctl':{out:'hw.ncpu: '+sel.vcpu+'\nhw.memsize: '+(sel.ram*1073741824),code:0},
+    'echo':{out:cmd.slice(5),code:0},'clear':{out:'',code:0},
+  };
+  if(m[c])return m[c];if(c==='cat'||c==='vim'||c==='open')return {out:cmd.split(' ')[1]+': operation simulated',code:0};return {out:'zsh: command not found: '+c,code:127};}
+
+  render(){}
+  renderVals(){
+    const s=this.state,sel=this.sel();
+    const q=(s.search||'').toLowerCase();
+    const ghost='height:30px;padding:0 11px;font-size:12px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:8px;color:var(--text-dim);display:flex;align-items:center;gap:5px';
+    const primary='height:30px;padding:0 13px;font-size:12px;font-weight:600;background:var(--emerald);color:#04130d;border:none;border-radius:8px;display:flex;align-items:center;gap:5px';
+    const danger='width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--red-soft);border:1px solid transparent;border-radius:8px;color:var(--red);font-size:13px';
+
+    // vm rows
+    const vmsView=s.vms.filter(v=>!q||v.name.toLowerCase().includes(q)).map(v=>{
+      const mt=this.meta(v.state);const active=v.id===s.selectedId;const glow=v.live&&v.state==='running';
+      let dot='width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:'+mt.color;
+      if(v.state==='running')dot+=';box-shadow:0 0 8px '+mt.color;
+      if(v.state==='booting')dot+=';animation:mfpulse 1.4s ease-in-out infinite';
+      if(v.state==='suspended')dot+=';opacity:.55';
+      let row='width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;margin-bottom:2px;border-radius:9px;border:1px solid '+(active?'var(--border-strong)':'transparent')+';background:'+(active?'var(--bg-elev2)':'transparent')+';transition:background .12s';
+      if(glow&&active)row+=';animation:mfglow 2.6s ease-in-out infinite';
+      return {...v,dotStyle:dot,rowStyle:row,stateLabel:mt.label,hasTtl:v.ttl>0,ttlText:this.fmtTtl(v.ttl),spin:v.state==='creating',onSelect:()=>this.selectVM(v.id)};
+    });
+    const snapsView=s.snapshots.map(sn=>({...sn,onNew:()=>this.newFromSnapshot(sn)}));
+
+    // capacity
+    const active=s.vms.filter(v=>v.state==='running'||v.state==='booting'||v.state==='creating');
+    const usedMem=active.reduce((a,v)=>a+v.ram,0);
+    const cap={running:s.vms.filter(v=>v.state==='running').length+' running',mem:usedMem+' / 32 GB'};
+
+    const agents=[
+      {who:'claude-code',action:'ran e2e suite on',target:'agent-sandbox',ago:'12s ago',color:'var(--emerald)'},
+      {who:'agent-7f2',action:'snapshotted',target:'ci-runner-01',ago:'1m ago',color:'var(--violet)'},
+      {who:'claude-code',action:'took screenshot of',target:'agent-sandbox',ago:'2m ago',color:'var(--emerald)'},
+    ];
+
+    const base={
+      theme:s.theme,themeIcon:s.theme==='dark'?'☾':'☀',search:s.search,onSearch:(e)=>this.setState({search:e.target.value}),
+      onPaletteInput:(e)=>this.setState({paletteQuery:e.target.value,paletteIndex:0}),
+      openPalette:()=>this.openPalette(),closePalette:()=>this.closePalette(),stop:(e)=>e.stopPropagation(),
+      toggleTheme:()=>this.toggleTheme(),
+      cap,agentCount:2,agents,agentOpen:s.agentOpen,toggleAgent:()=>this.setState(st=>({agentOpen:!st.agentOpen})),
+      vmsView,vmCount:s.vms.length,snapsView,snapCount:s.snapshots.length,
+      fleetEmpty:vmsView.length===0&&s.vms.length>0,
+      createName:s.createName,onCreateName:(e)=>this.setState({createName:e.target.value}),
+      createVM:()=>this.createVM(),advancedOpen:s.advancedOpen,advChevron:s.advancedOpen?'▾':'▸',toggleAdvanced:()=>this.setState(st=>({advancedOpen:!st.advancedOpen})),
+      createSource:s.createSource,onCreateSource:(e)=>this.setState({createSource:e.target.value}),
+      createPreset:s.createPreset,onCreatePreset:(e)=>this.setState({createPreset:e.target.value}),
+      createTTL:s.createTTL,onCreateTTL:(e)=>this.setState({createTTL:e.target.checked}),
+      btnGhost:ghost,btnPrimary:primary,btnDanger:danger,
+      clock:s.clock,
+      paletteOpen:s.paletteOpen,paletteQuery:s.paletteQuery,
+      toasts:s.toasts.map(t=>({...t,style:'display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:10px;box-shadow:var(--shadow);font-size:12.5px;color:var(--text);animation:mfin .16s ease;max-width:320px'})),
+    };
+    // palette view
+    const pal=this.palette();const pidx=Math.max(0,Math.min(s.paletteIndex,pal.length-1));
+    base.paletteView=pal.map((p,i)=>({...p,active:i===pidx,onClick:p.run,onHover:()=>this.setState({paletteIndex:i}),style:'width:100%;display:flex;align-items:center;gap:12px;padding:9px 11px;border-radius:9px;border:none;background:'+(i===pidx?'var(--bg-elev2)':'transparent')+';font-size:13px'}));
+    base.paletteEmpty=pal.length===0;
+
+    if(!sel){
+      const totallyEmpty=s.vms.length===0;
+      return {...base,hasSelection:false,noSelection:true,fleetTotallyEmpty:totallyEmpty,
+        emptyTitle:totallyEmpty?'No VMs yet':'Select a VM to view it',
+        emptySub:totallyEmpty?'Spin one up to get started — clones from the golden image in a couple of seconds.':'Pick a machine from the fleet on the left.'};
+    }
+
+    const mt=this.meta(sel.state);
+    let sdot='width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:'+mt.color;
+    if(sel.state==='running')sdot+=';box-shadow:0 0 10px '+mt.color;
+    if(sel.state==='booting')sdot+=';animation:mfpulse 1.4s ease-in-out infinite';
+    const badge='display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:7px;font-size:11px;font-weight:600;color:'+mt.color+';background:color-mix(in oklch,'+mt.color+' 14%,transparent)';
+
+    const tabs=[['screen','Screen'],['terminal','Terminal'],['logs','Logs'],['resources','Resources'],['connect','Connect']];
+    const tabsView=tabs.map(([id,label])=>({label,onClick:()=>this.setState({tab:id}),style:'height:38px;padding:0 13px;border:none;background:none;font-size:12.5px;font-weight:'+(s.tab===id?'600':'500')+';color:'+(s.tab===id?'var(--text)':'var(--text-faint)')+';border-bottom:2px solid '+(s.tab===id?'var(--emerald)':'transparent')+';margin-bottom:-1px'}));
+
+    // resources bars
+    const pct=(a,b)=>Math.max(3,Math.min(100,Math.round(a/b*100)));
+    const bar=(p,col)=>'height:100%;width:'+p+'%;background:'+col+';border-radius:4px;transition:width .5s';
+    const cpuP=sel.state==='running'?sel.cpu:0, memP=pct(sel.memUsed,sel.ram), diskP=pct(sel.diskUsed,sel.disk);
+    const resLocked=sel.state==='running'||sel.state==='booting';
+
+    // connect items
+    const ip=sel.ip; const ci=(key,label,value)=>({label,value,onCopy:()=>this.copyField(key,value),copyLabel:s.copied===key?'✓ Copied':'Copy',copyStyle:'flex:0 0 auto;height:30px;padding:0 12px;font-size:12px;font-weight:550;border-radius:8px;border:1px solid var(--border);background:'+(s.copied===key?'var(--emerald-soft)':'var(--bg-elev2)')+';color:'+(s.copied===key?'var(--emerald)':'var(--text-dim)')});
+    const connectItems= ip==='—'?[]:[ci('ip','IP address',ip),ci('ssh','SSH',('ssh admin@'+ip)),ci('vnc','Screen sharing (VNC)',('open vnc://'+ip)),ci('url','Guest server URL',('http://'+ip+':7842'))];
+
+    // screen state
+    const screenLive=sel.state==='running';
+    const screenState={
+      booting:['Booting — waiting for guest','The guest agent will connect once macOS finishes booting.',false],
+      creating:['Creating VM…','Cloning from source. This takes a couple of seconds.',false],
+      stopped:['Stopped','This VM is powered off. Resume it to see the screen.',true],
+      suspended:['Suspended','State is frozen on disk. Resume to continue where you left off (~2s).',true],
+      error:['Unhealthy — control disabled','The guest failed a healthcheck. Check the logs, then restart or delete.',false],
+    }[sel.state];
+
+    return {...base,hasSelection:true,noSelection:false,
+      sel:{...sel,dotStyle:sdot,badgeStyle:badge,stateLabel:mt.label,
+        suspendLabel:sel.state==='running'?'⏸ Suspend':'▶ Resume',
+        cpuText:sel.state==='running'?sel.cpu+'%':'idle',
+        memText:sel.state==='running'?sel.memUsed.toFixed(1)+' / '+sel.ram+' GB':'—',
+        diskText:sel.diskUsed+' / '+sel.disk+' GB',spin:sel.state==='creating'||sel.state==='booting'},
+      renaming:s.renaming,notRenaming:!s.renaming,renameValue:s.renameValue,
+      onRename:(e)=>this.setState({renameValue:e.target.value}),onRenameKey:(e)=>{if(e.key==='Enter')this.commitRename();if(e.key==='Escape')this.setState({renaming:false});},startRename:()=>this.startRename(),
+      suspendResume:()=>this.suspendResume(),snapshotVM:()=>this.snapshotVM(),duplicateVM:()=>this.duplicateVM(),
+      connectShortcut:()=>this.setState({tab:'connect'}),
+      confirmDelete:s.confirmDelete,notConfirmDelete:!s.confirmDelete,askDelete:()=>this.askDelete(),doDelete:()=>this.doDelete(),cancelDelete:()=>this.setState({confirmDelete:false}),
+      tabsView,isScreen:s.tab==='screen',isTerm:s.tab==='terminal',isLogs:s.tab==='logs',isRes:s.tab==='resources',isConn:s.tab==='connect',
+      // screen
+      screenFrameStyle:'position:relative;width:100%;aspect-ratio:16/10;border-radius:14px;overflow:hidden;border:1px solid var(--border-strong);box-shadow:var(--shadow);'+(screenLive?'cursor:crosshair':'cursor:default'),
+      screenLive,screenOverlay:!screenLive,screenMsg:screenState?screenState[0]:'',screenSub:screenState?screenState[1]:'',screenHasAction:screenState?screenState[2]:false,
+      cursorStyle:'position:absolute;left:'+s.cursor.x+'%;top:'+s.cursor.y+'%;width:0;height:0;transition:left .18s ease,top .18s ease;z-index:6',
+      showTyped:s.showTyped,lastTyped:s.lastTyped,
+      typeInput:s.typeInput,onTypeInput:(e)=>this.setState({typeInput:e.target.value}),onTypeKey:(e)=>{if(e.key==='Enter')this.sendType();},sendType:()=>this.sendType(),
+      pauseLabel:s.screenPaused?'▶ Resume':'⏸ Pause',togglePause:()=>this.togglePause(),fullscreen:()=>this.fullscreen(),
+      // terminal
+      termLines:(s.term[sel.id]||[]).map(l=>({...l,codeColor:l.code===0?'var(--emerald)':'var(--red)'})),
+      termInput:s.termInput,onTermInput:(e)=>this.setState({termInput:e.target.value}),onTermKey:(e)=>{if(e.key==='Enter')this.runCommand();},runCommand:()=>this.runCommand(),
+      // logs
+      logLines:(s.logs[sel.id]||[]).map(l=>({...l,color:l.level==='ERR'?'#f0555a':l.level==='WARN'?'#f5a623':l.level==='OK'?'#4ade80':'#5e9eff'})),
+      // resources
+      resLocked,resEditable:!resLocked,
+      metricCard:'padding:16px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px',
+      cpuBar:bar(cpuP,'var(--emerald)'),memBar:bar(memP,'var(--emerald)'),diskBar:bar(diskP,diskP>85?'var(--amber)':'var(--violet)'),
+      // connect
+      connectItems,
+    };
+  }
+  fmtTtl(sec){if(sec==null)return '';const m=Math.floor(sec/60),ss=sec%60;return m>0?(m+'m '+ss+'s'):(ss+'s');}
+}
+</script>
+</body>
+</html>
