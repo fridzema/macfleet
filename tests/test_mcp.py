@@ -1,9 +1,15 @@
 from macfleet import mcp as M
 
 
+class _NoOpActivity:
+    def record(self, who, action, target):
+        pass
+
+
 class FakeFleet:
     def __init__(self):
         self.calls = []
+        self.activity = _NoOpActivity()
 
     def list_vms(self):
         return [{"name": "mf-a", "state": "running", "healthy": True}]
@@ -48,3 +54,25 @@ def test_build_server_registers_tools():
     server = M.build_server(FakeFleet())
     names = {t.name for t in server._tool_manager.list_tools()}
     assert {"list_vms", "create_vm", "snapshot", "exec"} <= names
+
+
+def test_create_vm_records_activity(monkeypatch):
+    monkeypatch.setenv("MACFLEET_AGENT", "claude-code")
+    fake = FakeFleet()
+    recorded = []
+    fake.activity = type("A", (), {"record": lambda self, who, action, target: recorded.append((who, action, target))})()
+    M.mcp_create_vm(fake, name="web")
+    assert recorded == [("claude-code", "created", "web")]
+
+
+def test_list_vms_does_not_record(monkeypatch):
+    fake = FakeFleet()
+    recorded = []
+    fake.activity = type("A", (), {"record": lambda self, w, a, t: recorded.append((w, a, t))})()
+    M.mcp_list_vms(fake)
+    assert recorded == []
+
+
+def test_who_defaults_to_agent(monkeypatch):
+    monkeypatch.delenv("MACFLEET_AGENT", raising=False)
+    assert M._who() == "agent"

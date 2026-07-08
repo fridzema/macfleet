@@ -86,7 +86,7 @@ targets fleet VMs over their guest IP — never the host. Without the flag,
 Expose the fleet to an AI agent:
 
 ```bash
-claude mcp add macfleet -- uv run --extra mcp macfleet-mcp
+claude mcp add macfleet -e MACFLEET_AGENT=claude-code -- uv run --extra mcp macfleet-mcp
 ```
 
 Tools cover the full loop: list/create (incl. `from_snapshot`, `ttl_seconds`),
