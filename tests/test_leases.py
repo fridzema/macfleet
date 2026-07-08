@@ -50,3 +50,27 @@ def test_expired_skips_entries_missing_expires_at(tmp_path):
     path.write_text('{"leases": {"mf-a": {"created_at": 1000, "source": "api"}}}')
     lease = Leases(str(path), clock=lambda: 0.0)
     assert lease.expired(1e12) == []  # malformed entry skipped, no crash
+
+
+def test_suspended_set_roundtrip(tmp_path):
+    lease = Leases(str(tmp_path / "state.json"), clock=lambda: 0.0)
+    lease.suspend("mf-a")
+    lease.suspend("mf-a")  # idempotent
+    assert lease.suspended() == {"mf-a"}
+    lease.unsuspend("mf-a")
+    assert lease.suspended() == set()
+
+
+def test_suspended_coexists_with_leases(tmp_path):
+    lease = Leases(str(tmp_path / "state.json"), clock=lambda: 1000.0)
+    lease.record("mf-a", ttl=60)
+    lease.suspend("mf-b")
+    assert lease.expired(2000.0) == ["mf-a"]  # leases still work
+    assert lease.suspended() == {"mf-b"}       # suspended preserved
+
+
+def test_rename_moves_suspended_marker(tmp_path):
+    lease = Leases(str(tmp_path / "state.json"), clock=lambda: 0.0)
+    lease.suspend("mf-a")
+    lease.rename("mf-a", "mf-b")
+    assert lease.suspended() == {"mf-b"}

@@ -19,48 +19,73 @@ class Leases:
         self._path = path
         self._clock = clock
 
-    def _load(self) -> dict:
+    def _load_doc(self) -> dict:
         try:
             with open(self._path) as fh:
                 data = json.load(fh)
-            return data.get("leases", {}) if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
         except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return {}
+            data = {}
+        data.setdefault("leases", {})
+        data.setdefault("suspended", [])
+        return data
 
-    def _save(self, leases: dict) -> None:
+    def _save_doc(self, doc: dict) -> None:
         d = os.path.dirname(self._path)
         if d:
             os.makedirs(d, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=d or ".")
         try:
             with os.fdopen(fd, "w") as fh:
-                json.dump({"leases": leases}, fh)
+                json.dump({"leases": doc["leases"], "suspended": doc["suspended"]}, fh)
             os.replace(tmp, self._path)
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
     def record(self, name: str, ttl: float, source: str = "api") -> None:
-        leases = self._load()
+        doc = self._load_doc()
         now = self._clock()
-        leases[name] = {"expires_at": now + ttl, "created_at": now, "source": source}
-        self._save(leases)
+        doc["leases"][name] = {"expires_at": now + ttl, "created_at": now, "source": source}
+        self._save_doc(doc)
 
     def expired(self, now: float) -> list[str]:
         result = []
-        for n, lease in self._load().items():
+        for n, lease in self._load_doc()["leases"].items():
             expires_at = lease.get("expires_at")
             if expires_at is not None and expires_at < now:
                 result.append(n)
         return result
 
     def drop(self, name: str) -> None:
-        leases = self._load()
-        if leases.pop(name, None) is not None:
-            self._save(leases)
+        doc = self._load_doc()
+        if doc["leases"].pop(name, None) is not None:
+            self._save_doc(doc)
 
     def rename(self, old: str, new: str) -> None:
-        leases = self._load()
-        if old in leases:
-            leases[new] = leases.pop(old)
-            self._save(leases)
+        doc = self._load_doc()
+        changed = False
+        if old in doc["leases"]:
+            doc["leases"][new] = doc["leases"].pop(old)
+            changed = True
+        if old in doc["suspended"]:
+            doc["suspended"] = [new if x == old else x for x in doc["suspended"]]
+            changed = True
+        if changed:
+            self._save_doc(doc)
+
+    def suspend(self, name: str) -> None:
+        doc = self._load_doc()
+        if name not in doc["suspended"]:
+            doc["suspended"].append(name)
+            self._save_doc(doc)
+
+    def unsuspend(self, name: str) -> None:
+        doc = self._load_doc()
+        if name in doc["suspended"]:
+            doc["suspended"].remove(name)
+            self._save_doc(doc)
+
+    def suspended(self) -> set[str]:
+        return set(self._load_doc()["suspended"])
