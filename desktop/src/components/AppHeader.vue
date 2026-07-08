@@ -12,13 +12,22 @@ const { isDark, toggleDark } = useDarkMode()
 
 const themeIcon = computed(() => (isDark.value ? '☾' : '☀'))
 
-// Phase-1 honest capacity (comp line 80 sums per-VM RAM, which `list_vms` doesn't carry —
-// that's Phase 2, once per-VM resources are tracked). Show what's actually known instead:
-// how many VMs are running, plus the host's total memory when it's loaded.
-const runningCount = computed(() => fleet.vms.filter((v) => v.state === 'running').length)
+// Comp line 80 sums per-VM RAM. `list_vms` now carries `memory_mb` (Task 9), so show the
+// real Σ used / host total once at least one running VM reports it. Suspended VMs have
+// freed their RAM, so they're excluded from both the running count and the sum — only
+// 'stopped' isn't "running" here (there's no separate 'booting' state on the wire).
+const runningVms = computed(() => fleet.vms.filter((v) => v.state === 'running'))
+const runningCount = computed(() => runningVms.value.length)
+const usedGb = computed(() => {
+  const total = runningVms.value.reduce((sum, v) => sum + (v.memory_mb ?? 0), 0)
+  return Math.round(total / 1024)
+})
+const hasMemoryData = computed(() => runningVms.value.some((v) => v.memory_mb != null))
 const capacityLabel = computed(() => {
   const running = `${runningCount.value} running`
-  return fleet.host ? `${running} · ${fleet.host.total_mem_gb} GB` : running
+  if (!fleet.host) return running
+  if (hasMemoryData.value) return `${usedGb.value} / ${fleet.host.total_mem_gb} GB`
+  return `${running} · ${fleet.host.total_mem_gb} GB`
 })
 
 useHotkeys(() => ui.openPalette())
