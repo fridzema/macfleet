@@ -15,6 +15,8 @@ export default [
     rules: {
       // False positive: ESLint cannot see template usage of script setup bindings
       'no-useless-assignment': 'off',
+      // Toasts.vue is the task-mandated filename for the single-word "toast layer" component.
+      'vue/multi-word-component-names': ['error', { ignores: ['Toasts'] }],
     },
   },
   {
