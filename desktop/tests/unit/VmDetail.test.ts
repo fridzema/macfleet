@@ -49,6 +49,20 @@ describe('VmDetail — header', () => {
     wrapper.unmount()
   })
 
+  it('shows the suspended/error badges carried straight through from state', async () => {
+    let wrapper = mount(VmDetail, {
+      props: { name: 'web', state: 'suspended', healthy: false },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="status-badge"]').text()).toBe('Suspended')
+    wrapper.unmount()
+
+    wrapper = mount(VmDetail, { props: { name: 'web', state: 'error', healthy: false } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="status-badge"]').text()).toBe('Unhealthy')
+    wrapper.unmount()
+  })
+
   it('shows the stopped badge for a non-running, unhealthy VM', async () => {
     const wrapper = mount(VmDetail, { props: stopped })
     await flushPromises()
@@ -181,6 +195,20 @@ describe('VmDetail — inline rename', () => {
     await wrapper.vm.$nextTick()
     await wrapper.find('[data-test="rename-input"]').setValue('ignored')
     await wrapper.find('[data-test="rename-input"]').trigger('keydown', { key: 'Escape' })
+    expect(rename).not.toHaveBeenCalled()
+    expect(ui.renaming).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('Enter with a blank rename value closes the input without calling store.rename', async () => {
+    const store = useFleet()
+    const rename = vi.spyOn(store, 'rename').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.startRename('web')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="rename-input"]').setValue('   ')
+    await wrapper.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' })
     expect(rename).not.toHaveBeenCalled()
     expect(ui.renaming).toBe(false)
     wrapper.unmount()

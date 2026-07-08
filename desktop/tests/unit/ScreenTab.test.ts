@@ -65,6 +65,29 @@ describe('ScreenTab — live view', () => {
     expect(wrapper.find('[data-test="shot"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'standalone' })]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'standalone' } })
+    await vi.waitFor(() => expect(wrapper.find('[data-test="shot"]').exists()).toBe(true))
+    wrapper.unmount()
+  })
+
+  it('restarts polling against the new VM when the name prop changes to another running VM', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'mf-web' }), vm({ name: 'mf-db' })]
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(shot).toHaveBeenCalledWith('web')
+
+    await wrapper.setProps({ name: 'db' })
+    await flushPromises()
+    expect(shot).toHaveBeenCalledWith('db')
+    wrapper.unmount()
+  })
 })
 
 describe('ScreenTab — click & type control', () => {
@@ -139,6 +162,83 @@ describe('ScreenTab — click & type control', () => {
     expect(typeText).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('does not send when the typed text is blank', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const typeText = vi.spyOn(api, 'typeText').mockResolvedValue({})
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    await wrapper.find('[data-test="send-btn"]').trigger('click')
+    expect(typeText).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('sending a second time before the first flash expires clears and resets the flash timer', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    vi.spyOn(api, 'typeText').mockResolvedValue({})
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    await wrapper.find('[data-test="type-input"]').setValue('hello')
+    await wrapper.find('[data-test="send-btn"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('⌨ hello')
+
+    await wrapper.find('[data-test="type-input"]').setValue('world')
+    await wrapper.find('[data-test="send-btn"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('⌨ world')
+    expect(wrapper.text()).not.toContain('⌨ hello')
+
+    await vi.advanceTimersByTimeAsync(2200)
+    expect(wrapper.text()).not.toContain('⌨ world')
+    wrapper.unmount()
+  })
+
+  it('toasts a failure instead of rejecting when api.typeText fails', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    vi.spyOn(api, 'typeText').mockRejectedValue(new Error('POST /vms/web/type -> 500'))
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    await wrapper.find('[data-test="type-input"]').setValue('hello')
+    await wrapper.find('[data-test="send-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(useToasts().toasts.value.map((t) => t.msg)).toContain('Failed to send keystrokes')
+    wrapper.unmount()
+  })
+
+  it('calls the real requestFullscreen when available, toasting on failure', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    const frame = wrapper.find('[data-test="screen-frame"]').element as HTMLElement & {
+      requestFullscreen?: () => Promise<void>
+    }
+    const requestFullscreen = vi.fn().mockRejectedValue(new Error('denied'))
+    Object.defineProperty(frame, 'requestFullscreen', {
+      value: requestFullscreen,
+      configurable: true,
+    })
+
+    await wrapper.find('[data-test="fullscreen-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(requestFullscreen).toHaveBeenCalled()
+    expect(useToasts().toasts.value.some((t) => t.msg === 'Fullscreen failed')).toBe(true)
+    wrapper.unmount()
+  })
 })
 
 describe('ScreenTab — non-running overlays', () => {
@@ -163,6 +263,25 @@ describe('ScreenTab — non-running overlays', () => {
     const wrapper = mount(ScreenTab, { props: { name: 'web' } })
     await flushPromises()
     expect(wrapper.find('[data-test="overlay-msg"]').text()).toBe('Creating VM…')
+    wrapper.unmount()
+  })
+
+  it('defaults to "Stopped" when the VM is not found in store.vms at all', async () => {
+    const store = useFleet()
+    store.vms = []
+    const wrapper = mount(ScreenTab, { props: { name: 'ghost' } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="overlay-msg"]').text()).toBe('Stopped')
+    wrapper.unmount()
+  })
+
+  it('falls back to the "Stopped" overlay for an unrecognized raw state', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'zombie', healthy: false })]
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="overlay-msg"]').text()).toBe('Stopped')
+    expect(wrapper.find('[data-test="resume-btn"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

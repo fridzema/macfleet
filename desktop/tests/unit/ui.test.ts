@@ -306,6 +306,15 @@ describe('ui store — paletteItems', () => {
     expect(ui.selectedVm).toBe('db')
   })
 
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'standalone', state: 'running', source: 'local', healthy: true }]
+    const ui = useUi()
+    ui.selectVm('standalone')
+    const byId = Object.fromEntries(ui.paletteItems.map((i) => [i.id, i]))
+    expect(byId.snap.label).toBe('Snapshot standalone')
+  })
+
   it('theme item reflects the current mode and toggles it', () => {
     vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(true), toggleDark })
     const ui = useUi()

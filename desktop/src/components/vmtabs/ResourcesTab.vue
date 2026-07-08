@@ -53,6 +53,11 @@ watch(disk, (v) => {
 
 function save(): void {
   const r = resources.value
+  // The save button (template, `v-if="!locked"` inside `v-else` for `!resources`) only
+  // ever renders once `resources` is loaded, so this can't actually be reached — it's a
+  // type narrowing guard for `resources.value`'s `Resources | undefined` type, not a
+  // real runtime possibility.
+  /* istanbul ignore if */
   if (!r) return
   const patch: Parameters<typeof store.setResources>[1] = {}
   if (cpu.value !== r.cpu) patch.cpu = cpu.value
