@@ -36,10 +36,15 @@ function parseLine(raw: string): ParsedLine {
   const level = m?.[1]
   if (!m || m.index === undefined || !level)
     return { prefix: '', level: null, color: '', rest: raw }
+  // `level` is always one of LEVEL_COLORS' own keys here (the regex only captures those
+  // 4 literals) — `noUncheckedIndexedAccess` just can't see that, so the `?? ''`
+  // fallback can't actually be reached.
+  /* istanbul ignore next */
+  const color = LEVEL_COLORS[level] ?? ''
   return {
     prefix: raw.slice(0, m.index),
     level,
-    color: LEVEL_COLORS[level] ?? '',
+    color,
     rest: raw.slice(m.index + level.length),
   }
 }
@@ -83,6 +88,11 @@ const scrollEl = ref<HTMLElement | null>(null)
 async function scrollToBottom(): Promise<void> {
   await nextTick()
   const el = scrollEl.value
+  // Guards a post-unmount race: this `flush: 'post'` watcher's callback can already be
+  // queued when the component unmounts, in which case `el` is null by the time this
+  // resumes after `nextTick()`. Not reliably reproducible without a contrived timing
+  // hack, so it's excluded rather than faked.
+  /* istanbul ignore else */
   if (el) el.scrollTop = el.scrollHeight
 }
 watch(logLines, scrollToBottom, { flush: 'post' })

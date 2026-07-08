@@ -53,6 +53,16 @@ describe('TerminalTab', () => {
     wrapper.unmount()
   })
 
+  it('ignores keys other than Enter in the input', async () => {
+    const exec = vi.spyOn(api, 'exec').mockResolvedValue({ stdout: 'ok', exit_code: 0 })
+    const wrapper = mount(TerminalTab, { props: { name: 'web' } })
+
+    await wrapper.find('[data-test="term-input"]').setValue('ls')
+    await wrapper.find('[data-test="term-input"]').trigger('keydown', { key: 'a' })
+    expect(exec).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('does not call api.exec for a blank command', async () => {
     const exec = vi.spyOn(api, 'exec').mockResolvedValue({ stdout: '', exit_code: 0 })
     const wrapper = mount(TerminalTab, { props: { name: 'web' } })

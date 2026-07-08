@@ -34,6 +34,11 @@ describe('api', () => {
     await expect(api.screenshot('web')).rejects.toThrow('409')
   })
 
+  it('defaults the method in the error message to GET when init was not supplied', async () => {
+    mockFetch(500, { detail: 'boom' })
+    await expect(api.listVms()).rejects.toThrow('GET /vms -> 500')
+  })
+
   it('create POSTs name + opts to /vms', async () => {
     const f = mockFetch(200, { ok: true })
     await api.create('mf-a', { from_snapshot: 'snap1', ttl: 60, cpu: 2, memory: 4096, disk: 40 })
@@ -48,6 +53,69 @@ describe('api', () => {
       memory: 4096,
       disk: 40,
     })
+  })
+
+  it('create defaults opts to {} when omitted', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.create('mf-a')
+    const [, init] = f.mock.calls[0]
+    expect(JSON.parse(init?.body as string)).toEqual({ name: 'mf-a' })
+  })
+
+  it('up POSTs /vms/{n}/up', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.up('mf-a')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/up`, { method: 'POST' })
+  })
+
+  it('down POSTs /vms/{n}/down', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.down('mf-a')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/down`, { method: 'POST' })
+  })
+
+  it('nuke POSTs /vms/{n}/nuke', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.nuke('mf-a')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/nuke`, { method: 'POST' })
+  })
+
+  it('status GETs /vms/{n}/status', async () => {
+    const f = mockFetch(200, { healthy: true })
+    const res = await api.status('mf-a')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/status`, undefined)
+    expect(res).toEqual({ healthy: true })
+  })
+
+  it('typeText POSTs { text } to /vms/{n}/type', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.typeText('mf-a', 'hello')
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe(`${API_BASE}/vms/mf-a/type`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ text: 'hello' })
+  })
+
+  it('key POSTs { combo } to /vms/{n}/key', async () => {
+    const f = mockFetch(200, { ok: true })
+    await api.key('mf-a', 'cmd+c')
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe(`${API_BASE}/vms/mf-a/key`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ combo: 'cmd+c' })
+  })
+
+  it('logs GETs /vms/{n}/logs with a default lines=100', async () => {
+    const f = mockFetch(200, { lines: 'boot ok' })
+    const res = await api.logs('mf-a')
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/logs?lines=100`, undefined)
+    expect(res).toEqual({ lines: 'boot ok' })
+  })
+
+  it('logs GETs /vms/{n}/logs with an explicit lines count', async () => {
+    const f = mockFetch(200, { lines: 'boot ok' })
+    await api.logs('mf-a', 25)
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/logs?lines=25`, undefined)
   })
 
   it('suspend POSTs /vms/{n}/suspend', async () => {

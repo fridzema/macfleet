@@ -186,4 +186,33 @@ describe('ResourcesTab — stopped (editable)', () => {
     await vi.waitFor(() => expect(setResources).toHaveBeenCalledWith('web', { disk_size: 80 }))
     wrapper.unmount()
   })
+
+  it('editing memory and display sends both in the patch', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    store.resources = { web: resources() }
+    const setResources = vi.spyOn(api, 'setResources').mockResolvedValue({})
+    vi.spyOn(api, 'resources').mockResolvedValue(
+      resources({ memory_mb: 16384, display: '2560x1440' }),
+    )
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+
+    await wrapper.find('[data-test="memory-input"]').setValue(16)
+    await wrapper.find('[data-test="display-input"]').setValue('2560x1440')
+    await wrapper.find('[data-test="save-btn"]').trigger('click')
+
+    await vi.waitFor(() => expect(setResources).toHaveBeenCalled())
+    expect(setResources).toHaveBeenCalledWith('web', { memory: 16384, display: '2560x1440' })
+    wrapper.unmount()
+  })
+
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'standalone' })]
+    store.resources = { standalone: resources() }
+    const wrapper = mount(ResourcesTab, { props: { name: 'standalone' } })
+    // Same rationale as elsewhere: 'stopped' -> editable banner, not locked.
+    expect(wrapper.find('[data-test="editable-banner"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

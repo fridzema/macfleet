@@ -60,6 +60,40 @@ describe('LogsTab — tailing', () => {
     expect(wrapper.find('[data-test="not-running"]').text()).toBe('VM not running')
     wrapper.unmount()
   })
+
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'standalone' })]
+    vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'boot ok' })
+    const wrapper = mount(LogsTab, { props: { name: 'standalone' } })
+    await vi.waitFor(() => expect(wrapper.find('[data-test="not-running"]').exists()).toBe(false))
+    wrapper.unmount()
+  })
+
+  it('renders the error inline when api.logs rejects while the VM is running', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'logs').mockRejectedValue(new Error('GET /vms/web/logs -> 500'))
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await vi.waitFor(() => expect(wrapper.find('[data-test="logscroll"]').text()).toContain('500'))
+    wrapper.unmount()
+  })
+
+  it('re-tails from scratch when the name prop changes to another running VM', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'mf-web' }), vm({ name: 'mf-db' })]
+    const logs = vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'web logs' })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(logs).toHaveBeenCalledWith('web')
+
+    logs.mockResolvedValue({ lines: 'db logs' })
+    await wrapper.setProps({ name: 'db' })
+    await flushPromises()
+    expect(logs).toHaveBeenCalledWith('db')
+    expect(wrapper.find('[data-test="logscroll"]').text()).toContain('db logs')
+    wrapper.unmount()
+  })
 })
 
 describe('LogsTab — pause', () => {

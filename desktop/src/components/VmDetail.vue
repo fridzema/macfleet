@@ -50,14 +50,20 @@ const STATUS_META: Record<string, { label: string; dotClass: string; badgeClass:
     badgeClass: 'text-[var(--red)] bg-[color-mix(in_oklch,var(--red)_14%,transparent)]',
   },
 }
-const statusMeta = computed(
-  () =>
+const statusMeta = computed(() => {
+  // `status` above only ever yields a key already in STATUS_META (suspended/error pass
+  // straight through, everything else is constrained to running/booting/stopped by
+  // `vmStatus`) — this fallback can't be reached through it, but stays as a genuine
+  // safety net against a `status` string that falls through silently.
+  /* istanbul ignore next */
+  return (
     STATUS_META[status.value] ?? {
       label: status.value,
       dotClass: 'bg-[var(--idle)]',
       badgeClass: 'text-[var(--idle)] bg-[color-mix(in_oklch,var(--idle)_14%,transparent)]',
-    },
-)
+    }
+  )
+})
 
 // Resource chips (vCPU/RAM/disk): fetched into the fleet store's `resources` cache so
 // the Resources tab (Task 11) can reuse the same data instead of a second round trip.
