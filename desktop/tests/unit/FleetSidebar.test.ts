@@ -5,7 +5,11 @@ import FleetSidebar from '../../src/components/FleetSidebar.vue'
 import { api } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
 
-beforeEach(() => setActivePinia(createPinia()))
+beforeEach(() => {
+  setActivePinia(createPinia())
+  // refresh() also lists snapshots now — default to empty for these VM-focused tests.
+  vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
+})
 
 describe('FleetSidebar', () => {
   it('lists polled VMs and emits select with the short name', async () => {
