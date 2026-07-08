@@ -43,6 +43,23 @@ const items = computed<ConnectItem[]>(() => {
   ]
 })
 
+// The packaged app runs in a WKWebView where navigator.clipboard can be unreliable, so
+// prefer the Tauri clipboard plugin when running inside Tauri; fall back to the browser
+// API otherwise (and if the plugin import/write itself fails).
+async function copyText(value: string): Promise<void> {
+  const win = window as Window & { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
+  if (win.__TAURI_INTERNALS__ || win.__TAURI__) {
+    try {
+      const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
+      await writeText(value)
+      return
+    } catch {
+      // Plugin unavailable or the write failed — fall through to the browser API.
+    }
+  }
+  await navigator.clipboard.writeText(value)
+}
+
 // comp `copyField` (design source line 582): copy, flash "✓ Copied" for a beat, toast —
 // but only once the clipboard write actually succeeds. A real WKWebView can reject this
 // (permission denied) either synchronously or asynchronously; either way that must not
@@ -51,7 +68,7 @@ const copied = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 async function copyField(key: string, value: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(value)
+    await copyText(value)
   } catch {
     toast('Failed to copy to clipboard', '⚠')
     return
