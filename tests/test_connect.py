@@ -469,6 +469,28 @@ def test_list_vms_includes_cached_resources_and_fetches_once(tmp_path):
     assert len(gets2) == len(gets)  # no additional tart get on cache hit
 
 
+def test_list_vms_tolerates_tart_get_failure_for_one_vm(tmp_path):
+    # A VM can vanish between `tart list` and `tart get` (concurrent delete/reap), so
+    # `tart get` returns empty stdout for it. That must not blow up the whole listing —
+    # the VM still gets a row with None resources, and it's left out of the cache so
+    # it's retried on the next call instead of sticking with a bad value.
+    def run(argv):
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                [{"Name": "mf-web", "State": "running", "Source": "local"}]), "")
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    rows = fleet.list_vms()
+    row = next(r for r in rows if r["name"] == "mf-web")
+    assert row["cpu"] is None and row["memory_mb"] is None and row["disk_gb"] is None
+    assert "mf-web" not in fleet._res_cache
+
+
 def test_set_resources_invalidates_cache(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "stopped", "local")])
     fleet.list_vms()
