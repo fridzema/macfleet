@@ -312,6 +312,20 @@ describe('fleet store — lifecycle mutations', () => {
       true,
     )
   })
+
+  it('prunes pending once the VM shows up running', async () => {
+    const listVms = vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'duplicate').mockResolvedValue({})
+    const s = useFleet()
+    await s.duplicate('web')
+    expect(s.pending).toContain('web-copy')
+
+    listVms.mockResolvedValue([
+      { name: 'mf-web-copy', state: 'running', source: 'local', healthy: true },
+    ])
+    await s.refresh()
+    expect(s.pending).not.toContain('web-copy')
+  })
 })
 
 describe('fleet store — create (options -> api args)', () => {
