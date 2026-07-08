@@ -33,15 +33,26 @@ watch(
 const active = computed(() => vm.value?.state === 'running')
 const metrics = ref<Metrics | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+// Bumped on every restart() so a poll() in flight when the VM is switched (or flips to
+// stopped) can tell its response is stale once the await resolves, and skip the write —
+// otherwise a late response for the OLD vm/state could land after the new poll cycle
+// has already started, overwriting the new card's numbers or reviving a stopped VM's bar.
+let generation = 0
 
 async function poll(): Promise<void> {
+  const myGen = generation
+  const name = props.name
+  let result: Metrics | null
   try {
-    metrics.value = await api.metrics(props.name)
+    result = await api.metrics(name)
   } catch {
-    metrics.value = null
+    result = null
   }
+  if (myGen !== generation || !active.value || props.name !== name) return
+  metrics.value = result
 }
 function restart(): void {
+  generation++
   if (timer) clearInterval(timer)
   timer = null
   metrics.value = null
