@@ -100,9 +100,14 @@ class Fleet:
         self._run_nocheck = run_nocheck
         self._leases = leases or Leases(default_state_path())
         self._clock = clock
+        self._res_cache: dict[str, dict] = {}
 
     def _state(self, full: str) -> str:
         return self.tart.get_config(full)["State"]
+
+    def _fetch_config(self, full: str) -> dict:
+        c = self.tart.get_config(full)
+        return {"cpu": c.get("CPU"), "memory_mb": c.get("Memory"), "disk_gb": c.get("Disk")}
 
     def suspend(self, name: str) -> None:
         self.tart.suspend(fullname(name))
@@ -128,6 +133,7 @@ class Fleet:
         if cpu is not None or memory is not None or disk_size is not None:
             # freshly-cloned VM is stopped, so `tart set` is valid here
             self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
+        self._res_cache.pop(target, None)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
         if ttl is not None:
@@ -165,14 +171,19 @@ class Fleet:
         # under screenshot load. Parallel keeps the list responsive.
         running = [v for v in vms if v.state == "running"]
         health: dict[str, bool] = {}
-        if running:
-            with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
-                health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
+        uncached = [v for v in vms if v.name not in self._res_cache]
+        if running or uncached:
+            with ThreadPoolExecutor(max_workers=min(8, len(vms))) as pool:
+                if running:
+                    health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
+                for name, res in pool.map(lambda v: (v.name, self._fetch_config(v.name)), uncached):
+                    self._res_cache[name] = res
         suspended = self._leases.suspended()
         return [{"name": v.name,
                  "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
-                 "source": v.source,
-                 "healthy": health.get(v.name, False)} for v in vms]
+                 "source": v.source, "healthy": health.get(v.name, False),
+                 **self._res_cache.get(v.name, {"cpu": None, "memory_mb": None, "disk_gb": None})}
+                for v in vms]
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))
@@ -184,6 +195,7 @@ class Fleet:
         except RuntimeError:
             pass
         self.tart.delete(fullname(name))
+        self._res_cache.pop(fullname(name), None)
         self._leases.unsuspend(fullname(name))
 
     def ip(self, name: str) -> str:
@@ -242,6 +254,7 @@ class Fleet:
 
     def rename(self, old: str, new: str) -> None:
         self.tart.rename(fullname(old), fullname(new))
+        self._res_cache.pop(fullname(old), None)
         self._leases.rename(fullname(old), fullname(new))
 
     def duplicate(self, name: str, new: str) -> None:
@@ -271,10 +284,14 @@ class Fleet:
 
     def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
                       disk_size: int | None = None, display: str | None = None) -> None:
-        if self.resources(name)["state"] == "running":
+        current = self.resources(name)
+        if current["state"] == "running":
             raise RuntimeError("stop the VM before changing resources")
+        if disk_size is not None and disk_size <= current["disk_gb"]:
+            disk_size = None  # tart set --disk-size is grow-only
         self.tart.set_config(fullname(name), cpu=cpu, memory=memory,
                              disk_size=disk_size, display=display)
+        self._res_cache.pop(fullname(name), None)
 
     def connection_info(self, name: str) -> dict:
         ip = self.ip(name)
