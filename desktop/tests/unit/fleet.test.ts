@@ -71,6 +71,23 @@ describe('fleet store', () => {
     await p
   })
 
+  it('does not add a duplicate pending entry when up is called again before it resolves', async () => {
+    const releases: (() => void)[] = []
+    vi.spyOn(api, 'up').mockImplementation(
+      () =>
+        new Promise((r) => {
+          releases.push(() => r({}))
+        }),
+    )
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const s = useFleet()
+    const p1 = s.up('web')
+    const p2 = s.up('web')
+    expect(s.pending.filter((n) => n === 'web')).toHaveLength(1)
+    for (const release of releases) release()
+    await Promise.all([p1, p2])
+  })
+
   it('prunes pending once the VM shows up running', async () => {
     vi.spyOn(api, 'up').mockResolvedValue({})
     vi.spyOn(api, 'listVms').mockResolvedValue([
@@ -151,6 +168,45 @@ describe('fleet store', () => {
     await s.refresh()
     expect(s.snapshots).toEqual([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
   })
+
+  it('refresh still populates vms when /snapshots rejects (best-effort, not on the critical path)', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true },
+    ])
+    vi.spyOn(api, 'listSnapshots').mockRejectedValue(new Error('500'))
+    const s = useFleet()
+    await s.refresh()
+    expect(s.vms).toHaveLength(1)
+    expect(s.loaded).toBe(true)
+    expect(s.error).toBeNull()
+  })
+
+  it('refresh keeps the last-known snapshots when a later /snapshots call rejects', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const listSnapshots = vi
+      .spyOn(api, 'listSnapshots')
+      .mockResolvedValue([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
+    const s = useFleet()
+    await s.refresh()
+    expect(s.snapshots).toHaveLength(1)
+
+    listSnapshots.mockRejectedValueOnce(new Error('500'))
+    await s.refresh()
+    expect(s.snapshots).toEqual([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
+  })
+
+  it('refresh does not populate vms and sets error when /vms itself rejects (critical path)', async () => {
+    vi.spyOn(api, 'listVms').mockRejectedValue(new Error('boom'))
+    const listSnapshots = vi.spyOn(api, 'listSnapshots')
+    listSnapshots.mockClear() // call count accumulates across this file's shared spy
+    const s = useFleet()
+    await s.refresh()
+    expect(s.vms).toHaveLength(0)
+    expect(s.loaded).toBe(false)
+    expect(s.error).toContain('boom')
+    // Never even attempted — /vms failing short-circuits before /snapshots.
+    expect(listSnapshots).not.toHaveBeenCalled()
+  })
 })
 
 describe('fleet store — host', () => {
@@ -185,6 +241,22 @@ describe('fleet store — lifecycle mutations', () => {
     vi.spyOn(api, 'down').mockRejectedValue(new Error('409'))
     const s = useFleet()
     await s.down('web')
+    expect(s.error).toContain('409')
+    expect(useToasts().toasts.value).toEqual([])
+  })
+
+  it('nuke calls api.nuke then refreshes', async () => {
+    const nuke = vi.spyOn(api, 'nuke').mockResolvedValue({})
+    const s = useFleet()
+    await s.nuke('web')
+    expect(nuke).toHaveBeenCalledWith('web')
+    expect(s.error).toBeNull()
+  })
+
+  it('nuke surfaces API errors on error without toasting (no user-facing copy for it)', async () => {
+    vi.spyOn(api, 'nuke').mockRejectedValue(new Error('409'))
+    const s = useFleet()
+    await s.nuke('web')
     expect(s.error).toContain('409')
     expect(useToasts().toasts.value).toEqual([])
   })
@@ -297,6 +369,22 @@ describe('fleet store — lifecycle mutations', () => {
     expect(useToasts().toasts.value.some((t) => t.msg.includes('ready'))).toBe(false)
   })
 
+  it('does not add a duplicate pending entry when duplicate is called again before it resolves', async () => {
+    const releases: (() => void)[] = []
+    vi.spyOn(api, 'duplicate').mockImplementation(
+      () =>
+        new Promise((r) => {
+          releases.push(() => r({}))
+        }),
+    )
+    const s = useFleet()
+    const p1 = s.duplicate('web')
+    const p2 = s.duplicate('web')
+    expect(s.pending.filter((n) => n === 'web-copy')).toHaveLength(1)
+    for (const release of releases) release()
+    await Promise.all([p1, p2])
+  })
+
   it('duplicate drops the pending copy and toasts on failure', async () => {
     vi.spyOn(api, 'duplicate').mockRejectedValue(new Error('409'))
     const s = useFleet()
@@ -387,6 +475,23 @@ describe('fleet store — create (options -> api args)', () => {
     expect(s.createOptions.advancedOpen).toBe(false)
   })
 
+  it('does not add a duplicate pending entry when create is called again before it resolves', async () => {
+    const releases: (() => void)[] = []
+    vi.spyOn(api, 'create').mockImplementation(
+      () =>
+        new Promise((r) => {
+          releases.push(() => r({}))
+        }),
+    )
+    const s = useFleet()
+    s.createOptions.name = 'web'
+    const p1 = s.create()
+    const p2 = s.create()
+    expect(s.pending.filter((n) => n === 'web')).toHaveLength(1)
+    for (const release of releases) release()
+    await Promise.all([p1, p2])
+  })
+
   it('emits only a START toast on success — no premature "ready" (VM still booting)', async () => {
     vi.spyOn(api, 'create').mockResolvedValue({})
     const s = useFleet()
@@ -467,6 +572,31 @@ describe('fleet store — resources cache', () => {
     await s.fetchResources('web')
     expect(s.error).toContain('409')
     expect(s.resources.web).toBeUndefined()
+  })
+
+  it('setResources refetches on success', async () => {
+    vi.spyOn(api, 'setResources').mockResolvedValue({})
+    const resources = vi.spyOn(api, 'resources').mockResolvedValue({
+      cpu: 6,
+      memory_mb: 8192,
+      disk_gb: 50,
+      display: '1920x1080',
+      state: 'stopped',
+    })
+    const s = useFleet()
+    await s.setResources('web', { cpu: 6 })
+    expect(resources).toHaveBeenCalledWith('web')
+    expect(s.resources.web?.cpu).toBe(6)
+  })
+
+  it('setResources toasts the generic failure message for a non-409 error', async () => {
+    vi.spyOn(api, 'setResources').mockRejectedValue(new Error('500'))
+    const s = useFleet()
+    await s.setResources('web', { cpu: 6 })
+    expect(s.error).toContain('500')
+    expect(
+      useToasts().toasts.value.some((t) => t.msg === 'Failed to update resources for web'),
+    ).toBe(true)
   })
 })
 

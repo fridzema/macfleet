@@ -3,6 +3,11 @@ import { ref } from 'vue'
 import { useToasts } from '../composables/useToasts'
 import { api, type HostInfo, type Resources, type Snapshot, type Vm } from '../shared/api'
 
+// Its only caller (below, in refresh()) always feeds it a name from `vms.value`, which is
+// itself filtered to `mf-`-prefixed names two lines earlier — the pass-through branch is
+// unreachable from here (unlike the same helper in the Vue components, which read
+// `store.vms` set directly by tests/bypassing that filter).
+/* istanbul ignore next */
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
 export type Tab = 'screen' | 'terminal' | 'logs' | 'resources' | 'connect'
@@ -140,13 +145,12 @@ export const useFleet = defineStore('fleet', () => {
 
   async function refresh(): Promise<void> {
     try {
-      const [rawVms, rawSnapshots] = await Promise.all([api.listVms(), api.listSnapshots()])
+      const rawVms = await api.listVms()
       // Only mf- fleet VMs are operable; base/OCI images can't be controlled, and
       // mf-golden is the read-only clone template, not a work VM.
       vms.value = rawVms
         .filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
         .map(smooth)
-      snapshots.value = rawSnapshots
       error.value = null
       loaded.value = true
       pending.value = pending.value.filter(
@@ -154,6 +158,17 @@ export const useFleet = defineStore('fleet', () => {
       )
     } catch (e) {
       error.value = String(e)
+      return
+    }
+
+    // Snapshots are best-effort: a transient /snapshots failure must not blank the
+    // fleet list that just loaded successfully above (nor set `error`, which the
+    // sidebar reads as an overall connectivity problem). Keep the last-known
+    // snapshots rather than clearing them on a miss.
+    try {
+      snapshots.value = await api.listSnapshots()
+    } catch {
+      // ignored — see above
     }
   }
 
