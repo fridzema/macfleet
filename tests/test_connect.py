@@ -537,3 +537,14 @@ def test_metrics_raises_when_exec_fails(tmp_path):
                   run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
     with pytest.raises(RuntimeError, match="metrics unavailable"):
         fleet.metrics("web")
+
+
+def test_activity_recent_delegates(tmp_path):
+    from macfleet.activity import Activity
+    from macfleet.leases import Leases
+    act = Activity(str(tmp_path / "a.jsonl"), clock=lambda: 5.0)
+    act.record("claude-code", "created", "web")
+    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), activity=act)
+    r = fleet.activity_recent()
+    assert r[0]["who"] == "claude-code" and r[0]["action"] == "created"

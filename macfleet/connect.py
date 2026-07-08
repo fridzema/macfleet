@@ -12,6 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from macfleet.activity import Activity, default_activity_path
 from macfleet.leases import Leases, default_state_path
 from macfleet.vm import Runner, Tart, VmInfo, _run, _run_nocheck, fullname, shortname
 
@@ -94,13 +95,15 @@ class Fleet:
                  spawn: Callable[[list[str]], None] = _spawn,
                  run_nocheck: Runner = _run_nocheck,
                  leases: Leases | None = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time,
+                 activity: Activity | None = None) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
         self._run_nocheck = run_nocheck
         self._leases = leases or Leases(default_state_path())
         self._clock = clock
+        self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
 
     def _state(self, full: str) -> str:
@@ -328,3 +331,6 @@ class Fleet:
                     mem_used_mb = int(val * 1024) if m.group(2) == "G" else int(val)
         total = self._res_cache.get(fullname(name), {}).get("memory_mb") or self.resources(name)["memory_mb"]
         return {"cpu_pct": cpu_pct, "mem_used_mb": mem_used_mb, "mem_total_mb": total}
+
+    def activity_recent(self, limit: int = 20) -> list[dict]:
+        return self.activity.recent(limit)
