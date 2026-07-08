@@ -415,7 +415,6 @@ describe('fleet store — create (options -> api args)', () => {
       ttl: undefined,
       cpu: 2,
       memory: 4096,
-      disk: 40,
     })
   })
 
@@ -432,7 +431,6 @@ describe('fleet store — create (options -> api args)', () => {
       ttl: 600,
       cpu: 4,
       memory: 8192,
-      disk: 50,
     })
     expect(s.leases.web).toBe(600)
   })
@@ -451,7 +449,6 @@ describe('fleet store — create (options -> api args)', () => {
       ttl: undefined,
       cpu: 8,
       memory: 16384,
-      disk: 80,
     })
     expect(useToasts().toasts.value.some((t) => t.msg === 'Cloning from golden…')).toBe(true)
   })
@@ -534,14 +531,26 @@ describe('fleet store — create (options -> api args)', () => {
     expect(s.error).toContain('409')
   })
 
-  it('newFromSnapshot sets createOptions.source to the snapshot id and creates', async () => {
-    const create = vi.spyOn(api, 'create').mockResolvedValue({})
+  it('newFromSnapshot sets createOptions.source to the snapshot id while creating, then resets it to golden on success', async () => {
+    let release = () => {}
+    const create = vi.spyOn(api, 'create').mockImplementation(
+      () =>
+        new Promise((r) => {
+          release = () => r({})
+        }),
+    )
     const s = useFleet()
-    await s.newFromSnapshot({ id: 'web-golden', vm: 'web', label: 'golden', size: 10 })
+    const p = s.newFromSnapshot({ id: 'web-golden', vm: 'web', label: 'golden', size: 10 })
+    // source flips to the snapshot id synchronously, before the create call resolves
     expect(s.createOptions.source).toBe('web-golden')
     const [name, opts] = create.mock.calls.at(-1) as [string, unknown]
     expect(name).toMatch(/^golden-[0-9a-f]{3}$/)
     expect(opts).toMatchObject({ from_snapshot: 'web-golden' })
+    release()
+    await p
+    // Not sticky: the next plain "Spin up" must clone golden again, not silently
+    // re-clone from this snapshot.
+    expect(s.createOptions.source).toBe('golden')
   })
 })
 
