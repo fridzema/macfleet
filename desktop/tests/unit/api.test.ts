@@ -74,10 +74,11 @@ describe('api', () => {
   })
 
   it('listSnapshots GETs /snapshots', async () => {
-    const f = mockFetch(200, [{ id: 'mf-a-golden', vm: 'mf-a', label: 'golden', size: '10G' }])
+    const f = mockFetch(200, [{ id: 'mf-a-golden', vm: 'mf-a', label: 'golden', size: 10.5 }])
     const res = await api.listSnapshots()
     expect(f).toHaveBeenCalledWith(`${API_BASE}/snapshots`, undefined)
     expect(res[0].id).toBe('mf-a-golden')
+    expect(res[0].size).toBe(10.5)
   })
 
   it('deleteSnapshot DELETEs /snapshots/{id}', async () => {

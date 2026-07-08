@@ -13,7 +13,7 @@ export interface Snapshot {
   id: string
   vm: string
   label: string
-  size: string
+  size: number
 }
 
 export interface Resources {
