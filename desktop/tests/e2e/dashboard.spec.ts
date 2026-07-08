@@ -1,11 +1,10 @@
 import { expect, test } from '@playwright/test'
+import { mockApi } from './mock-api'
 
 test('sidebar lists mocked VMs and selecting shows detail', async ({ page }) => {
-  await page.route('**/vms', (route) =>
-    route.fulfill({ json: [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }] }),
-  )
-  await page.route('**/vms/*/screenshot', (route) => route.fulfill({ json: { png_b64: 'QUJD' } }))
-  await page.route('**/vms/*/logs**', (route) => route.fulfill({ json: { lines: 'ok' } }))
+  await mockApi(page, {
+    vms: [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }],
+  })
 
   await page.goto('/')
   const row = page.getByTestId('vm-row')
