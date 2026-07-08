@@ -116,6 +116,28 @@ export const useFleet = defineStore('fleet', () => {
     }
   }
 
+  // The server 409s if the VM is running (resources can only change while stopped) —
+  // surfaced as a specific toast rather than the generic mutation-failed copy, so the
+  // user knows exactly what to do. On success, re-fetch just the resources cache
+  // (not a full `refresh()` — resources aren't part of the polled `/vms` list).
+  async function setResources(
+    name: string,
+    patch: { cpu?: number; memory?: number; disk_size?: number; display?: string },
+  ): Promise<void> {
+    try {
+      await api.setResources(name, patch)
+      await fetchResources(name)
+    } catch (e) {
+      error.value = String(e)
+      toast(
+        String(e).includes('409')
+          ? 'Stop the VM to change resources'
+          : `Failed to update resources for ${name}`,
+        '⚠',
+      )
+    }
+  }
+
   async function refresh(): Promise<void> {
     try {
       const [rawVms, rawSnapshots] = await Promise.all([api.listVms(), api.listSnapshots()])
@@ -288,6 +310,7 @@ export const useFleet = defineStore('fleet', () => {
     refresh,
     fetchHost,
     fetchResources,
+    setResources,
     up,
     down,
     nuke,
