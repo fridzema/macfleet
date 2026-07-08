@@ -1,10 +1,272 @@
 <script setup lang="ts">
-// Placeholder — real screenshot stream + click/type controls land in Task 8.
-defineProps<{ name: string }>()
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useToasts } from '../../composables/useToasts'
+import { api } from '../../shared/api'
+import { useFleet } from '../../stores/fleet'
+
+const props = defineProps<{ name: string }>()
+const store = useFleet()
+const { add: toast } = useToasts()
+
+const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
+
+// The tart-reported raw state — `running`/`stopped` today, with `booting`/`suspended`/
+// `error` carried straight through should the backend ever report them (see
+// FleetSidebar's `rowStatus` comment) — folded together with the optimistic `creating`
+// state (a `store.pending` entry that hasn't landed as `running` yet), same as the
+// sidebar row.
+const vm = computed(() => store.vms.find((v) => short(v.name) === props.name))
+const rawState = computed(() => {
+  if (store.pending.includes(props.name) && vm.value?.state !== 'running') return 'creating'
+  return vm.value?.state ?? 'stopped'
+})
+
+// Gate polling on the tart-reported state, which is stable — NOT on the health flag,
+// which flaps under load (the guest's health check competes with screenshots on the
+// guest) and would otherwise blank the frame on every flap.
+const active = computed(() => rawState.value === 'running')
+
+const shot = ref<string | null>(null)
+const paused = ref(false)
+const typed = ref('')
+const lastTyped = ref('')
+const showTyped = ref(false)
+let timer: ReturnType<typeof setInterval> | null = null
+let typedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function poll() {
+  if (paused.value || !active.value) return
+  try {
+    const { png_b64 } = await api.screenshot(props.name)
+    shot.value = `data:image/png;base64,${png_b64}`
+  } catch {
+    // Transient failure (guest still settling, screenshot busy, etc.) — keep the last
+    // good frame rather than blanking the screen on every miss.
+  }
+}
+
+function restart() {
+  if (timer) clearInterval(timer)
+  timer = null
+  if (!active.value) {
+    shot.value = null
+    return
+  }
+  poll()
+  // 1s balances a live feel against the ~2-3MB PNG per frame. Gated on state + pause.
+  timer = setInterval(poll, 1000)
+}
+
+// Fresh VM selected: drop the old frame immediately. State toggles (stable) just
+// start/stop without a blanking flash.
+watch(
+  () => props.name,
+  () => {
+    shot.value = null
+    restart()
+  },
+  { immediate: true },
+)
+watch(active, restart)
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  if (typedTimer) clearTimeout(typedTimer)
+})
+
+async function onImgClick(ev: MouseEvent) {
+  const el = ev.currentTarget as HTMLImageElement
+  const rect = el.getBoundingClientRect()
+  const x = Math.round(((ev.clientX - rect.left) * el.naturalWidth) / rect.width)
+  const y = Math.round(((ev.clientY - rect.top) * el.naturalHeight) / rect.height)
+  try {
+    await api.click(props.name, x, y)
+    toast(`click → ${x}, ${y}`, '☉')
+  } catch {
+    toast('Click failed', '⚠')
+  }
+}
+
+async function sendType() {
+  const text = typed.value.trim()
+  if (!active.value || !text) return
+  try {
+    await api.typeText(props.name, text)
+    typed.value = ''
+    lastTyped.value = text
+    showTyped.value = true
+    if (typedTimer) clearTimeout(typedTimer)
+    typedTimer = setTimeout(() => {
+      showTyped.value = false
+    }, 2200)
+    toast('Sent keystrokes', '⌨')
+  } catch {
+    toast('Failed to send keystrokes', '⚠')
+  }
+}
+
+function togglePause(): void {
+  paused.value = !paused.value
+}
+
+const frameEl = ref<HTMLElement | null>(null)
+async function fullscreen(): Promise<void> {
+  const el = frameEl.value
+  if (!el?.requestFullscreen) {
+    toast('Fullscreen not available', '⛶')
+    return
+  }
+  try {
+    await el.requestFullscreen()
+  } catch {
+    toast('Fullscreen failed', '⛶')
+  }
+}
+
+// Comp state→message map (design source lines 682–689). `resumable` states surface a
+// Resume action (`store.resume`); `spin` states show the loading ring.
+const OVERLAY: Record<string, { msg: string; sub: string; resumable: boolean; spin: boolean }> = {
+  booting: {
+    msg: 'Booting — waiting for guest',
+    sub: 'The guest agent will connect once macOS finishes booting.',
+    resumable: false,
+    spin: true,
+  },
+  creating: {
+    msg: 'Creating VM…',
+    sub: 'Cloning from source. This takes a couple of seconds.',
+    resumable: false,
+    spin: true,
+  },
+  stopped: {
+    msg: 'Stopped',
+    sub: 'This VM is powered off. Resume it to see the screen.',
+    resumable: true,
+    spin: false,
+  },
+  suspended: {
+    msg: 'Suspended',
+    sub: 'State is frozen on disk. Resume to continue where you left off (~2s).',
+    resumable: true,
+    spin: false,
+  },
+  error: {
+    msg: 'Unhealthy — control disabled',
+    sub: 'The guest failed a healthcheck. Check the logs, then restart or delete.',
+    resumable: false,
+    spin: false,
+  },
+}
+const overlay = computed(
+  () =>
+    OVERLAY[rawState.value] ?? {
+      msg: 'Stopped',
+      sub: 'This VM is powered off. Resume it to see the screen.',
+      resumable: true,
+      spin: false,
+    },
+)
 </script>
 
 <template>
-  <div class="grid h-full place-items-center text-sm text-[var(--text-faint)]">
-    Screen — coming in Task 8
+  <div class="mx-auto max-w-[920px]">
+    <div
+      ref="frameEl"
+      data-test="screen-frame"
+      class="relative aspect-[16/10] w-full overflow-hidden rounded-[14px] border border-[var(--border-strong)] shadow-[var(--shadow)]"
+      :class="active ? 'cursor-crosshair' : 'cursor-default'"
+    >
+      <template v-if="active">
+        <img
+          v-if="shot"
+          data-test="shot"
+          :src="shot"
+          draggable="false"
+          class="absolute inset-0 h-full w-full bg-[var(--bg-elev)] object-contain select-none"
+          @click="onImgClick"
+        />
+        <div
+          v-else
+          class="absolute inset-0 flex items-center justify-center bg-[var(--bg-elev)] text-sm text-[var(--text-faint)]"
+        >
+          Connecting…
+        </div>
+        <div
+          v-if="showTyped"
+          class="absolute top-[44%] left-1/2 -translate-x-1/2 animate-[mfin_.12s_ease] rounded-[9px] border border-white/20 bg-black/70 px-3.5 py-2 font-mono text-[13px] text-white"
+        >
+          ⌨ {{ lastTyped }}
+        </div>
+      </template>
+      <div
+        v-else
+        data-test="overlay"
+        class="absolute inset-0 flex flex-col items-center justify-center gap-3.5 bg-[var(--bg-elev)] text-[var(--text-dim)]"
+      >
+        <div
+          v-if="overlay.spin"
+          class="h-[30px] w-[30px] rounded-full border-[3px] border-[var(--border-strong)] border-t-[var(--amber)] animate-[mfspin_.8s_linear_infinite]"
+        />
+        <div data-test="overlay-msg" class="text-sm font-[550] text-[var(--text)]">
+          {{ overlay.msg }}
+        </div>
+        <div
+          data-test="overlay-sub"
+          class="max-w-[320px] text-center text-[12.5px] text-[var(--text-faint)]"
+        >
+          {{ overlay.sub }}
+        </div>
+        <button
+          v-if="overlay.resumable"
+          type="button"
+          data-test="resume-btn"
+          class="flex h-[30px] items-center gap-[5px] rounded-lg bg-[var(--emerald)] px-[13px] text-xs font-semibold text-[#04130d]"
+          @click="store.resume(name)"
+        >
+          ▶ Resume
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-3 flex items-center gap-[9px]">
+      <input
+        v-model="typed"
+        :disabled="!active"
+        data-test="type-input"
+        placeholder="Type into VM — text is sent as keystrokes…"
+        class="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-elev)] px-3 font-mono text-[12.5px] text-[var(--text)] outline-none disabled:opacity-50"
+        @keydown.enter="sendType"
+      />
+      <button
+        type="button"
+        :disabled="!active"
+        data-test="send-btn"
+        class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)] disabled:opacity-50"
+        @click="sendType"
+      >
+        ⏎ Send
+      </button>
+      <button
+        type="button"
+        title="Pause stream"
+        data-test="pause-btn"
+        class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)]"
+        @click="togglePause"
+      >
+        {{ paused ? '▶ Resume' : '⏸ Pause' }}
+      </button>
+      <button
+        type="button"
+        title="Fullscreen"
+        data-test="fullscreen-btn"
+        class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)]"
+        @click="fullscreen"
+      >
+        ⛶
+      </button>
+    </div>
+    <div class="mt-[9px] text-[11.5px] text-[var(--text-faint)]">
+      Click anywhere on the screen to move &amp; click the VM cursor. No SSH keys needed —
+      control runs through the guest agent.
+    </div>
   </div>
 </template>
