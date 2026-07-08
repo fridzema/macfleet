@@ -165,6 +165,72 @@ def test_create_from_snapshot(tmp_path):
     assert ["tart", "clone", "mfsnap-base-clean", "mf-web"] in calls
 
 
+def test_create_with_preset_sets_resources_before_run(tmp_path):
+    events = []
+
+    def run(argv):
+        events.append(("run", argv))
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def spawn(argv):
+        events.append(("spawn", argv))
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawn,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet.create("web", cpu=4, memory=8192, disk=100)  # 100 > cloned base's 80GB -> grows
+    set_idx = events.index(
+        ("run", ["tart", "set", "mf-web", "--cpu", "4", "--memory", "8192", "--disk-size", "100"])
+    )
+    run_idx = events.index(("spawn", ["tart", "run", "mf-web", "--no-graphics"]))
+    assert set_idx < run_idx
+
+
+def test_create_without_preset_skips_set(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path)
+    fleet.create("web")
+    assert not any(c[:2] == ["tart", "set"] for c in calls)
+
+
+def test_create_disk_shrink_is_guarded_grow_only(tmp_path):
+    # tart's `--disk-size` is grow-only: shrinking raises RuntimeError. mf-golden clones
+    # at ~80GB, so a preset requesting a smaller disk (e.g. Light's 40GB) must never
+    # attempt a shrink — only apply --disk-size when it exceeds the current disk. This
+    # fake raises on ANY `--disk-size`, modeling tart's shrink failure — since the guard
+    # must skip the call entirely for a smaller disk, that raise must never be reached.
+    def run_would_raise_on_shrink(argv):
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
+        if argv[:2] == ["tart", "set"] and "--disk-size" in argv:
+            raise RuntimeError("tart set --disk-size: cannot shrink disk")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(tart=Tart(run=run_would_raise_on_shrink), run=run_would_raise_on_shrink,
+                  spawn=lambda a: None, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet.create("web", disk=40)  # smaller than current 80GB -> must not shrink, must not raise
+
+    # Growing still emits --disk-size as before.
+    events = []
+
+    def run_grows(argv):
+        events.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet2 = Fleet(tart=Tart(run=run_grows), run=run_grows, spawn=lambda a: None,
+                   leases=Leases(str(tmp_path / "s2.json"), clock=lambda: 0.0))
+    fleet2.create("web2", disk=100)  # larger than current 80GB -> grows normally
+    assert ["tart", "set", "mf-web2", "--disk-size", "100"] in events
+
+
 def test_up_delegates_to_create(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path)
     fleet.up("web")
@@ -327,6 +393,19 @@ def test_connection_info(tmp_path):
     assert info["ssh"] == "ssh admin@192.168.64.9"
     assert info["guest_server"] == "http://192.168.64.9:8000"
     assert info["exec"] is True
+
+
+def test_host_info_parses_sysctl_and_hostname(tmp_path):
+    def run(argv):
+        # 17179869184 bytes == 16 GiB exactly — decimal (1e9) would misreport this as 17.
+        if argv == ["sysctl", "-n", "hw.memsize", "hw.ncpu"]:
+            return subprocess.CompletedProcess(argv, 0, "17179869184\n8\n", "")
+        if argv == ["hostname"]:
+            return subprocess.CompletedProcess(argv, 0, "mac-studio.local\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    assert fleet.host_info() == {"total_mem_gb": 16, "cpu_count": 8, "name": "mac-studio.local"}
 
 
 def test_exec_returns_stdout_and_exit_code(tmp_path):

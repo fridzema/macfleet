@@ -33,6 +33,9 @@ class CreateRequest(BaseModel):
     name: str
     from_snapshot: str | None = None
     ttl: float | None = None
+    cpu: int | None = None
+    memory: int | None = None
+    disk: int | None = None
 
 
 class LabelRequest(BaseModel):
@@ -97,8 +100,13 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAP
 
     @api.post("/vms")
     def create(body: CreateRequest) -> dict:
-        fleet.create(body.name, from_snapshot=body.from_snapshot, ttl=body.ttl)
+        fleet.create(body.name, from_snapshot=body.from_snapshot, ttl=body.ttl,
+                     cpu=body.cpu, memory=body.memory, disk=body.disk)
         return {"ok": True}
+
+    @api.get("/host")
+    def host() -> dict:
+        return fleet.host_info()
 
     @api.post("/vms/{name}/suspend")
     def suspend(name: str) -> dict:

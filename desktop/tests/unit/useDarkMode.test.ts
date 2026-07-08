@@ -14,9 +14,16 @@ describe('useDarkMode', () => {
     expect(result).toHaveProperty('toggleDark')
   })
 
-  it('calls useDark with disableTransition: false', () => {
+  it('calls useDark with data-theme attribute config on the html element, defaulting to dark', () => {
     useDarkMode()
-    expect(useDark).toHaveBeenCalledWith({ disableTransition: false })
+    expect(useDark).toHaveBeenCalledWith({
+      selector: 'html',
+      attribute: 'data-theme',
+      valueDark: 'dark',
+      valueLight: 'light',
+      initialValue: 'dark',
+      disableTransition: false,
+    })
   })
 
   it('passes isDark ref to useToggle', () => {
