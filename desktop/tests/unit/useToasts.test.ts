@@ -7,6 +7,19 @@ beforeEach(() => {
 })
 
 describe('useToasts', () => {
+  // Must run before any test/describe below overrides the scheduler (via
+  // `setToastScheduler`) — this is the only place the pristine module-level default
+  // (a real `setTimeout`) is ever exercised.
+  it('the real default scheduler (no override, no explicit arg) dismisses via a real setTimeout', () => {
+    vi.useFakeTimers()
+    const { toasts, add } = useToasts()
+    add('hi')
+    expect(toasts.value).toHaveLength(1)
+    vi.advanceTimersByTime(2600)
+    expect(toasts.value).toHaveLength(0)
+    vi.useRealTimers()
+  })
+
   it('add() appends a toast with a default icon', () => {
     const { toasts, add } = useToasts(vi.fn())
     add('Snapshot saved')

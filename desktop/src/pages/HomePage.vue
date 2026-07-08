@@ -35,7 +35,7 @@ const emptySub = computed(() =>
 
 <template>
   <div class="flex h-full">
-    <FleetSidebar :selected="ui.selectedVm" @select="ui.selectVm($event)" />
+    <FleetSidebar />
     <main class="flex min-w-0 flex-1 flex-col">
       <VmDetail
         v-if="selectedVm"

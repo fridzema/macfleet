@@ -6,10 +6,6 @@ import { useUi } from '../stores/ui'
 
 const store = useFleet()
 const ui = useUi()
-// `selected` stays for HomePage's own (pre-migration) selection state — see the
-// `select` emit below. Row highlighting itself now reads `ui.selectedVm`.
-defineProps<{ selected: string | null }>()
-const emit = defineEmits<(e: 'select', name: string) => void>()
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
@@ -29,6 +25,12 @@ const STATUS_META: Record<string, { label: string; dotClass: string }> = {
   error: { label: 'Unhealthy', dotClass: 'bg-[var(--red)]' },
 }
 function meta(status: string): { label: string; dotClass: string } {
+  // `rowStatus` below only ever returns a key already in STATUS_META (it funnels
+  // everything but 'creating'/'suspended'/'error' through `vmStatus`, which is itself
+  // constrained to running/booting/stopped) — this fallback can't be reached through it,
+  // but stays as a genuine safety net against a `status` string from a future rowStatus
+  // change or direct call falling through silently.
+  /* istanbul ignore next */
   return STATUS_META[status] ?? { label: status, dotClass: 'bg-[var(--idle)]' }
 }
 
@@ -109,10 +111,6 @@ function isActive(name: string, status: string): boolean {
 
 function selectRow(name: string): void {
   ui.selectVm(name)
-  // HomePage still owns its own `selected` ref and drives VmDetail/LogPane off it (it
-  // migrates to `ui.selectedVm` directly in a later task) — keep emitting so that
-  // continues to work.
-  emit('select', name)
 }
 
 // Poll the fleet on an interval: this both survives the sidecar cold-start race and
@@ -127,7 +125,12 @@ onMounted(() => {
   ttlTimer = setInterval(store.tickTtl, 1000)
 })
 onUnmounted(() => {
+  // Both timers are unconditionally set in onMounted above, which always runs before a
+  // component can unmount — the null-guard only exists to satisfy the `| null` type, not
+  // because either is ever actually null here.
+  /* istanbul ignore else */
   if (refreshTimer) clearInterval(refreshTimer)
+  /* istanbul ignore else */
   if (ttlTimer) clearInterval(ttlTimer)
 })
 </script>

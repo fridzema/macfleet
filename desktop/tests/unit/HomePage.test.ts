@@ -76,6 +76,21 @@ describe('HomePage — selection', () => {
     wrapper.unmount()
   })
 
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const wrapper = mount(HomePage)
+    const store = useFleet()
+    const ui = useUi()
+    await flushPromises()
+    // store.refresh()'s own filter only keeps mf- names — set store.vms directly to
+    // exercise the defensive passthrough for a name that never goes through it.
+    store.vms = [{ name: 'standalone', state: 'running', source: 'local', healthy: true }]
+    ui.selectVm('standalone')
+    await flushPromises()
+    expect(wrapper.find('[data-test="rename-display"]').text()).toBe('standalone')
+    wrapper.unmount()
+  })
+
   it('clears the selection once the selected VM disappears from the fleet', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([
       { name: 'mf-web', state: 'running', source: 'local', healthy: true },
