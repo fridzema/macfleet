@@ -2,6 +2,7 @@
 import { RouterView } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import CommandPalette from '../components/CommandPalette.vue'
+import Toasts from '../components/Toasts.vue'
 </script>
 
 <template>
@@ -17,5 +18,6 @@ import CommandPalette from '../components/CommandPalette.vue'
       </RouterView>
     </main>
     <CommandPalette />
+    <Toasts />
   </div>
 </template>

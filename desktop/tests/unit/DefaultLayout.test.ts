@@ -6,6 +6,7 @@ import DefaultLayout from '../../src/layouts/DefaultLayout.vue'
 const stubs = {
   AppHeader: { template: '<header data-testid="app-header" />' },
   CommandPalette: { template: '<div data-testid="command-palette" />' },
+  Toasts: { template: '<div data-testid="toasts" />' },
   RouterView: defineComponent({
     setup(_, { slots }) {
       const StubComponent = defineComponent({
@@ -31,5 +32,10 @@ describe('DefaultLayout', () => {
   it('mounts the command palette at the app root', () => {
     const wrapper = mount(DefaultLayout, { global: { stubs } })
     expect(wrapper.find('[data-testid="command-palette"]').exists()).toBe(true)
+  })
+
+  it('mounts the toast layer at the app root', () => {
+    const wrapper = mount(DefaultLayout, { global: { stubs } })
+    expect(wrapper.find('[data-testid="toasts"]').exists()).toBe(true)
   })
 })
