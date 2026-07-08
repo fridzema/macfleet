@@ -105,11 +105,15 @@ describe('VmDetail — actions', () => {
 })
 
 describe('VmDetail — tab bar', () => {
-  it('defaults to the Screen tab and switches store.selectedTab, rendering the matching placeholder', async () => {
+  it('defaults to the Screen tab and switches store.selectedTab, rendering each tab', async () => {
     const store = useFleet()
+    // ScreenTab (Task 8) reads live VM state from the store itself rather than via
+    // props — seed it to match `running` so its frame renders instead of falling back
+    // to the "not found" overlay.
+    store.vms = [{ ...running, name: 'mf-web', source: 'local' }]
     const wrapper = mount(VmDetail, { props: running })
     expect(store.selectedTab).toBe('screen')
-    expect(wrapper.text()).toContain('Screen — coming in Task 8')
+    expect(wrapper.find('[data-test="screen-frame"]').exists()).toBe(true)
 
     await wrapper.find('[data-test="tab-terminal"]').trigger('click')
     expect(store.selectedTab).toBe('terminal')
