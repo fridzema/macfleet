@@ -23,10 +23,17 @@ beforeEach(() => {
     display: '1920x1080',
     state: 'running',
   })
-  // The tabbed detail renders the real LogsTab/ScreenTab, so switching tabs would
-  // otherwise issue a real fetch to the sidecar — mock both to keep unit tests fake-only.
+  // The tabbed detail renders the real LogsTab/ScreenTab/ConnectTab, so switching tabs
+  // would otherwise issue a real fetch to the sidecar — mock all to keep unit tests fake-only.
   vi.spyOn(api, 'logs').mockResolvedValue({ lines: '' })
   vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: '' })
+  vi.spyOn(api, 'connection').mockResolvedValue({
+    ip: '192.168.64.12',
+    ssh: 'ssh admin@192.168.64.12',
+    vnc: 'open vnc://192.168.64.12',
+    guest_server: 'http://192.168.64.12:8000',
+    exec: true,
+  })
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -134,7 +141,9 @@ describe('VmDetail — tab bar', () => {
 
     await wrapper.find('[data-test="tab-connect"]').trigger('click')
     expect(store.selectedTab).toBe('connect')
-    expect(wrapper.text()).toContain('Connect — coming in Task 12')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Everything you need to reach')
+    expect(wrapper.find('[data-test="connect-item"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })
