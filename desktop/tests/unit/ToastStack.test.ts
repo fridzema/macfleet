@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Toasts from '../../src/components/Toasts.vue'
+import ToastStack from '../../src/components/ToastStack.vue'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
@@ -14,9 +14,9 @@ beforeEach(() => {
   useToasts().toasts.value = []
 })
 
-describe('Toasts', () => {
+describe('ToastStack', () => {
   it('renders nothing when there are no toasts', () => {
-    const wrapper = mount(Toasts)
+    const wrapper = mount(ToastStack)
     expect(wrapper.findAll('[data-test="toast"]')).toHaveLength(0)
   })
 
@@ -25,7 +25,7 @@ describe('Toasts', () => {
       { id: 1, msg: 'Suspended', icon: '⏸' },
       { id: 2, msg: 'Copied to clipboard', icon: '✓' },
     ]
-    const wrapper = mount(Toasts)
+    const wrapper = mount(ToastStack)
     const items = wrapper.findAll('[data-test="toast"]')
     expect(items).toHaveLength(2)
     expect(items[0]?.text()).toContain('⏸')
@@ -35,7 +35,7 @@ describe('Toasts', () => {
   })
 
   it('shows a toast added after mount, reactively', async () => {
-    const wrapper = mount(Toasts)
+    const wrapper = mount(ToastStack)
     useToasts().add('Creating vm-1…', '⚡')
     await wrapper.vm.$nextTick()
     const items = wrapper.findAll('[data-test="toast"]')
@@ -44,12 +44,12 @@ describe('Toasts', () => {
   })
 
   it('is mounted against the shared composable, so a store action toast shows up', async () => {
-    // Mirrors how the app really wires this: Toasts.vue renders the same module-level
+    // Mirrors how the app really wires this: ToastStack.vue renders the same module-level
     // `useToasts()` list the fleet store pushes to — no mocking of useToasts itself.
     vi.spyOn(api, 'snapshot').mockResolvedValue({})
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
-    const wrapper = mount(Toasts)
+    const wrapper = mount(ToastStack)
     const fleet = useFleet()
     void fleet.snapshotVM('mf-web', 'golden')
     await wrapper.vm.$nextTick()
