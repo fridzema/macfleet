@@ -68,6 +68,20 @@ watch(
 )
 const resources = computed(() => store.resources[props.name])
 
+// Defense-in-depth against a wrong-VM rename/delete. `ui.renaming`/`ui.confirmDeleteVm`
+// are global flags: `ui.selectVm` resets them on every selection change, and HomePage
+// keys this component to `selectedVm` so it remounts fresh — but if this instance is
+// ever reused for a different VM via a bare `name` swap, an armed confirm on the old VM
+// must not carry over to the new one. NOT immediate: a palette arm-then-mount (which
+// sets the flag *before* this instance exists) must survive its first render.
+watch(
+  () => props.name,
+  () => {
+    ui.cancelRename()
+    ui.cancelDeleteVm()
+  },
+)
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'screen', label: 'Screen' },
   { id: 'terminal', label: 'Terminal' },

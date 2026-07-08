@@ -39,6 +39,7 @@ const emptySub = computed(() =>
     <main class="flex min-w-0 flex-1 flex-col">
       <VmDetail
         v-if="selectedVm"
+        :key="ui.selectedVm!"
         :name="ui.selectedVm!"
         :state="selectedVm.state"
         :healthy="selectedVm.healthy"

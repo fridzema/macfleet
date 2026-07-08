@@ -38,17 +38,26 @@ export const useUi = defineStore('ui', () => {
   // suspend/resume, duplicate, rename, resize, connect, delete). Single source of truth
   // for selection going forward (HomePage's local ref migrates here in a later task).
   const selectedVm = ref<string | null>(null)
-  function selectVm(name: string | null): void {
-    selectedVm.value = name
-  }
 
   // Inline rename + two-step delete confirm, mirroring the comp's `startRename` (line 577)
   // and `askDelete` (552/579) — no browser dialogs (this is a Tauri/WKWebView app). The
   // palette only *arms* these; the actual inline input / confirm-button render + execute
-  // in the VM-detail component (later task), same as its existing `armNuke` pattern.
+  // in the VM-detail component, same as its existing `armNuke` pattern.
   const renaming = ref(false)
   const renameValue = ref('')
   const confirmDeleteVm = ref(false)
+
+  function selectVm(name: string | null): void {
+    selectedVm.value = name
+    // These flags are per-VM-scoped but stored globally, so they MUST reset on every
+    // selection change — otherwise an armed delete or open rename on the previously
+    // selected VM would carry over and act on the newly selected one (a wrong-VM nuke
+    // or rename, both irreversible). This guards every call site: sidebar click, palette
+    // "Switch to X", and startRename/askDeleteVm (which select first, then re-arm).
+    renaming.value = false
+    renameValue.value = ''
+    confirmDeleteVm.value = false
+  }
 
   function startRename(name: string): void {
     selectVm(name)

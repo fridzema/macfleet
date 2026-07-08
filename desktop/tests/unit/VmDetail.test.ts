@@ -207,3 +207,39 @@ describe('VmDetail — two-step delete', () => {
     wrapper.unmount()
   })
 })
+
+describe('VmDetail — wrong-VM guard on prop change', () => {
+  it('changing the name prop clears an armed delete confirm so Yes cannot nuke the new VM', async () => {
+    const store = useFleet()
+    const nuke = vi.spyOn(store, 'nuke').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    // Arm delete on "web".
+    ui.askDeleteVm('web')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="delete-yes"]').exists()).toBe(true)
+    // Now the instance is shown for a different VM: the stale confirm must vanish.
+    await wrapper.setProps({ name: 'db', state: 'running', healthy: true })
+    expect(ui.confirmDeleteVm).toBe(false)
+    expect(wrapper.find('[data-test="delete-yes"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="delete-btn"]').exists()).toBe(true)
+    expect(nuke).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('changing the name prop closes an open rename input so Enter cannot rename the new VM', async () => {
+    const store = useFleet()
+    const rename = vi.spyOn(store, 'rename').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.startRename('web')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="rename-input"]').exists()).toBe(true)
+    await wrapper.setProps({ name: 'db', state: 'running', healthy: true })
+    expect(ui.renaming).toBe(false)
+    expect(wrapper.find('[data-test="rename-input"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="rename-display"]').text()).toBe('db')
+    expect(rename).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
