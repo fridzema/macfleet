@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -306,3 +307,24 @@ class Fleet:
     def exec(self, name: str, command: str) -> dict:
         proc = self._run_nocheck(["tart", "exec", fullname(name), "/bin/sh", "-lc", command])
         return {"stdout": proc.stdout, "exit_code": proc.returncode}
+
+    def metrics(self, name: str) -> dict:
+        proc = self._run_nocheck(
+            ["tart", "exec", fullname(name), "/bin/sh", "-lc",
+             "top -l1 -n0 | grep -E 'CPU usage|PhysMem'"])
+        if proc.returncode != 0:
+            raise RuntimeError(f"metrics unavailable: {proc.stderr.strip() or 'exec failed'}")
+        cpu_pct = 0.0
+        mem_used_mb = 0
+        for line in proc.stdout.splitlines():
+            if "CPU usage" in line:
+                m = re.search(r"([\d.]+)%\s+idle", line)
+                if m:
+                    cpu_pct = round(100 - float(m.group(1)), 1)
+            elif "PhysMem" in line:
+                m = re.search(r"([\d.]+)([MG])\s+used", line)
+                if m:
+                    val = float(m.group(1))
+                    mem_used_mb = int(val * 1024) if m.group(2) == "G" else int(val)
+        total = self._res_cache.get(fullname(name), {}).get("memory_mb") or self.resources(name)["memory_mb"]
+        return {"cpu_pct": cpu_pct, "mem_used_mb": mem_used_mb, "mem_total_mb": total}
