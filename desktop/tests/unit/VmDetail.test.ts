@@ -1,70 +1,209 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import VmDetail from '../../src/components/VmDetail.vue'
+import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api } from '../../src/shared/api'
-
-beforeEach(() => setActivePinia(createPinia()))
-afterEach(() => vi.restoreAllMocks())
+import { useFleet } from '../../src/stores/fleet'
+import { useUi } from '../../src/stores/ui'
 
 const running = { name: 'web', state: 'running', healthy: true }
 const stopped = { name: 'web', state: 'stopped', healthy: false }
 
-describe('VmDetail', () => {
-  it('renders the polled screenshot as a data URI', async () => {
-    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+beforeEach(() => {
+  setActivePinia(createPinia())
+  // Toasts triggered by the fleet mutations below default to a real setTimeout —
+  // swap in a no-op so nothing dangles past a test.
+  setToastScheduler(() => {})
+  useToasts().toasts.value = []
+  vi.spyOn(api, 'resources').mockResolvedValue({
+    cpu: 4,
+    memory_mb: 8192,
+    disk_gb: 50,
+    display: '1920x1080',
+    state: 'running',
+  })
+})
+
+afterEach(() => vi.restoreAllMocks())
+
+describe('VmDetail — header', () => {
+  it('shows the running badge and fetched resource chips', async () => {
     const wrapper = mount(VmDetail, { props: running })
-    await vi.waitFor(() => {
-      const src = wrapper.find('[data-test="shot"]').attributes('src')
-      expect(src).toBe('data:image/png;base64,QUJD')
-    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="status-badge"]').text()).toBe('Running')
+    expect(wrapper.find('[data-test="chip-cpu"]').text()).toBe('4 vCPU')
+    expect(wrapper.find('[data-test="chip-ram"]').text()).toBe('8 GB')
+    expect(wrapper.find('[data-test="chip-disk"]').text()).toBe('50 GB')
     wrapper.unmount()
   })
 
-  it('does not poll a screenshot when the VM is not running', async () => {
-    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+  it('shows the stopped badge for a non-running, unhealthy VM', async () => {
     const wrapper = mount(VmDetail, { props: stopped })
-    await Promise.resolve()
-    expect(shot).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-test="shot"]').exists()).toBe(false)
+    await flushPromises()
+    expect(wrapper.find('[data-test="status-badge"]').text()).toBe('Stopped')
     wrapper.unmount()
   })
 
-  it('does not type into a VM that is not running', async () => {
-    const type = vi.spyOn(api, 'typeText').mockResolvedValue({})
+  it('re-fetches resources when the selected VM changes', async () => {
+    const resources = vi.spyOn(api, 'resources')
+    const wrapper = mount(VmDetail, { props: running })
+    await flushPromises()
+    expect(resources).toHaveBeenCalledWith('web')
+    await wrapper.setProps({ name: 'db', state: 'running', healthy: true })
+    await flushPromises()
+    expect(resources).toHaveBeenCalledWith('db')
+    wrapper.unmount()
+  })
+})
+
+describe('VmDetail — actions', () => {
+  it('Suspend calls store.suspend when running', async () => {
+    const store = useFleet()
+    const suspend = vi.spyOn(store, 'suspend').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    await wrapper.find('[data-test="suspend-resume-btn"]').trigger('click')
+    expect(suspend).toHaveBeenCalledWith('web')
+    wrapper.unmount()
+  })
+
+  it('shows Resume and calls store.resume when not running', async () => {
+    const store = useFleet()
+    const resume = vi.spyOn(store, 'resume').mockResolvedValue()
     const wrapper = mount(VmDetail, { props: stopped })
-    await wrapper.find('input').setValue('hello')
-    await wrapper.find('form').trigger('submit')
-    expect(type).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="suspend-resume-btn"]').text()).toContain('Resume')
+    await wrapper.find('[data-test="suspend-resume-btn"]').trigger('click')
+    expect(resume).toHaveBeenCalledWith('web')
     wrapper.unmount()
   })
 
-  it('surfaces a failed control action on err instead of rejecting', async () => {
-    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
-    vi.spyOn(api, 'typeText').mockRejectedValue(new Error('POST /vms/web/type -> 409'))
+  it('Snapshot calls store.snapshotVM with a default "<name>-snap" label', async () => {
+    const store = useFleet()
+    const snapshotVM = vi.spyOn(store, 'snapshotVM').mockResolvedValue()
     const wrapper = mount(VmDetail, { props: running })
-    await wrapper.find('input').setValue('hi')
-    await wrapper.find('form').trigger('submit')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('409'))
+    await wrapper.find('[data-test="snapshot-btn"]').trigger('click')
+    expect(snapshotVM).toHaveBeenCalledWith('web', 'web-snap')
     wrapper.unmount()
   })
 
-  it('maps an image click to pixel coords and calls api.click', async () => {
-    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
-    const click = vi.spyOn(api, 'click').mockResolvedValue({})
+  it('Duplicate calls store.duplicate', async () => {
+    const store = useFleet()
+    const duplicate = vi.spyOn(store, 'duplicate').mockResolvedValue()
     const wrapper = mount(VmDetail, { props: running })
-    await vi.waitFor(() => {
-      expect(wrapper.find('[data-test="shot"]').exists()).toBe(true)
-    })
-    const img = wrapper.find('[data-test="shot"]')
-    const el = img.element as HTMLImageElement
-    Object.defineProperty(el, 'getBoundingClientRect', {
-      value: () => ({ left: 0, top: 0, width: 100, height: 100 }),
-    })
-    Object.defineProperty(el, 'naturalWidth', { value: 200 })
-    Object.defineProperty(el, 'naturalHeight', { value: 200 })
-    await img.trigger('click', { clientX: 10, clientY: 20 })
-    expect(click).toHaveBeenCalledWith('web', 20, 40)
+    await wrapper.find('[data-test="duplicate-btn"]').trigger('click')
+    expect(duplicate).toHaveBeenCalledWith('web')
+    wrapper.unmount()
+  })
+
+  it('Connect switches store.selectedTab to "connect"', async () => {
+    const store = useFleet()
+    const wrapper = mount(VmDetail, { props: running })
+    await wrapper.find('[data-test="connect-btn"]').trigger('click')
+    expect(store.selectedTab).toBe('connect')
+    wrapper.unmount()
+  })
+})
+
+describe('VmDetail — tab bar', () => {
+  it('defaults to the Screen tab and switches store.selectedTab, rendering the matching placeholder', async () => {
+    const store = useFleet()
+    const wrapper = mount(VmDetail, { props: running })
+    expect(store.selectedTab).toBe('screen')
+    expect(wrapper.text()).toContain('Screen — coming in Task 8')
+
+    await wrapper.find('[data-test="tab-terminal"]').trigger('click')
+    expect(store.selectedTab).toBe('terminal')
+    expect(wrapper.text()).toContain('Terminal — coming in Task 9')
+
+    await wrapper.find('[data-test="tab-logs"]').trigger('click')
+    expect(store.selectedTab).toBe('logs')
+    expect(wrapper.text()).toContain('Logs — coming in Task 10')
+
+    await wrapper.find('[data-test="tab-resources"]').trigger('click')
+    expect(store.selectedTab).toBe('resources')
+    expect(wrapper.text()).toContain('Resources — coming in Task 11')
+
+    await wrapper.find('[data-test="tab-connect"]').trigger('click')
+    expect(store.selectedTab).toBe('connect')
+    expect(wrapper.text()).toContain('Connect — coming in Task 12')
+    wrapper.unmount()
+  })
+})
+
+describe('VmDetail — inline rename', () => {
+  it('clicking the name arms ui.renaming, prefilled with the current name', async () => {
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    await wrapper.find('[data-test="rename-display"]').trigger('click')
+    expect(ui.renaming).toBe(true)
+    expect(ui.renameValue).toBe('web')
+    wrapper.unmount()
+  })
+
+  it('Enter commits the renamed value via store.rename and closes the input', async () => {
+    const store = useFleet()
+    const rename = vi.spyOn(store, 'rename').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.startRename('web')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="rename-input"]').setValue('renamed vm')
+    await wrapper.find('[data-test="rename-input"]').trigger('keydown', { key: 'Enter' })
+    expect(rename).toHaveBeenCalledWith('web', 'renamed-vm')
+    expect(ui.renaming).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('Escape cancels without calling store.rename', async () => {
+    const store = useFleet()
+    const rename = vi.spyOn(store, 'rename').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.startRename('web')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="rename-input"]').setValue('ignored')
+    await wrapper.find('[data-test="rename-input"]').trigger('keydown', { key: 'Escape' })
+    expect(rename).not.toHaveBeenCalled()
+    expect(ui.renaming).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('VmDetail — two-step delete', () => {
+  it('clicking delete arms ui.confirmDeleteVm without deleting', async () => {
+    const store = useFleet()
+    const nuke = vi.spyOn(store, 'nuke').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    await wrapper.find('[data-test="delete-btn"]').trigger('click')
+    expect(ui.confirmDeleteVm).toBe(true)
+    expect(nuke).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('confirming with Yes calls store.nuke and clears the confirm flag', async () => {
+    const store = useFleet()
+    const nuke = vi.spyOn(store, 'nuke').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.askDeleteVm('web')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="delete-yes"]').trigger('click')
+    expect(nuke).toHaveBeenCalledWith('web')
+    expect(ui.confirmDeleteVm).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('cancelling with No clears the confirm flag without deleting', async () => {
+    const store = useFleet()
+    const nuke = vi.spyOn(store, 'nuke').mockResolvedValue()
+    const wrapper = mount(VmDetail, { props: running })
+    const ui = useUi()
+    ui.askDeleteVm('web')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="delete-no"]').trigger('click')
+    expect(nuke).not.toHaveBeenCalled()
+    expect(ui.confirmDeleteVm).toBe(false)
     wrapper.unmount()
   })
 })

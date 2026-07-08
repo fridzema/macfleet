@@ -1,186 +1,275 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { api, vmStatus } from '../shared/api'
-import { useFleet } from '../stores/fleet'
+import { type Component, computed, nextTick, ref, watch } from 'vue'
+import { vmStatus } from '../shared/api'
+import { type Tab, useFleet } from '../stores/fleet'
+import { useUi } from '../stores/ui'
+import ConnectTab from './vmtabs/ConnectTab.vue'
+import LogsTab from './vmtabs/LogsTab.vue'
+import ResourcesTab from './vmtabs/ResourcesTab.vue'
+import ScreenTab from './vmtabs/ScreenTab.vue'
+import TerminalTab from './vmtabs/TerminalTab.vue'
 
 const props = defineProps<{ name: string; state: string; healthy: boolean }>()
-const emit = defineEmits<(e: 'close') => void>()
 const store = useFleet()
+const ui = useUi()
 
-const shot = ref<string | null>(null)
-const paused = ref(false)
-const typed = ref('')
-const err = ref<string | null>(null)
-const armNuke = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
+// 'suspended'/'error' aren't states the current backend reports (see FleetSidebar's
+// `rowStatus` comment) but are carried straight through from `state`; everything else
+// goes through the shared `vmStatus` helper, same as the sidebar row.
+const status = computed(() => {
+  if (props.state === 'suspended' || props.state === 'error') return props.state
+  return vmStatus({ state: props.state, healthy: props.healthy })
+})
 
-// Gate polling on the tart-reported state, which is stable — NOT on `healthy`, which
-// flaps under load (the health check competes with screenshots on the guest) and would
-// otherwise blank the frame on every flap.
-const active = computed(() => props.state === 'running')
-const status = computed(() => vmStatus({ state: props.state, healthy: props.healthy }))
-const BADGE: Record<string, string> = {
-  running: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  booting: 'bg-amber-400/10 text-amber-600 dark:text-amber-400',
-  stopped: 'bg-zinc-500/10 text-zinc-500',
+// Comp `meta()` (design source line 492) plus the header's larger dot/badge treatment
+// (lines 662–666).
+const STATUS_META: Record<string, { label: string; dotClass: string; badgeClass: string }> = {
+  running: {
+    label: 'Running',
+    dotClass: 'bg-[var(--emerald)] shadow-[0_0_10px_var(--emerald)]',
+    badgeClass: 'text-[var(--emerald)] bg-[color-mix(in_oklch,var(--emerald)_14%,transparent)]',
+  },
+  booting: {
+    label: 'Booting',
+    dotClass: 'bg-[var(--amber)] animate-[mfpulse_1.4s_ease-in-out_infinite]',
+    badgeClass: 'text-[var(--amber)] bg-[color-mix(in_oklch,var(--amber)_14%,transparent)]',
+  },
+  suspended: {
+    label: 'Suspended',
+    dotClass: 'bg-[var(--violet)] opacity-[.55]',
+    badgeClass: 'text-[var(--violet)] bg-[color-mix(in_oklch,var(--violet)_14%,transparent)]',
+  },
+  stopped: {
+    label: 'Stopped',
+    dotClass: 'bg-[var(--idle)]',
+    badgeClass: 'text-[var(--idle)] bg-[color-mix(in_oklch,var(--idle)_14%,transparent)]',
+  },
+  error: {
+    label: 'Unhealthy',
+    dotClass: 'bg-[var(--red)]',
+    badgeClass: 'text-[var(--red)] bg-[color-mix(in_oklch,var(--red)_14%,transparent)]',
+  },
 }
+const statusMeta = computed(
+  () =>
+    STATUS_META[status.value] ?? {
+      label: status.value,
+      dotClass: 'bg-[var(--idle)]',
+      badgeClass: 'text-[var(--idle)] bg-[color-mix(in_oklch,var(--idle)_14%,transparent)]',
+    },
+)
 
-async function poll() {
-  if (paused.value || !active.value) return
-  try {
-    const { png_b64 } = await api.screenshot(props.name)
-    shot.value = `data:image/png;base64,${png_b64}`
-    err.value = null
-  } catch (e) {
-    // While booting, capture failures are expected — don't surface them as errors,
-    // and keep the last good frame (never blank on a transient failure).
-    if (status.value === 'running') err.value = String(e)
-  }
-}
-
-function restart() {
-  if (timer) clearInterval(timer)
-  timer = null
-  err.value = null
-  if (!active.value) {
-    shot.value = null
-    return
-  }
-  poll()
-  // 1s balances a live feel against the ~2-3MB PNG per frame. Gated on state + pause.
-  timer = setInterval(poll, 1000)
-}
-
-// Fresh VM selected: drop the old frame immediately. State toggles (stable) just
-// start/stop without a blanking flash.
+// Resource chips (vCPU/RAM/disk): fetched into the fleet store's `resources` cache so
+// the Resources tab (Task 11) can reuse the same data instead of a second round trip.
 watch(
   () => props.name,
-  () => {
-    shot.value = null
-    restart()
-  },
+  (name) => store.fetchResources(name),
   { immediate: true },
 )
-watch(active, restart)
-onBeforeUnmount(() => timer && clearInterval(timer))
+const resources = computed(() => store.resources[props.name])
 
-async function onImgClick(ev: MouseEvent) {
-  const el = ev.target as HTMLImageElement
-  const rect = el.getBoundingClientRect()
-  const x = Math.round(((ev.clientX - rect.left) * el.naturalWidth) / rect.width)
-  const y = Math.round(((ev.clientY - rect.top) * el.naturalHeight) / rect.height)
-  try {
-    await api.click(props.name, x, y)
-    err.value = null
-  } catch (e) {
-    err.value = String(e)
-  }
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'screen', label: 'Screen' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'resources', label: 'Resources' },
+  { id: 'connect', label: 'Connect' },
+]
+const TAB_COMPONENTS: Record<Tab, Component> = {
+  screen: ScreenTab,
+  terminal: TerminalTab,
+  logs: LogsTab,
+  resources: ResourcesTab,
+  connect: ConnectTab,
+}
+const activeTab = computed(() => TAB_COMPONENTS[store.selectedTab])
+
+const suspendLabel = computed(() => (props.state === 'running' ? '⏸ Suspend' : '▶ Resume'))
+function suspendResume(): void {
+  if (props.state === 'running') store.suspend(props.name)
+  else store.resume(props.name)
+}
+function snapshot(): void {
+  store.snapshotVM(props.name, `${props.name}-snap`)
+}
+function duplicate(): void {
+  store.duplicate(props.name)
+}
+function connect(): void {
+  store.selectedTab = 'connect'
 }
 
-async function sendType() {
-  if (!active.value || !typed.value) return
-  try {
-    await api.typeText(props.name, typed.value)
-    typed.value = ''
-    err.value = null
-  } catch (e) {
-    err.value = String(e)
-  }
+// Inline rename (comp `startRename`/`commitRename`, lines 577–578) — the palette only
+// arms `ui.renaming`; committing/cancelling happens here.
+const renameInput = ref<HTMLInputElement | null>(null)
+watch(
+  () => ui.renaming,
+  async (renaming) => {
+    if (!renaming) return
+    await nextTick()
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  },
+)
+function commitRename(): void {
+  const next = ui.renameValue.trim().replace(/\s+/g, '-')
+  if (next) store.rename(props.name, next)
+  ui.cancelRename()
+}
+function onRenameKey(e: KeyboardEvent): void {
+  if (e.key === 'Enter') commitRename()
+  if (e.key === 'Escape') ui.cancelRename()
 }
 
-function stopVm() {
-  store.down(props.name)
-}
-function nukeVm() {
-  // Two-click guard — deleting a VM is irreversible and there's no dialog.
-  if (!armNuke.value) {
-    armNuke.value = true
-    return
-  }
-  armNuke.value = false
+// Two-step delete confirm (comp `askDelete`/`doDelete`, lines 223–232/579–580) — the
+// palette only arms `ui.confirmDeleteVm`; the actual delete happens here.
+function confirmDelete(): void {
   store.nuke(props.name)
-  emit('close')
+  ui.cancelDeleteVm()
 }
 </script>
 
 <template>
-  <section class="flex min-h-0 flex-1 flex-col gap-3 p-4">
-    <header class="flex items-center gap-2.5">
-      <h2 class="font-mono text-sm font-semibold">{{ name }}</h2>
-      <span class="rounded px-1.5 py-0.5 text-[11px] font-medium" :class="BADGE[status]">
-        {{ status }}
-      </span>
-      <span v-if="err && shot" class="truncate text-xs text-red-500">{{ err }}</span>
+  <section class="flex min-h-0 flex-1 flex-col">
+    <header
+      class="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-[18px] py-[14px]"
+    >
+      <div class="flex min-w-0 items-center gap-[11px]">
+        <span class="h-[11px] w-[11px] shrink-0 rounded-full" :class="statusMeta.dotClass" />
+        <input
+          v-if="ui.renaming"
+          ref="renameInput"
+          v-model="ui.renameValue"
+          data-test="rename-input"
+          class="w-[220px] rounded-[7px] border border-[var(--emerald)] bg-[var(--bg-elev2)] px-2 py-[3px] font-mono text-[16px] font-semibold text-[var(--text)] outline-none"
+          @keydown="onRenameKey"
+        />
+        <div
+          v-else
+          title="Click to rename"
+          data-test="rename-display"
+          class="cursor-text font-mono text-[16px] font-semibold tracking-[-0.01em] text-[var(--text)]"
+          @click="ui.startRename(name)"
+        >
+          {{ name }}
+        </div>
+        <span
+          data-test="status-badge"
+          class="inline-flex h-[22px] items-center rounded-[7px] px-[9px] text-[11px] font-semibold"
+          :class="statusMeta.badgeClass"
+        >
+          {{ statusMeta.label }}
+        </span>
+      </div>
 
-      <div class="ml-auto flex items-center gap-1.5">
-        <button
-          v-if="active"
-          class="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          @click="paused = !paused"
+      <div class="flex gap-[6px] font-mono text-[11px] text-[var(--text-dim)]">
+        <span
+          data-test="chip-cpu"
+          class="rounded-md border border-[var(--border)] bg-[var(--bg-elev2)] px-2 py-[3px]"
+          >{{ resources?.cpu ?? '—' }} vCPU</span
         >
-          {{ paused ? 'resume' : 'pause' }}
+        <span
+          data-test="chip-ram"
+          class="rounded-md border border-[var(--border)] bg-[var(--bg-elev2)] px-2 py-[3px]"
+          >{{ resources ? Math.round(resources.memory_mb / 1024) : '—' }} GB</span
+        >
+        <span
+          data-test="chip-disk"
+          class="rounded-md border border-[var(--border)] bg-[var(--bg-elev2)] px-2 py-[3px]"
+          >{{ resources?.disk_gb ?? '—' }} GB</span
+        >
+      </div>
+
+      <div class="flex-1" />
+
+      <div class="flex items-center gap-[6px]">
+        <button
+          type="button"
+          data-test="suspend-resume-btn"
+          class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)]"
+          @click="suspendResume"
+        >
+          {{ suspendLabel }}
         </button>
         <button
-          v-if="active"
-          class="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          @click="stopVm"
+          type="button"
+          data-test="snapshot-btn"
+          class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)]"
+          @click="snapshot"
         >
-          stop
+          ◈ Snapshot
         </button>
         <button
-          class="rounded-md border px-2 py-1 text-xs transition-colors"
-          :class="
-            armNuke
-              ? 'border-red-500 bg-red-500 text-white'
-              : 'border-zinc-300 text-red-600 hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950/40'
-          "
-          @click="nukeVm"
-          @blur="armNuke = false"
+          type="button"
+          data-test="duplicate-btn"
+          class="flex h-[30px] items-center gap-[5px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-[11px] text-xs text-[var(--text-dim)]"
+          @click="duplicate"
         >
-          {{ armNuke ? 'confirm delete' : 'delete' }}
+          ⧉ Duplicate
         </button>
+        <button
+          type="button"
+          data-test="connect-btn"
+          class="flex h-[30px] items-center gap-[5px] rounded-lg bg-[var(--emerald)] px-[13px] text-xs font-semibold text-[#04130d]"
+          @click="connect"
+        >
+          ↔ Connect
+        </button>
+        <button
+          v-if="!ui.confirmDeleteVm"
+          type="button"
+          title="Delete"
+          data-test="delete-btn"
+          class="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-[var(--red-soft)] text-[13px] text-[var(--red)]"
+          @click="ui.askDeleteVm(name)"
+        >
+          🗑
+        </button>
+        <div
+          v-else
+          class="flex h-[30px] items-center gap-[5px] rounded-lg bg-[var(--red-soft)] py-0 pr-1 pl-[10px]"
+        >
+          <span class="text-[11.5px] font-medium text-[var(--red)]">Delete?</span>
+          <button
+            type="button"
+            data-test="delete-yes"
+            class="h-[22px] rounded-md bg-[var(--red)] px-[9px] text-[11px] font-semibold text-white"
+            @click="confirmDelete"
+          >
+            Yes
+          </button>
+          <button
+            type="button"
+            data-test="delete-no"
+            class="h-[22px] rounded-md px-2 text-[11px] text-[var(--text-dim)]"
+            @click="ui.cancelDeleteVm()"
+          >
+            No
+          </button>
+        </div>
       </div>
     </header>
 
-    <div
-      class="grid min-h-0 flex-1 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100/50 dark:border-zinc-800 dark:bg-zinc-900/50"
-    >
-      <img
-        v-if="shot"
-        data-test="shot"
-        :src="shot"
-        class="max-h-full max-w-full cursor-crosshair object-contain"
-        @click="onImgClick"
-      />
-      <div
-        v-else
-        class="flex flex-col items-center gap-2 p-8 text-center text-sm text-zinc-400 dark:text-zinc-600"
+    <div class="flex gap-0.5 border-b border-[var(--border)] px-[14px]">
+      <button
+        v-for="tab in TABS"
+        :key="tab.id"
+        type="button"
+        :data-test="`tab-${tab.id}`"
+        class="-mb-px h-[38px] border-b-2 px-[13px] text-[12.5px]"
+        :class="
+          store.selectedTab === tab.id
+            ? 'border-[var(--emerald)] font-semibold text-[var(--text)]'
+            : 'border-transparent font-medium text-[var(--text-faint)]'
+        "
+        @click="store.selectedTab = tab.id"
       >
-        <span
-          v-if="status !== 'stopped' && !err"
-          class="size-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-60"
-        />
-        <p v-if="status === 'stopped'">VM is stopped</p>
-        <p v-else-if="err">{{ err }}</p>
-        <p v-else-if="status === 'booting'">Booting — waiting for the guest…</p>
-        <p v-else>Connecting…</p>
-      </div>
+        {{ tab.label }}
+      </button>
     </div>
 
-    <form class="flex gap-1.5" @submit.prevent="sendType">
-      <input
-        v-model="typed"
-        :disabled="!active"
-        :placeholder="active ? 'type into the VM…' : 'VM not running'"
-        class="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
-      />
-      <button
-        type="submit"
-        :disabled="!active"
-        class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
-      >
-        send
-      </button>
-    </form>
+    <div class="min-h-0 flex-1 overflow-auto p-[18px]">
+      <component :is="activeTab" :name="name" />
+    </div>
   </section>
 </template>
