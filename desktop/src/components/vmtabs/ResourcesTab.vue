@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { api, type Metrics } from '../../shared/api'
 import { useFleet } from '../../stores/fleet'
 
 const props = defineProps<{ name: string }>()
@@ -24,6 +25,46 @@ watch(
   },
   { immediate: true },
 )
+
+// Live CPU/memory only exist while the guest is actually up — gated on the raw state
+// (not the coarser `locked` above, which also covers booting/suspended). Mirrors
+// ScreenTab/LogsTab's poll: restart on VM switch, clear on unmount, never fabricate a
+// number when it isn't running or the fetch fails.
+const active = computed(() => vm.value?.state === 'running')
+const metrics = ref<Metrics | null>(null)
+let timer: ReturnType<typeof setInterval> | null = null
+
+async function poll(): Promise<void> {
+  try {
+    metrics.value = await api.metrics(props.name)
+  } catch {
+    metrics.value = null
+  }
+}
+function restart(): void {
+  if (timer) clearInterval(timer)
+  timer = null
+  metrics.value = null
+  if (!active.value) return
+  poll()
+  timer = setInterval(poll, 3000)
+}
+watch(() => props.name, restart, { immediate: true })
+watch(active, restart)
+onBeforeUnmount(() => timer && clearInterval(timer))
+
+const cpuBarWidth = computed(() => (metrics.value ? `${metrics.value.cpu_pct}%` : '100%'))
+const cpuCaption = computed(() => (metrics.value ? `${metrics.value.cpu_pct}% load` : 'configured'))
+const memBarWidth = computed(() => {
+  const m = metrics.value
+  if (!m || m.mem_total_mb <= 0) return '100%'
+  return `${(m.mem_used_mb / m.mem_total_mb) * 100}%`
+})
+const memCaption = computed(() => {
+  const m = metrics.value
+  if (!m) return 'configured'
+  return `${Math.round(m.mem_used_mb / 1024)} / ${Math.round(m.mem_total_mb / 1024)} GB used`
+})
 
 // Local edit buffer, reset from the fetched/refetched resources whenever they change
 // (including right after a successful save, once the store re-fetches).
@@ -101,9 +142,13 @@ function save(): void {
             {{ resources.cpu }} <span class="text-[13px] text-[var(--text-faint)]">vCPU</span>
           </div>
           <div class="mt-3 h-1.5 overflow-hidden rounded bg-[var(--bg)]">
-            <div class="h-full w-full rounded bg-[var(--emerald)]" />
+            <div
+              data-test="cpu-bar"
+              class="h-full w-full rounded bg-[var(--emerald)]"
+              :style="{ width: cpuBarWidth }"
+            />
           </div>
-          <div class="mt-1.5 font-mono text-[11px] text-[var(--text-faint)]">configured</div>
+          <div class="mt-1.5 font-mono text-[11px] text-[var(--text-faint)]">{{ cpuCaption }}</div>
           <input
             v-if="!locked"
             v-model.number="cpu"
@@ -123,9 +168,13 @@ function save(): void {
             <span class="text-[13px] text-[var(--text-faint)]">GB</span>
           </div>
           <div class="mt-3 h-1.5 overflow-hidden rounded bg-[var(--bg)]">
-            <div class="h-full w-full rounded bg-[var(--emerald)]" />
+            <div
+              data-test="memory-bar"
+              class="h-full w-full rounded bg-[var(--emerald)]"
+              :style="{ width: memBarWidth }"
+            />
           </div>
-          <div class="mt-1.5 font-mono text-[11px] text-[var(--text-faint)]">configured</div>
+          <div class="mt-1.5 font-mono text-[11px] text-[var(--text-faint)]">{{ memCaption }}</div>
           <input
             v-if="!locked"
             v-model.number="memoryGb"
