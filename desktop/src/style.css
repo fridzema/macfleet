@@ -1,6 +1,125 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root[data-theme="dark"] {
+  --bg: #09090b;
+  --bg-elev: #0e0e11;
+  --bg-elev2: #161619;
+  --bg-hover: #1c1c20;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --text: #e7e7ea;
+  --text-dim: #a0a0a8;
+  --text-faint: #6c6c76;
+  --emerald: #10b981;
+  --emerald-soft: rgba(16, 185, 129, 0.14);
+  --amber: #f59e0b;
+  --amber-soft: rgba(245, 158, 11, 0.14);
+  --red: #f0555a;
+  --red-soft: rgba(240, 85, 90, 0.13);
+  --idle: #6c6c76;
+  --violet: #8b8bf5;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, "Cascadia Code", monospace;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f6f7;
+  --bg-elev: #ffffff;
+  --bg-elev2: #ffffff;
+  --bg-hover: #f0f0f2;
+  --border: rgba(0, 0, 0, 0.085);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --text: #18181b;
+  --text-dim: #52525b;
+  --text-faint: #8b8b93;
+  --emerald: #059669;
+  --emerald-soft: rgba(5, 150, 105, 0.11);
+  --amber: #d97706;
+  --amber-soft: rgba(217, 119, 6, 0.12);
+  --red: #dc3b41;
+  --red-soft: rgba(220, 59, 65, 0.09);
+  --idle: #9a9aa2;
+  --violet: #6d6df0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 10px 30px rgba(0, 0, 0, 0.09);
+}
+
+@keyframes mfpulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 var(--amber-soft);
+  }
+  50% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+@keyframes mfspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mfglow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      0 0 14px -2px var(--emerald);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      0 0 22px 1px var(--emerald);
+  }
+}
+@keyframes mfblink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes mfring {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+@keyframes mfin {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mfdot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
 
 .fade-enter-active,
 .fade-leave-active {
