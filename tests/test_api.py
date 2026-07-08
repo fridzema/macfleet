@@ -51,8 +51,11 @@ class FakeFleet:
             raise self._computer_error
         return self._computer_obj
 
-    def create(self, name, from_snapshot=None, ttl=None):
-        self.calls.append(("create", name, from_snapshot, ttl))
+    def create(self, name, from_snapshot=None, ttl=None, cpu=None, memory=None, disk=None):
+        self.calls.append(("create", name, from_snapshot, ttl, cpu, memory, disk))
+
+    def host_info(self):
+        return {"total_mem_gb": 32, "cpu_count": 10, "name": "test-host"}
 
     def suspend(self, name):
         self.calls.append(("suspend", name))
@@ -160,7 +163,23 @@ def test_create_from_snapshot_with_ttl():
     fake = FakeFleet()
     r = TestClient(build_app(fake)).post("/vms", json={"name": "web", "from_snapshot": "base", "ttl": 60})
     assert r.status_code == 200
-    assert ("create", "web", "base", 60) in fake.calls
+    assert ("create", "web", "base", 60, None, None, None) in fake.calls
+
+
+def test_create_with_resource_preset_forwards_to_fleet():
+    fake = FakeFleet()
+    r = TestClient(build_app(fake)).post(
+        "/vms", json={"name": "web", "cpu": 4, "memory": 8192, "disk": 100}
+    )
+    assert r.status_code == 200
+    assert ("create", "web", None, None, 4, 8192, 100) in fake.calls
+
+
+def test_host_endpoint():
+    fake = FakeFleet()
+    r = TestClient(build_app(fake)).get("/host")
+    assert r.status_code == 200
+    assert r.json() == {"total_mem_gb": 32, "cpu_count": 10, "name": "test-host"}
 
 
 def test_suspend_resume_endpoints():

@@ -111,16 +111,26 @@ class Fleet:
         self._spawn(["tart", "run", fullname(name), "--no-graphics"])
 
     def create(self, name: str, from_snapshot: str | None = None,
-               ttl: float | None = None) -> None:
+               ttl: float | None = None, cpu: int | None = None,
+               memory: int | None = None, disk: int | None = None) -> None:
         self.reap()
         target = fullname(name)
         if target not in {v.name for v in self.tart.list()}:
             src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
             self.tart.clone(src, target)
+        if cpu is not None or memory is not None or disk is not None:
+            # freshly-cloned VM is stopped, so `tart set` is valid here
+            self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
         if ttl is not None:
             self._leases.record(target, ttl)
+
+    def host_info(self) -> dict:
+        out = self._run(["sysctl", "-n", "hw.memsize", "hw.ncpu"]).stdout
+        memsize, cpu_count = out.split()
+        name = self._run(["hostname"]).stdout.strip()
+        return {"total_mem_gb": round(int(memsize) / 1e9), "cpu_count": int(cpu_count), "name": name}
 
     def up(self, name: str) -> None:
         self.create(name)
