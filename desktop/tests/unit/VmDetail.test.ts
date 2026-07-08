@@ -117,7 +117,7 @@ describe('VmDetail — tab bar', () => {
 
     await wrapper.find('[data-test="tab-terminal"]').trigger('click')
     expect(store.selectedTab).toBe('terminal')
-    expect(wrapper.text()).toContain('Terminal — coming in Task 9')
+    expect(wrapper.text()).toContain('macfleet guest-agent · in-guest shell · web')
 
     await wrapper.find('[data-test="tab-logs"]').trigger('click')
     expect(store.selectedTab).toBe('logs')

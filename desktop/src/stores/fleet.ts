@@ -8,6 +8,15 @@ const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 export type Tab = 'screen' | 'terminal' | 'logs' | 'resources' | 'connect'
 export type Preset = 'light' | 'standard' | 'heavy'
 
+// One in-guest command run in the Terminal tab. `code: null` means the exec call
+// itself failed (network/sidecar error) — distinct from a nonzero guest exit, which is
+// a normal result (`code` is the actual exit status the guest returned).
+export interface ExecEntry {
+  cmd: string
+  out: string
+  code: number | null
+}
+
 export interface CreateOptions {
   name: string
   // 'golden' clones the read-only template; anything else is a snapshot id.
@@ -78,6 +87,26 @@ export const useFleet = defineStore('fleet', () => {
   // detail header when a VM is selected, and reused by the Resources tab — rather than
   // bundled into the polled `/vms` list, which doesn't carry it.
   const resources = ref<Record<string, Resources>>({})
+
+  // Terminal tab scrollback, keyed by short name — kept in the store (rather than
+  // component-local state) so it survives the VmDetail `:key="ui.selectedVm"` remount
+  // when switching VMs and back.
+  const terminalHistory = ref<Record<string, ExecEntry[]>>({})
+
+  async function execCommand(name: string, cmd: string): Promise<void> {
+    let entry: ExecEntry
+    try {
+      const { stdout, exit_code } = await api.exec(name, cmd)
+      entry = { cmd, out: stdout, code: exit_code }
+    } catch (e) {
+      entry = { cmd, out: String(e), code: null }
+      toast(`Failed to run command on ${name}`, '⚠')
+    }
+    terminalHistory.value = {
+      ...terminalHistory.value,
+      [name]: [...(terminalHistory.value[name] ?? []), entry],
+    }
+  }
 
   async function fetchResources(name: string): Promise<void> {
     try {
@@ -254,6 +283,8 @@ export const useFleet = defineStore('fleet', () => {
     createOptions,
     leases,
     resources,
+    terminalHistory,
+    execCommand,
     refresh,
     fetchHost,
     fetchResources,
