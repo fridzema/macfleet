@@ -1,0 +1,276 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
+import { useDarkMode } from '../../src/composables/useDarkMode'
+import { useToasts } from '../../src/composables/useToasts'
+import { useFleet } from '../../src/stores/fleet'
+import { fuzzy, useUi } from '../../src/stores/ui'
+
+vi.mock('../../src/composables/useDarkMode', () => ({
+  useDarkMode: vi.fn(),
+}))
+
+let toggleDark: ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  toggleDark = vi.fn()
+  vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(false), toggleDark })
+  useToasts().toasts.value = []
+})
+
+describe('fuzzy', () => {
+  it('matches an empty query against anything', () => {
+    expect(fuzzy('', 'Snapshot web')).toBe(true)
+  })
+
+  it('matches an in-order subsequence, case-insensitively', () => {
+    expect(fuzzy('spw', 'Snapshot Web')).toBe(true)
+  })
+
+  it('rejects when the characters are out of order', () => {
+    expect(fuzzy('wsp', 'Snapshot Web')).toBe(false)
+  })
+
+  it('rejects when a character is missing entirely', () => {
+    expect(fuzzy('zzz', 'Snapshot Web')).toBe(false)
+  })
+})
+
+describe('ui store — search / theme', () => {
+  it('search starts empty', () => {
+    const ui = useUi()
+    expect(ui.search).toBe('')
+  })
+
+  it('exposes isDark/toggleDark from useDarkMode', () => {
+    const ui = useUi()
+    ui.toggleDark()
+    expect(toggleDark).toHaveBeenCalled()
+  })
+})
+
+describe('ui store — command palette state', () => {
+  it('openPalette resets query/index and opens', () => {
+    const ui = useUi()
+    ui.query = 'stale'
+    ui.index = 3
+    ui.openPalette()
+    expect(ui.open).toBe(true)
+    expect(ui.query).toBe('')
+    expect(ui.index).toBe(0)
+  })
+
+  it('closePalette closes without touching query', () => {
+    const ui = useUi()
+    ui.openPalette()
+    ui.query = 'web'
+    ui.closePalette()
+    expect(ui.open).toBe(false)
+    expect(ui.query).toBe('web')
+  })
+
+  it('changing query resets index back to 0', () => {
+    const ui = useUi()
+    ui.index = 2
+    ui.query = 'web'
+    expect(ui.index).toBe(0)
+  })
+})
+
+describe('ui store — paletteItems', () => {
+  it('always includes "spin up new VM" and the theme toggle', () => {
+    const ui = useUi()
+    const labels = ui.paletteItems.map((i) => i.label)
+    expect(labels).toContain('Spin up new VM (Golden image)')
+    expect(labels).toContain('Toggle dark theme')
+  })
+
+  it('running the "spin up" item calls fleet.create and closes the palette', () => {
+    const fleet = useFleet()
+    const create = vi.spyOn(fleet, 'create').mockResolvedValue()
+    const ui = useUi()
+    ui.openPalette()
+    const item = ui.paletteItems.find((i) => i.id === 'new')
+    item?.run()
+    expect(create).toHaveBeenCalled()
+    expect(ui.open).toBe(false)
+  })
+
+  it('adds one "new VM from snapshot" item per snapshot, running newFromSnapshot', () => {
+    const fleet = useFleet()
+    fleet.snapshots = [{ id: 'web-golden', vm: 'web', label: 'golden', size: 10 }]
+    const newFromSnapshot = vi.spyOn(fleet, 'newFromSnapshot').mockResolvedValue()
+    const ui = useUi()
+    const item = ui.paletteItems.find((i) => i.id === 'nf-web-golden')
+    expect(item?.label).toBe('New VM from snapshot · golden')
+    expect(item?.group).toBe('Create')
+    item?.run()
+    expect(newFromSnapshot).toHaveBeenCalledWith(fleet.snapshots[0])
+  })
+
+  it('has no VM/Danger-group items when nothing is selected', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const ui = useUi()
+    const groups = ui.paletteItems.map((i) => i.group)
+    expect(groups).not.toContain('VM')
+    expect(groups).not.toContain('Danger')
+  })
+
+  it('adds VM + Danger items for the selected VM', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const ui = useUi()
+    ui.selectVm('web')
+    const byId = Object.fromEntries(ui.paletteItems.map((i) => [i.id, i]))
+    expect(byId.snap.label).toBe('Snapshot web')
+    expect(byId.susp.label).toBe('Suspend web') // running -> offers Suspend
+    expect(byId.dup.label).toBe('Duplicate web')
+    expect(byId.res.group).toBe('VM')
+    expect(byId.conn.group).toBe('VM')
+    expect(byId.term.group).toBe('VM')
+    expect(byId.log.group).toBe('VM')
+    expect(byId.del.label).toBe('Delete web')
+    expect(byId.del.group).toBe('Danger')
+  })
+
+  it('offers Resume for a non-running selected VM, and running it calls fleet.resume', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'stopped', source: 'local', healthy: false }]
+    const resume = vi.spyOn(fleet, 'resume').mockResolvedValue()
+    const ui = useUi()
+    ui.selectVm('web')
+    const item = ui.paletteItems.find((i) => i.id === 'susp')
+    expect(item?.label).toBe('Resume web')
+    item?.run()
+    expect(resume).toHaveBeenCalledWith('web')
+  })
+
+  it('suspend/resume item calls the matching fleet action', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const suspend = vi.spyOn(fleet, 'suspend').mockResolvedValue()
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'susp')?.run()
+    expect(suspend).toHaveBeenCalledWith('web')
+  })
+
+  it('snapshot item calls fleet.snapshotVM with a default label', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const snapshotVM = vi.spyOn(fleet, 'snapshotVM').mockResolvedValue()
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'snap')?.run()
+    expect(snapshotVM).toHaveBeenCalledWith('web', 'web-snap')
+  })
+
+  it('duplicate item calls fleet.duplicate', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const duplicate = vi.spyOn(fleet, 'duplicate').mockResolvedValue()
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'dup')?.run()
+    expect(duplicate).toHaveBeenCalledWith('web')
+  })
+
+  it('rename item prompts for a new name and calls fleet.rename', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const rename = vi.spyOn(fleet, 'rename').mockResolvedValue()
+    vi.spyOn(window, 'prompt').mockReturnValue('prod')
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'ren')?.run()
+    expect(rename).toHaveBeenCalledWith('web', 'prod')
+  })
+
+  it('rename item does nothing when the prompt is cancelled', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const rename = vi.spyOn(fleet, 'rename').mockResolvedValue()
+    vi.spyOn(window, 'prompt').mockReturnValue(null)
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'ren')?.run()
+    expect(rename).not.toHaveBeenCalled()
+  })
+
+  it('resize/connect/terminal/logs items switch the fleet tab', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'res')?.run()
+    expect(fleet.selectedTab).toBe('resources')
+    ui.paletteItems.find((i) => i.id === 'conn')?.run()
+    expect(fleet.selectedTab).toBe('connect')
+    ui.paletteItems.find((i) => i.id === 'term')?.run()
+    expect(fleet.selectedTab).toBe('terminal')
+    ui.paletteItems.find((i) => i.id === 'log')?.run()
+    expect(fleet.selectedTab).toBe('logs')
+  })
+
+  it('delete item confirms before calling fleet.nuke', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const nuke = vi.spyOn(fleet, 'nuke').mockResolvedValue()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'del')?.run()
+    expect(nuke).toHaveBeenCalledWith('web')
+  })
+
+  it('delete item does nothing when the confirm is declined', () => {
+    const fleet = useFleet()
+    fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
+    const nuke = vi.spyOn(fleet, 'nuke').mockResolvedValue()
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.paletteItems.find((i) => i.id === 'del')?.run()
+    expect(nuke).not.toHaveBeenCalled()
+  })
+
+  it('lists every other VM under "Go to", and switching updates selectedVm', () => {
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-web', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-db', state: 'running', source: 'local', healthy: true },
+    ]
+    const ui = useUi()
+    ui.selectVm('web')
+    const goTo = ui.paletteItems.filter((i) => i.group === 'Go to')
+    expect(goTo.map((i) => i.label)).toEqual(['Switch to db'])
+    goTo[0].run()
+    expect(ui.selectedVm).toBe('db')
+  })
+
+  it('theme item reflects the current mode and toggles it', () => {
+    vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(true), toggleDark })
+    const ui = useUi()
+    const item = ui.paletteItems.find((i) => i.id === 'theme')
+    expect(item?.label).toBe('Toggle light theme')
+    item?.run()
+    expect(toggleDark).toHaveBeenCalled()
+  })
+
+  it('filters items by the fuzzy query', () => {
+    const ui = useUi()
+    ui.query = 'zzz-does-not-match-anything'
+    expect(ui.paletteItems).toEqual([])
+  })
+})
+
+describe('ui store — toasts', () => {
+  it('toast() adds to the shared toasts list', () => {
+    const ui = useUi()
+    ui.toast('Copied to clipboard')
+    // ui.toasts is a Pinia-unwrapped ref, so it's the array directly.
+    expect(ui.toasts.some((t) => t.msg === 'Copied to clipboard')).toBe(true)
+  })
+})

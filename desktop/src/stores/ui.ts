@@ -1,0 +1,151 @@
+import { defineStore } from 'pinia'
+import { computed, ref, watch } from 'vue'
+import { useDarkMode } from '../composables/useDarkMode'
+import { useToasts } from '../composables/useToasts'
+import { useFleet } from './fleet'
+
+const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
+
+export interface PaletteItem {
+  id: string
+  label: string
+  group: 'Create' | 'VM' | 'Danger' | 'Go to' | 'App'
+  run: () => void
+}
+
+/** Subsequence match (comp `fuzzy` line 498): every char of `query`, in order, somewhere
+ * in `str`. Empty query matches everything. */
+export function fuzzy(query: string, str: string): boolean {
+  const q = query.toLowerCase()
+  const s = str.toLowerCase()
+  if (!q) return true
+  let i = 0
+  for (const c of s) {
+    if (c === q[i]) i++
+    if (i >= q.length) return true
+  }
+  return false
+}
+
+export const useUi = defineStore('ui', () => {
+  const fleet = useFleet()
+  const { isDark, toggleDark } = useDarkMode()
+  const { toasts, add: toast } = useToasts()
+
+  const search = ref('')
+
+  // The VM the command palette treats as "current" for its per-VM actions (snapshot,
+  // suspend/resume, duplicate, rename, resize, connect, delete). Distinct from routing —
+  // just enough state for the palette to build its item list.
+  const selectedVm = ref<string | null>(null)
+  function selectVm(name: string | null): void {
+    selectedVm.value = name
+  }
+
+  const open = ref(false)
+  const query = ref('')
+  const index = ref(0)
+
+  // Typing a new query resets the highlighted row, same as the comp's `onPaletteInput`.
+  // Sync flush: callers expect `index` to already be 0 right after setting `query`.
+  watch(
+    query,
+    () => {
+      index.value = 0
+    },
+    { flush: 'sync' },
+  )
+
+  function openPalette(): void {
+    open.value = true
+    query.value = ''
+    index.value = 0
+  }
+  function closePalette(): void {
+    open.value = false
+  }
+
+  const paletteItems = computed<PaletteItem[]>(() => {
+    const items: PaletteItem[] = []
+    const push = (
+      id: string,
+      label: string,
+      group: PaletteItem['group'],
+      action: () => void,
+    ): void => {
+      items.push({
+        id,
+        label,
+        group,
+        run: () => {
+          closePalette()
+          action()
+        },
+      })
+    }
+
+    push('new', 'Spin up new VM (Golden image)', 'Create', () => fleet.create())
+    for (const sn of fleet.snapshots) {
+      push(`nf-${sn.id}`, `New VM from snapshot · ${sn.label}`, 'Create', () =>
+        fleet.newFromSnapshot(sn),
+      )
+    }
+
+    const sel = selectedVm.value
+      ? fleet.vms.find((v) => short(v.name) === selectedVm.value)
+      : undefined
+    if (sel) {
+      const name = short(sel.name)
+      push('snap', `Snapshot ${name}`, 'VM', () => fleet.snapshotVM(name, `${name}-snap`))
+      push('susp', `${sel.state === 'running' ? 'Suspend' : 'Resume'} ${name}`, 'VM', () =>
+        sel.state === 'running' ? fleet.suspend(name) : fleet.resume(name),
+      )
+      push('dup', `Duplicate ${name}`, 'VM', () => fleet.duplicate(name))
+      push('ren', `Rename ${name}`, 'VM', () => {
+        const next = window.prompt(`New name for ${name}:`, name)?.trim()
+        if (next) fleet.rename(name, next)
+      })
+      push('res', `Resize ${name}`, 'VM', () => {
+        fleet.selectedTab = 'resources'
+      })
+      push('conn', `Connect to ${name}`, 'VM', () => {
+        fleet.selectedTab = 'connect'
+      })
+      push('term', 'Open terminal', 'VM', () => {
+        fleet.selectedTab = 'terminal'
+      })
+      push('log', 'Open logs', 'VM', () => {
+        fleet.selectedTab = 'logs'
+      })
+      push('del', `Delete ${name}`, 'Danger', () => {
+        if (window.confirm(`Delete ${name}? This can't be undone.`)) fleet.nuke(name)
+      })
+    }
+
+    for (const v of fleet.vms) {
+      const name = short(v.name)
+      if (name !== selectedVm.value)
+        push(`sw-${v.name}`, `Switch to ${name}`, 'Go to', () => selectVm(name))
+    }
+
+    push('theme', `Toggle ${isDark.value ? 'light' : 'dark'} theme`, 'App', () => toggleDark())
+
+    return items.filter((it) => fuzzy(query.value, it.label))
+  })
+
+  return {
+    isDark,
+    toggleDark,
+    search,
+    selectedVm,
+    selectVm,
+    open,
+    query,
+    index,
+    openPalette,
+    closePalette,
+    paletteItems,
+    toasts,
+    toast,
+  }
+})
