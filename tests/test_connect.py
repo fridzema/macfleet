@@ -510,3 +510,30 @@ def test_set_resources_never_shrinks_disk(tmp_path):
     from macfleet.leases import Leases
     fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
     fleet.set_resources("web", disk_size=40)  # would shrink -> must be dropped, no error
+
+
+def test_metrics_parses_top(tmp_path):
+    top = "CPU usage: 1.91% user, 23.56% sys, 74.52% idle\nPhysMem: 8029M used (1027M wired), 147M unused."
+    def nocheck(argv):
+        assert argv[:3] == ["tart", "exec", "mf-web"]
+        return subprocess.CompletedProcess(argv, 0, top, "")
+    def run(argv):  # for mem_total via resources()
+        return subprocess.CompletedProcess(argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, run_nocheck=nocheck,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    m = fleet.metrics("web")
+    assert m["cpu_pct"] == 25.5           # 100 - 74.52 = 25.48 -> 25.5
+    assert m["mem_used_mb"] == 8029
+    assert m["mem_total_mb"] == 8192
+
+
+def test_metrics_raises_when_exec_fails(tmp_path):
+    def nocheck(argv):
+        return subprocess.CompletedProcess(argv, 1, "", "vm not running")
+    from macfleet.leases import Leases
+    import pytest
+    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+                  run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    with pytest.raises(RuntimeError, match="metrics unavailable"):
+        fleet.metrics("web")
