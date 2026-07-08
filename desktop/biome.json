@@ -46,6 +46,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/style.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          }
+        }
+      }
     }
   ],
   "vcs": {
