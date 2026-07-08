@@ -80,6 +80,22 @@ describe('VmDetail — header', () => {
     expect(resources).toHaveBeenCalledWith('db')
     wrapper.unmount()
   })
+
+  it('does not re-fetch resources for a VM already in the store cache (avoids the double GET alongside ResourcesTab)', async () => {
+    const store = useFleet()
+    store.resources.web = {
+      cpu: 4,
+      memory_mb: 8192,
+      disk_gb: 50,
+      display: '1920x1080',
+      state: 'running',
+    }
+    const resources = vi.spyOn(api, 'resources')
+    const wrapper = mount(VmDetail, { props: running })
+    await flushPromises()
+    expect(resources).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })
 
 describe('VmDetail — actions', () => {

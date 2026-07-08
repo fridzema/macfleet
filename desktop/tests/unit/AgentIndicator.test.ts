@@ -51,4 +51,27 @@ describe('AgentIndicator', () => {
     expect(wrapper.find('[data-test="agent-popover"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('closes on a click outside the popover (backdrop)', async () => {
+    const wrapper = mount(AgentIndicator)
+    await wrapper.find('[data-test="agent-trigger"]').trigger('click')
+    expect(wrapper.find('[data-test="agent-popover"]').exists()).toBe(true)
+    await wrapper.find('[data-test="agent-backdrop"]').trigger('click')
+    expect(wrapper.find('[data-test="agent-popover"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not close when clicking inside the popover', async () => {
+    const wrapper = mount(AgentIndicator)
+    await wrapper.find('[data-test="agent-trigger"]').trigger('click')
+    await wrapper.find('[data-test="agent-popover"]').trigger('click')
+    expect(wrapper.find('[data-test="agent-popover"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('has no backdrop/popover while closed', () => {
+    const wrapper = mount(AgentIndicator)
+    expect(wrapper.find('[data-test="agent-backdrop"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

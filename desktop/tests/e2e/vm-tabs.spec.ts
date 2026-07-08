@@ -37,7 +37,12 @@ test.describe('selecting a VM renders each of the 5 tabs', () => {
     await expect(page.getByTestId('card-disk')).toContainText('50')
   })
 
-  test('Connect tab shows connection info, and Copy confirms', async ({ page }) => {
+  test('Connect tab shows connection info, and Copy confirms', async ({ page, context }) => {
+    // Copy now only flashes "✓ Copied" once navigator.clipboard.writeText actually
+    // resolves. Chromium denies clipboard-write without an explicit grant; Firefox/
+    // WebKit allow it in Playwright without one and don't support this permission
+    // name, so ignore a grant failure there.
+    await context.grantPermissions(['clipboard-write']).catch(() => {})
     await page.getByTestId('tab-connect').click()
     const item = page.getByTestId('connect-item').first()
     await expect(item).toContainText('192.168.64.12')

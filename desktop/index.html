@@ -7,6 +7,18 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>macfleet</title>
+    <script>
+      // Stamp the theme before the app bundle loads so a cold start doesn't flash the
+      // unstyled/wrong-theme frame while Vue mounts and `useDark` (useDarkMode.ts)
+      // catches up. Same localStorage key vueuse's `useDark` persists to by default.
+      var mfTheme = null
+      try {
+        mfTheme = localStorage.getItem('vueuse-color-scheme')
+      } catch (e) {
+        mfTheme = null
+      }
+      document.documentElement.dataset.theme = mfTheme === 'light' || mfTheme === 'dark' ? mfTheme : 'dark'
+    </script>
   </head>
   <body>
     <div id="app"></div>

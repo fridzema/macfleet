@@ -94,7 +94,7 @@ describe('ConnectTab — copy', () => {
     wrapper.unmount()
   })
 
-  it('still confirms the copy when the Clipboard API throws', async () => {
+  it('does not confirm the copy when the Clipboard API throws synchronously', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: () => {
@@ -108,11 +108,13 @@ describe('ConnectTab — copy', () => {
     await flushPromises()
 
     await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
-    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('Copy')
+    expect(useToasts().toasts.value.map((t) => t.msg)).not.toContain('Copied to clipboard')
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('Failed to copy'))).toBe(true)
     wrapper.unmount()
   })
 
-  it('still confirms the copy when the Clipboard API rejects asynchronously (real WKWebView permission denial)', async () => {
+  it('does not confirm the copy when the Clipboard API rejects asynchronously (real WKWebView permission denial)', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockRejectedValue(new Error('permission denied')) },
       configurable: true,
@@ -123,7 +125,9 @@ describe('ConnectTab — copy', () => {
 
     await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('Copy')
+    expect(useToasts().toasts.value.map((t) => t.msg)).not.toContain('Copied to clipboard')
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('Failed to copy'))).toBe(true)
     wrapper.unmount()
   })
 
