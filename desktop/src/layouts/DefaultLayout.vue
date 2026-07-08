@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
+import CommandPalette from '../components/CommandPalette.vue'
 </script>
 
 <template>
@@ -15,5 +16,6 @@ import AppHeader from '../components/AppHeader.vue'
         </Transition>
       </RouterView>
     </main>
+    <CommandPalette />
   </div>
 </template>
