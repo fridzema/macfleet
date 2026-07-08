@@ -5,6 +5,9 @@ export interface Vm {
   state: string
   source: string
   healthy: boolean
+  cpu?: number | null
+  memory_mb?: number | null
+  disk_gb?: number | null
 }
 
 export type VmStatus = 'running' | 'booting' | 'stopped'
@@ -41,6 +44,19 @@ export interface HostInfo {
   total_mem_gb: number
   cpu_count: number
   name: string
+}
+
+export interface AgentActivity {
+  who: string
+  action: string
+  target: string
+  ts: number
+}
+
+export interface Metrics {
+  cpu_pct: number
+  mem_used_mb: number
+  mem_total_mb: number
 }
 
 /** running = up + server healthy; booting = up but server not answering yet. */
@@ -83,7 +99,6 @@ export const api = {
       disk?: number
     } = {},
   ) => postJson('/vms', { name, ...opts }),
-  up: (n: string) => j(`/vms/${n}/up`, { method: 'POST' }),
   down: (n: string) => j(`/vms/${n}/down`, { method: 'POST' }),
   nuke: (n: string) => j(`/vms/${n}/nuke`, { method: 'POST' }),
   suspend: (n: string) => j(`/vms/${n}/suspend`, { method: 'POST' }),
@@ -108,4 +123,7 @@ export const api = {
   connection: (n: string) => j<ConnectionInfo>(`/vms/${n}/connection`),
   exec: (n: string, command: string) => postJson<ExecResult>(`/vms/${n}/exec`, { command }),
   host: () => j<HostInfo>('/host'),
+  agentsActivity: (limit?: number) =>
+    j<AgentActivity[]>(`/agents/activity${limit !== undefined ? `?limit=${limit}` : ''}`),
+  metrics: (n: string) => j<Metrics>(`/vms/${n}/metrics`),
 }
