@@ -455,6 +455,24 @@ def test_list_vms_reports_suspended(tmp_path):
     assert row["state"] == "suspended"
 
 
+def test_snapshot_resume_clears_stale_suspended_marker(tmp_path):
+    # Source was user-suspended before the snapshot ran. snapshot() suspends it further
+    # (or it's already suspended), clones, then resumes it via a raw `tart run` — that
+    # resume must also clear the lease-store suspended marker, or list_vms() would keep
+    # mislabeling the now-running source as "suspended" forever.
+    fleet, calls, spawned, lease = _fleet(tmp_path)  # _state -> running
+    lease.suspend("mf-web")
+    fleet.snapshot("web", "v1")
+    assert "mf-web" not in lease.suspended()
+
+
+def test_duplicate_resume_clears_stale_suspended_marker(tmp_path):
+    fleet, calls, spawned, lease = _fleet(tmp_path)  # _state -> running
+    lease.suspend("mf-web")
+    fleet.duplicate("web", "web2")
+    assert "mf-web" not in lease.suspended()
+
+
 # --- Fleet configured-resources cache ---
 
 
