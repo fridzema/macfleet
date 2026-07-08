@@ -1,9 +1,16 @@
+import { writeText as tauriWriteText } from '@tauri-apps/plugin-clipboard-manager'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ConnectTab from '../../src/components/vmtabs/ConnectTab.vue'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api, type ConnectionInfo } from '../../src/shared/api'
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: vi.fn(),
+}))
+
+type TauriWindow = Window & { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
 
 const connection = (overrides: Partial<ConnectionInfo> = {}): ConnectionInfo => ({
   ip: '192.168.64.12',
@@ -145,6 +152,49 @@ describe('ConnectTab — copy', () => {
     await buttons[1]?.trigger('click')
     expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('Copy')
     expect(wrapper.findAll('[data-test="copy-btn"]')[1]?.text()).toBe('✓ Copied')
+    wrapper.unmount()
+  })
+})
+
+describe('ConnectTab — copy via Tauri clipboard', () => {
+  afterEach(() => {
+    const win = window as TauriWindow
+    delete win.__TAURI_INTERNALS__
+    delete win.__TAURI__
+    vi.mocked(tauriWriteText).mockReset()
+  })
+
+  it('uses the Tauri clipboard plugin instead of navigator.clipboard when running inside Tauri', async () => {
+    ;(window as TauriWindow).__TAURI_INTERNALS__ = {}
+    vi.mocked(tauriWriteText).mockResolvedValue(undefined)
+    vi.spyOn(api, 'connection').mockResolvedValue(connection())
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
+    await flushPromises()
+
+    expect(tauriWriteText).toHaveBeenCalledWith('192.168.64.12')
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    expect(useToasts().toasts.value.map((t) => t.msg)).toContain('Copied to clipboard')
+    wrapper.unmount()
+  })
+
+  it('falls back to navigator.clipboard when the Tauri plugin import/write fails', async () => {
+    ;(window as TauriWindow).__TAURI_INTERNALS__ = {}
+    vi.mocked(tauriWriteText).mockRejectedValue(new Error('plugin unavailable'))
+    vi.spyOn(api, 'connection').mockResolvedValue(connection())
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
+    await flushPromises()
+
+    expect(tauriWriteText).toHaveBeenCalledWith('192.168.64.12')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('192.168.64.12')
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    expect(useToasts().toasts.value.map((t) => t.msg)).toContain('Copied to clipboard')
     wrapper.unmount()
   })
 })
