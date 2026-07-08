@@ -32,7 +32,7 @@ class Activity:
                         out.append(json.loads(line))
                     except json.JSONDecodeError:
                         continue
-        except (FileNotFoundError, OSError):
+        except (FileNotFoundError, OSError, UnicodeDecodeError):
             return []
         return out
 
