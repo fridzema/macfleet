@@ -1,9 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import LogsTab from '../../src/components/vmtabs/LogsTab.vue'
 import { api, type Vm } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
+
+// Partial-mock 'vue' so we can gate a single `nextTick()` call from inside
+// LogsTab's `scrollToBottom` — see the "post-unmount" test below.
+vi.mock('vue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue')>()
+  return { ...actual, nextTick: vi.fn(actual.nextTick) }
+})
 
 const vm = (overrides: Partial<Vm> = {}): Vm => ({
   name: 'mf-web',
@@ -143,5 +151,38 @@ describe('LogsTab — level coloring', () => {
     expect(line.text()).toBe('boot ok')
     expect(line.find('[data-test="log-level"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+})
+
+describe('LogsTab — post-unmount', () => {
+  it('scrollToBottom does not throw when its flush:post watcher resumes after unmount', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm()]
+    const logs = vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'boot ok' })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wrapper.find('[data-test="logscroll"]').text()).toContain('boot ok')
+
+    // Gate the *next* `nextTick()` call made from inside scrollToBottom so we can unmount
+    // the component in the window between its `await nextTick()` and resumption — the
+    // exact race the `if (el)` guard protects against.
+    let releaseGate!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    vi.mocked(nextTick).mockImplementationOnce(() => gate as unknown as Promise<void>)
+
+    // Append a log line: text.value changes, logLines changes, the flush:'post' watcher
+    // fires and calls scrollToBottom, which suspends on our gated nextTick().
+    logs.mockResolvedValueOnce({ lines: 'boot ok\nline two' })
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+
+    // Unmount while scrollToBottom is still suspended — Vue nulls the template ref.
+    wrapper.unmount()
+    // Resume scrollToBottom: `el` is now null. No throw means the guard held.
+    releaseGate()
+    await flushPromises()
   })
 })

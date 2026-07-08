@@ -30,11 +30,12 @@ test.describe('selecting a VM renders each of the 5 tabs', () => {
     await expect(page.getByTestId('logscroll')).toContainText('server up')
   })
 
-  test('Resources tab shows the mocked resource cards', async ({ page }) => {
+  test('Resources tab shows the mocked resource cards and live metrics', async ({ page }) => {
     await page.getByTestId('tab-resources').click()
     await expect(page.getByTestId('card-cpu')).toContainText('4')
     await expect(page.getByTestId('card-memory')).toContainText('8')
     await expect(page.getByTestId('card-disk')).toContainText('50')
+    await expect(page.getByTestId('card-cpu')).toContainText('25.5% load')
   })
 
   test('Connect tab shows connection info, and Copy confirms', async ({ page, context }) => {

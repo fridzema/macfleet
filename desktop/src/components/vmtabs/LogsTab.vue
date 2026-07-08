@@ -90,9 +90,7 @@ async function scrollToBottom(): Promise<void> {
   const el = scrollEl.value
   // Guards a post-unmount race: this `flush: 'post'` watcher's callback can already be
   // queued when the component unmounts, in which case `el` is null by the time this
-  // resumes after `nextTick()`. Not reliably reproducible without a contrived timing
-  // hack, so it's excluded rather than faked.
-  /* istanbul ignore else */
+  // resumes after `nextTick()` — see the "post-unmount" test in LogsTab.test.ts.
   if (el) el.scrollTop = el.scrollHeight
 }
 watch(logLines, scrollToBottom, { flush: 'post' })

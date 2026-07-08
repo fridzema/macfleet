@@ -45,6 +45,13 @@ export async function mockApi(
     route.fulfill({ json: { total_mem_gb: 32, cpu_count: 8, name: 'Mac' } }),
   )
 
+  // AppHeader's AgentIndicator polls this on every page, so every journey needs it mocked.
+  await page.route('**/agents/activity*', (route) =>
+    route.fulfill({
+      json: [{ who: 'claude-code', action: 'created', target: 'web', ts: Date.now() }],
+    }),
+  )
+
   await page.route('**/vms', async (route) => {
     if (route.request().method() !== 'POST') return route.fulfill({ json: state.vms })
     const body = route.request().postDataJSON() as { name: string }
@@ -90,6 +97,9 @@ export async function mockApi(
     route.fulfill({
       json: { cpu: 4, memory_mb: 8192, disk_gb: 50, display: '1920x1080', state: 'running' },
     }),
+  )
+  await page.route('**/vms/*/metrics', (route) =>
+    route.fulfill({ json: { cpu_pct: 25.5, mem_used_mb: 8029, mem_total_mb: 8192 } }),
   )
   await page.route('**/vms/*/connection', (route) =>
     route.fulfill({
