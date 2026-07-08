@@ -119,6 +119,25 @@ describe('ResourcesTab — stopped (editable)', () => {
     wrapper.unmount()
   })
 
+  it('editing only cpu on a VM whose memory_mb is not a multiple of 1024 does not emit a spurious memory patch', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    // 6000 MB rounds to 6 GB but 6*1024 = 6144 !== 6000 — a naive MB diff would flag it.
+    store.resources = { web: resources({ memory_mb: 6000 }) }
+    const setResources = vi.spyOn(api, 'setResources').mockResolvedValue({})
+    vi.spyOn(api, 'resources').mockResolvedValue(resources({ memory_mb: 6000, cpu: 6 }))
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+
+    await wrapper.find('[data-test="cpu-input"]').setValue(6)
+    await wrapper.find('[data-test="save-btn"]').trigger('click')
+    await vi.waitFor(() => expect(setResources).toHaveBeenCalled())
+
+    expect(setResources).toHaveBeenCalledWith('web', { cpu: 6 })
+    const patch = setResources.mock.calls[0]?.[1]
+    expect(patch).not.toHaveProperty('memory')
+    wrapper.unmount()
+  })
+
   it('a 409 (VM running) surfaces a toast', async () => {
     const store = useFleet()
     store.vms = [vm()]

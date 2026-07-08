@@ -56,8 +56,11 @@ function save(): void {
   if (!r) return
   const patch: Parameters<typeof store.setResources>[1] = {}
   if (cpu.value !== r.cpu) patch.cpu = cpu.value
-  const memoryMb = memoryGb.value * 1024
-  if (memoryMb !== r.memory_mb) patch.memory = memoryMb
+  // Diff in GB (the unit the user actually edits) — NOT reconstructed MB. `memory_mb`
+  // from `tart get` isn't guaranteed to be a clean multiple of 1024 (e.g. 6000), so
+  // comparing `memoryGb*1024` against it would flag an untouched field as changed and
+  // silently rewrite memory the user never touched.
+  if (memoryGb.value !== Math.round(r.memory_mb / 1024)) patch.memory = memoryGb.value * 1024
   if (disk.value > r.disk_gb) patch.disk_size = disk.value
   if (display.value !== r.display) patch.display = display.value
   if (Object.keys(patch).length === 0) return
