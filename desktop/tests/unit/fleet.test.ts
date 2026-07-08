@@ -1,11 +1,14 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useToasts } from '../../src/composables/useToasts'
+import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // The store constructs `useToasts()` internally with the default scheduler — swap in a
+  // no-op so store-triggered toasts never leave a real 2600ms timer dangling in tests.
+  setToastScheduler(() => {})
   // Every refresh() now also lists snapshots — default to empty so tests that only
   // care about vms don't need to mock it explicitly.
   vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
@@ -273,7 +276,7 @@ describe('fleet store — lifecycle mutations', () => {
     )
   })
 
-  it('duplicate marks the copy pending immediately, then calls api.duplicate + refreshes', async () => {
+  it('duplicate marks the copy pending immediately, toasts only a START message', async () => {
     let release = () => {}
     vi.spyOn(api, 'duplicate').mockImplementation(
       () =>
@@ -284,10 +287,14 @@ describe('fleet store — lifecycle mutations', () => {
     const s = useFleet()
     const p = s.duplicate('web')
     expect(s.pending).toContain('web-copy')
+    // START toast is emitted synchronously, before the clone resolves.
+    expect(useToasts().toasts.value.map((t) => t.msg)).toEqual(['Duplicating web…'])
     release()
     await p
     expect(s.error).toBeNull()
-    expect(useToasts().toasts.value.some((t) => t.msg === 'web-copy ready')).toBe(true)
+    // No premature "ready" toast — readiness shows via the pending row -> running status,
+    // because the clone's `tart run` is non-blocking and the VM is still booting here.
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('ready'))).toBe(false)
   })
 
   it('duplicate drops the pending copy and toasts on failure', async () => {
@@ -378,6 +385,15 @@ describe('fleet store — create (options -> api args)', () => {
     await p
     expect(s.createOptions.name).toBe('')
     expect(s.createOptions.advancedOpen).toBe(false)
+  })
+
+  it('emits only a START toast on success — no premature "ready" (VM still booting)', async () => {
+    vi.spyOn(api, 'create').mockResolvedValue({})
+    const s = useFleet()
+    s.createOptions.name = 'web'
+    s.createOptions.source = 'golden'
+    await s.create()
+    expect(useToasts().toasts.value.map((t) => t.msg)).toEqual(['Creating web…'])
   })
 
   it('falls back to a generated name when none is given', async () => {

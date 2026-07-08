@@ -35,11 +35,37 @@ export const useUi = defineStore('ui', () => {
   const search = ref('')
 
   // The VM the command palette treats as "current" for its per-VM actions (snapshot,
-  // suspend/resume, duplicate, rename, resize, connect, delete). Distinct from routing —
-  // just enough state for the palette to build its item list.
+  // suspend/resume, duplicate, rename, resize, connect, delete). Single source of truth
+  // for selection going forward (HomePage's local ref migrates here in a later task).
   const selectedVm = ref<string | null>(null)
   function selectVm(name: string | null): void {
     selectedVm.value = name
+  }
+
+  // Inline rename + two-step delete confirm, mirroring the comp's `startRename` (line 577)
+  // and `askDelete` (552/579) — no browser dialogs (this is a Tauri/WKWebView app). The
+  // palette only *arms* these; the actual inline input / confirm-button render + execute
+  // in the VM-detail component (later task), same as its existing `armNuke` pattern.
+  const renaming = ref(false)
+  const renameValue = ref('')
+  const confirmDeleteVm = ref(false)
+
+  function startRename(name: string): void {
+    selectVm(name)
+    renameValue.value = name
+    confirmDeleteVm.value = false
+    renaming.value = true
+  }
+  function cancelRename(): void {
+    renaming.value = false
+  }
+  function askDeleteVm(name: string): void {
+    selectVm(name)
+    renaming.value = false
+    confirmDeleteVm.value = true
+  }
+  function cancelDeleteVm(): void {
+    confirmDeleteVm.value = false
   }
 
   const open = ref(false)
@@ -101,10 +127,7 @@ export const useUi = defineStore('ui', () => {
         sel.state === 'running' ? fleet.suspend(name) : fleet.resume(name),
       )
       push('dup', `Duplicate ${name}`, 'VM', () => fleet.duplicate(name))
-      push('ren', `Rename ${name}`, 'VM', () => {
-        const next = window.prompt(`New name for ${name}:`, name)?.trim()
-        if (next) fleet.rename(name, next)
-      })
+      push('ren', `Rename ${name}`, 'VM', () => startRename(name))
       push('res', `Resize ${name}`, 'VM', () => {
         fleet.selectedTab = 'resources'
       })
@@ -117,9 +140,8 @@ export const useUi = defineStore('ui', () => {
       push('log', 'Open logs', 'VM', () => {
         fleet.selectedTab = 'logs'
       })
-      push('del', `Delete ${name}`, 'Danger', () => {
-        if (window.confirm(`Delete ${name}? This can't be undone.`)) fleet.nuke(name)
-      })
+      // Arms the two-step confirm; does NOT delete here (comp askDelete line 552/579).
+      push('del', `Delete ${name}`, 'Danger', () => askDeleteVm(name))
     }
 
     for (const v of fleet.vms) {
@@ -139,6 +161,13 @@ export const useUi = defineStore('ui', () => {
     search,
     selectedVm,
     selectVm,
+    renaming,
+    renameValue,
+    confirmDeleteVm,
+    startRename,
+    cancelRename,
+    askDeleteVm,
+    cancelDeleteVm,
     open,
     query,
     index,

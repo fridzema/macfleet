@@ -17,7 +17,17 @@ const DISMISS_MS = 2600
 const toasts = ref<Toast[]>([])
 let nextId = 0
 
-export function useToasts(schedule: Scheduler = (run, ms) => setTimeout(run, ms)) {
+// The default scheduler used when a caller (e.g. the fleet/ui stores, which construct
+// `useToasts()` internally and can't pass one) doesn't supply its own. Overridable so
+// unit tests can swap in a no-op and never leave a real 2600ms timer dangling.
+let defaultScheduler: Scheduler = (run, ms) => setTimeout(run, ms)
+
+/** Test seam: replace the scheduler the parameterless `useToasts()` uses. */
+export function setToastScheduler(schedule: Scheduler): void {
+  defaultScheduler = schedule
+}
+
+export function useToasts(schedule: Scheduler = defaultScheduler) {
   function add(msg: string, icon = '✓'): void {
     const id = ++nextId
     toasts.value = [...toasts.value, { id, msg, icon }]
