@@ -77,6 +77,14 @@ Grounded facts driving this design:
   `set_resources`, `create` (fresh clone), `rename` (move key), and `nuke` (drop).
   Result: steady-state `/vms` stays ~0.05s (cache hits); the first sight of a VM pays one
   `tart get`, parallelized.
+- **Accepted staleness:** `_res_cache` is process-local. The API sidecar and the MCP/CLI
+  run as separate processes with separate caches, so a resize done out-of-process (via
+  the MCP or the `macfleet` CLI) invalidates only that process's cache — the API's `/vms`
+  `cpu`/`memory_mb`/`disk_gb` fields (and the desktop header Σ-RAM chip / list rows) can
+  keep showing the pre-resize value until the API process restarts. The authoritative
+  per-VM Resources detail (`api.resources` → `Fleet.resources`) is uncached and always
+  fresh, and the sidecar restarts on every desktop launch, so the staleness self-heals. A
+  future TTL or periodic cache-clear could tighten this window if it becomes an issue.
 - **Suspended marker:** track a suspended set in `~/.macfleet/state.json` under a new
   `"suspended": [<full names>]` key, via a small helper alongside `Leases` (same file,
   same atomic-write discipline). `Fleet.suspend(name)` adds the full name; `resume`,
