@@ -239,6 +239,7 @@ class Fleet:
         self.tart.clone(src, f"mfsnap-{shortname(name)}-{label}")
         if was_running:
             self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
+            self._leases.unsuspend(src)
         return f"{shortname(name)}-{label}"
 
     def snapshots(self) -> list[dict]:
@@ -276,6 +277,7 @@ class Fleet:
         self.tart.clone(src, fullname(new))
         if was_running:
             self._spawn(["tart", "run", src, "--no-graphics"])
+            self._leases.unsuspend(src)
             self._spawn(["tart", "run", fullname(new), "--no-graphics"])
 
     def resources(self, name: str) -> dict:
