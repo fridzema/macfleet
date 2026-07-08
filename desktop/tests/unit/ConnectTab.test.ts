@@ -19,9 +19,11 @@ beforeEach(() => {
   setToastScheduler(() => {})
   useToasts().toasts.value = []
   // jsdom has no navigator.clipboard — stub it so copyField's writeText call has
-  // something to hit (and something for tests to spy on).
+  // something to hit (and something for tests to spy on). The real API always returns a
+  // Promise, so the stub does too (a bare `vi.fn()` returning `undefined` would make
+  // `.catch()` throw synchronously, masking whether that call is wired correctly).
   Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText: vi.fn() },
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
     configurable: true,
   })
 })
@@ -107,6 +109,38 @@ describe('ConnectTab — copy', () => {
 
     await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
     expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    wrapper.unmount()
+  })
+
+  it('still confirms the copy when the Clipboard API rejects asynchronously (real WKWebView permission denial)', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('permission denied')) },
+      configurable: true,
+    })
+    vi.spyOn(api, 'connection').mockResolvedValue(connection())
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="copy-btn"]')[0]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('✓ Copied')
+    wrapper.unmount()
+  })
+
+  it('copying a second field before the first flash expires clears the first timer', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(api, 'connection').mockResolvedValue(connection())
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('[data-test="copy-btn"]')
+    await buttons[0]?.trigger('click')
+    expect(buttons[0]?.text()).toBe('✓ Copied')
+
+    await vi.advanceTimersByTimeAsync(600) // well within the first flash's 1300ms window
+    await buttons[1]?.trigger('click')
+    expect(wrapper.findAll('[data-test="copy-btn"]')[0]?.text()).toBe('Copy')
+    expect(wrapper.findAll('[data-test="copy-btn"]')[1]?.text()).toBe('✓ Copied')
     wrapper.unmount()
   })
 })

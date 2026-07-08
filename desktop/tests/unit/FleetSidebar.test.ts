@@ -30,26 +30,25 @@ afterEach(() => {
 })
 
 describe('FleetSidebar — fleet rows', () => {
-  it('lists polled VMs, selects via ui.selectVm, and still emits select for HomePage', async () => {
+  it('lists polled VMs and selects a row via ui.selectVm', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([
       { name: 'mf-a', state: 'running', source: 'local', healthy: true },
       { name: 'mf-b', state: 'stopped', source: 'local', healthy: false },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     const ui = useUi()
     await flushPromises()
     const rows = wrapper.findAll('[data-test="vm-row"]')
     expect(rows).toHaveLength(2)
     await rows[0]?.trigger('click')
     expect(ui.selectedVm).toBe('a')
-    expect(wrapper.emitted('select')?.[0]).toEqual(['a'])
     wrapper.unmount()
   })
 
   it('shows a disabled "Creating" row for a pending VM', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     store.pending = ['building']
     await flushPromises()
@@ -69,7 +68,7 @@ describe('FleetSidebar — fleet rows', () => {
       { name: 'mf-stopped', state: 'stopped', source: 'local', healthy: false },
       { name: 'mf-flaky', state: 'error', source: 'local', healthy: false },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     const rows = wrapper.findAll('[data-test="vm-row"]')
     expect(rows).toHaveLength(5)
@@ -88,7 +87,7 @@ describe('FleetSidebar — fleet rows', () => {
       { name: 'mf-a', state: 'running', source: 'local', healthy: true },
       { name: 'mf-b', state: 'stopped', source: 'local', healthy: false },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     const ui = useUi()
     await flushPromises()
     ui.selectVm('a')
@@ -105,7 +104,7 @@ describe('FleetSidebar — fleet rows', () => {
       { name: 'mf-plain', state: 'running', source: 'local', healthy: true },
     ])
     const store = useFleet()
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     store.leases = { leased: 125 }
     await wrapper.vm.$nextTick()
@@ -115,9 +114,63 @@ describe('FleetSidebar — fleet rows', () => {
     wrapper.unmount()
   })
 
+  it('formats a sub-minute TTL as plain seconds', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-leased', state: 'running', source: 'local', healthy: true },
+    ])
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    store.leases = { leased: 45 }
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="vm-row"]').text()).toContain('45s')
+    wrapper.unmount()
+  })
+
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    store.vms = [{ name: 'standalone', state: 'running', source: 'local', healthy: true }]
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="vm-row"]').text()).toContain('standalone')
+    wrapper.unmount()
+  })
+
+  it('a pending VM already appearing (but not yet running) in the polled list stays "Creating"', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-web', state: 'stopped', source: 'local', healthy: false },
+    ])
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    store.pending = ['web']
+    await wrapper.vm.$nextTick()
+    const row = wrapper.find('[data-test="vm-row"]')
+    expect(row.text()).toContain('Creating')
+    expect(row.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('a pending VM that has actually turned running is no longer shown as "Creating"', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-web', state: 'running', source: 'local', healthy: true },
+    ])
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    store.pending = ['web']
+    await wrapper.vm.$nextTick()
+    const row = wrapper.find('[data-test="vm-row"]')
+    expect(row.text()).toContain('Running')
+    expect(row.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('shows "No VMs running" when the fleet is empty, and "No matches" when search filters it out', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     expect(wrapper.text()).toContain('No VMs running')
 
@@ -139,7 +192,7 @@ describe('FleetSidebar — fleet rows', () => {
       { name: 'mf-web-1', state: 'running', source: 'local', healthy: true },
       { name: 'mf-db-1', state: 'running', source: 'local', healthy: true },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     const ui = useUi()
     await flushPromises()
     ui.search = 'WEB'
@@ -147,6 +200,26 @@ describe('FleetSidebar — fleet rows', () => {
     const rows = wrapper.findAll('[data-test="vm-row"]')
     expect(rows).toHaveLength(1)
     expect(rows[0]?.text()).toContain('web-1')
+    wrapper.unmount()
+  })
+
+  it('shows "Connecting to engine…" when the very first refresh fails', async () => {
+    vi.spyOn(api, 'listVms').mockRejectedValue(new Error('ECONNREFUSED'))
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Connecting to engine…')
+    wrapper.unmount()
+  })
+
+  it('shows the error message once loaded if a later refresh fails with an empty fleet', async () => {
+    const listVms = vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    listVms.mockRejectedValue(new Error('sidecar unreachable'))
+    const store = useFleet()
+    await store.refresh()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('sidecar unreachable')
     wrapper.unmount()
   })
 })
@@ -159,7 +232,7 @@ describe('FleetSidebar — snapshots', () => {
     ])
     const store = useFleet()
     const newFromSnapshot = vi.spyOn(store, 'newFromSnapshot').mockResolvedValue()
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     const snapRows = wrapper.findAll('[data-test="snap-row"]')
     expect(snapRows).toHaveLength(1)
@@ -177,7 +250,7 @@ describe('FleetSidebar — snapshots', () => {
       { id: 'snap1', vm: 'ci-runner-01', label: 'clean-ventura', size: 18 },
       { id: 'snap2', vm: 'build-mac-14', label: 'xcode-15-ready', size: 24 },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     const ui = useUi()
     await flushPromises()
     ui.search = 'xcode'
@@ -194,7 +267,7 @@ describe('FleetSidebar — create panel', () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await wrapper.find('[data-test="up-name"]').setValue('web')
     expect(store.createOptions.name).toBe('web')
     await wrapper.find('[data-test="up-form"]').trigger('submit')
@@ -204,7 +277,7 @@ describe('FleetSidebar — create panel', () => {
 
   it('advanced options are hidden until the toggle is clicked', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     expect(wrapper.find('[data-test="create-source"]').exists()).toBe(false)
     await wrapper.find('[data-test="create-advanced-toggle"]').trigger('click')
@@ -217,7 +290,7 @@ describe('FleetSidebar — create panel', () => {
     vi.spyOn(api, 'listSnapshots').mockResolvedValue([
       { id: 'snap1', vm: 'ci-runner-01', label: 'clean-ventura', size: 18 },
     ])
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
     await wrapper.find('[data-test="create-advanced-toggle"]').trigger('click')
     const options = wrapper.find('[data-test="create-source"]').findAll('option')
@@ -235,7 +308,7 @@ describe('FleetSidebar — create panel', () => {
     ])
     const store = useFleet()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await flushPromises()
 
     await wrapper.find('[data-test="up-name"]').setValue('ci-clone')
@@ -262,7 +335,7 @@ describe('FleetSidebar — polling', () => {
     const listVms = vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()
     const tickTtl = vi.spyOn(store, 'tickTtl')
-    const wrapper = mount(FleetSidebar, { props: { selected: null } })
+    const wrapper = mount(FleetSidebar)
     await vi.waitFor(() => expect(listVms).toHaveBeenCalledTimes(1))
 
     await vi.advanceTimersByTimeAsync(2000)

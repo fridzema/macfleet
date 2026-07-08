@@ -48,7 +48,9 @@ const copied = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 function copyField(key: string, value: string): void {
   try {
-    navigator.clipboard.writeText(value)
+    // A real WKWebView can reject this asynchronously (permission denied) — swallow it
+    // so that doesn't surface as an unhandled promise rejection; the UI still confirms.
+    navigator.clipboard.writeText(value).catch(() => {})
   } catch {
     // Clipboard API unavailable — still confirm, matching the comp.
   }

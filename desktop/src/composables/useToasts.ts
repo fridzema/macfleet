@@ -12,7 +12,7 @@ export type Scheduler = (run: () => void, ms: number) => void
 
 const DISMISS_MS = 2600
 
-// Module-scoped so every `useToasts()` call (fleet store, ui store, future Toasts.vue)
+// Module-scoped so every `useToasts()` call (fleet store, ui store, ToastStack.vue)
 // shares the same list rather than each getting an isolated copy.
 const toasts = ref<Toast[]>([])
 let nextId = 0
