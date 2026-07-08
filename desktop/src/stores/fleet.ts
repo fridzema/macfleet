@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useToasts } from '../composables/useToasts'
-import { api, type HostInfo, type Snapshot, type Vm } from '../shared/api'
+import { api, type HostInfo, type Resources, type Snapshot, type Vm } from '../shared/api'
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
@@ -73,6 +73,19 @@ export const useFleet = defineStore('fleet', () => {
   // by short name. The server is the one that actually reaps expired leases (see
   // `Fleet.reap`) — this just reflects/announces that locally between polls.
   const leases = ref<Record<string, number>>({})
+
+  // Per-VM resources (vCPU/RAM/disk), keyed by short name. Fetched on demand — by the
+  // detail header when a VM is selected, and reused by the Resources tab — rather than
+  // bundled into the polled `/vms` list, which doesn't carry it.
+  const resources = ref<Record<string, Resources>>({})
+
+  async function fetchResources(name: string): Promise<void> {
+    try {
+      resources.value = { ...resources.value, [name]: await api.resources(name) }
+    } catch (e) {
+      error.value = String(e)
+    }
+  }
 
   async function refresh(): Promise<void> {
     try {
@@ -240,8 +253,10 @@ export const useFleet = defineStore('fleet', () => {
     selectedTab,
     createOptions,
     leases,
+    resources,
     refresh,
     fetchHost,
+    fetchResources,
     up,
     down,
     nuke,

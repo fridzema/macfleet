@@ -440,6 +440,36 @@ describe('fleet store — create (options -> api args)', () => {
   })
 })
 
+describe('fleet store — resources cache', () => {
+  it('fetchResources caches the result keyed by name', async () => {
+    const resources = vi.spyOn(api, 'resources').mockResolvedValue({
+      cpu: 4,
+      memory_mb: 8192,
+      disk_gb: 50,
+      display: '1920x1080',
+      state: 'running',
+    })
+    const s = useFleet()
+    await s.fetchResources('web')
+    expect(resources).toHaveBeenCalledWith('web')
+    expect(s.resources.web).toEqual({
+      cpu: 4,
+      memory_mb: 8192,
+      disk_gb: 50,
+      display: '1920x1080',
+      state: 'running',
+    })
+  })
+
+  it('fetchResources sets error on failure without touching the cache', async () => {
+    vi.spyOn(api, 'resources').mockRejectedValue(new Error('409'))
+    const s = useFleet()
+    await s.fetchResources('web')
+    expect(s.error).toContain('409')
+    expect(s.resources.web).toBeUndefined()
+  })
+})
+
 describe('fleet store — TTL countdown', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
