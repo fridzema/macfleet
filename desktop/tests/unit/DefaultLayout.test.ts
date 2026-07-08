@@ -6,7 +6,7 @@ import DefaultLayout from '../../src/layouts/DefaultLayout.vue'
 const stubs = {
   AppHeader: { template: '<header data-testid="app-header" />' },
   CommandPalette: { template: '<div data-testid="command-palette" />' },
-  Toasts: { template: '<div data-testid="toasts" />' },
+  ToastStack: { template: '<div data-testid="toasts" />' },
   RouterView: defineComponent({
     setup(_, { slots }) {
       const StubComponent = defineComponent({
