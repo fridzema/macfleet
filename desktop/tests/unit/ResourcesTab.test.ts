@@ -1,9 +1,9 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ResourcesTab from '../../src/components/vmtabs/ResourcesTab.vue'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
-import { api, type Resources, type Vm } from '../../src/shared/api'
+import { api, type Metrics, type Resources, type Vm } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
 
 const vm = (overrides: Partial<Vm> = {}): Vm => ({
@@ -23,6 +23,13 @@ const resources = (overrides: Partial<Resources> = {}): Resources => ({
   ...overrides,
 })
 
+const metrics = (overrides: Partial<Metrics> = {}): Metrics => ({
+  cpu_pct: 42,
+  mem_used_mb: 4096,
+  mem_total_mb: 8192,
+  ...overrides,
+})
+
 beforeEach(() => {
   setActivePinia(createPinia())
   setToastScheduler(() => {})
@@ -31,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('ResourcesTab — cards', () => {
@@ -213,6 +221,103 @@ describe('ResourcesTab — stopped (editable)', () => {
     const wrapper = mount(ResourcesTab, { props: { name: 'standalone' } })
     // Same rationale as elsewhere: 'stopped' -> editable banner, not locked.
     expect(wrapper.find('[data-test="editable-banner"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('ResourcesTab — live metrics', () => {
+  it('polls api.metrics while the VM is running and drives the CPU/Memory bar + captions', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: true })]
+    store.resources = { web: resources({ state: 'running' }) }
+    const fetchMetrics = vi.spyOn(api, 'metrics').mockResolvedValue(metrics())
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    expect(fetchMetrics).toHaveBeenCalledWith('web')
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('42% load')
+    expect((wrapper.find('[data-test="cpu-bar"]').element as HTMLElement).style.width).toBe('42%')
+    expect(wrapper.find('[data-test="card-memory"]').text()).toContain('4 / 8 GB used')
+    expect((wrapper.find('[data-test="memory-bar"]').element as HTMLElement).style.width).toBe(
+      '50%',
+    )
+
+    fetchMetrics.mockClear()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fetchMetrics).toHaveBeenCalledWith('web')
+    wrapper.unmount()
+  })
+
+  it('does not poll metrics when the VM is not running — renders the configured fallback', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'stopped' })]
+    store.resources = { web: resources() }
+    const fetchMetrics = vi.spyOn(api, 'metrics')
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    expect(fetchMetrics).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('configured')
+    expect(wrapper.find('[data-test="card-memory"]').text()).toContain('configured')
+    wrapper.unmount()
+  })
+
+  it('falls back to the configured bars/captions when a metrics fetch rejects', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: true })]
+    store.resources = { web: resources({ state: 'running' }) }
+    vi.spyOn(api, 'metrics').mockRejectedValue(new Error('GET /vms/web/metrics -> 500'))
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="card-cpu"]').text()).toContain('configured')
+    expect(wrapper.find('[data-test="card-memory"]').text()).toContain('configured')
+    expect(wrapper.text()).not.toContain('load')
+    wrapper.unmount()
+  })
+
+  it('stops polling metrics on unmount', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: true })]
+    store.resources = { web: resources({ state: 'running' }) }
+    const fetchMetrics = vi.spyOn(api, 'metrics').mockResolvedValue(metrics())
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(fetchMetrics).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+    fetchMetrics.mockClear()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(fetchMetrics).not.toHaveBeenCalled()
+  })
+
+  it('restarts polling against the new VM on switch and stops targeting the old one', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [
+      vm({ name: 'mf-web', state: 'running', healthy: true }),
+      vm({ name: 'mf-db', state: 'running', healthy: true }),
+    ]
+    store.resources = {
+      web: resources({ state: 'running' }),
+      db: resources({ state: 'running', cpu: 2 }),
+    }
+    const fetchMetrics = vi.spyOn(api, 'metrics').mockResolvedValue(metrics())
+    const wrapper = mount(ResourcesTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(fetchMetrics).toHaveBeenCalledWith('web')
+
+    fetchMetrics.mockClear()
+    await wrapper.setProps({ name: 'db' })
+    await flushPromises()
+    expect(fetchMetrics).toHaveBeenCalledWith('db')
+
+    fetchMetrics.mockClear()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fetchMetrics).toHaveBeenCalledWith('db')
+    expect(fetchMetrics).not.toHaveBeenCalledWith('web')
     wrapper.unmount()
   })
 })
