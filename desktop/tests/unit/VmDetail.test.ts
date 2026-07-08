@@ -121,7 +121,8 @@ describe('VmDetail — tab bar', () => {
 
     await wrapper.find('[data-test="tab-logs"]').trigger('click')
     expect(store.selectedTab).toBe('logs')
-    expect(wrapper.text()).toContain('Logs — coming in Task 10')
+    expect(wrapper.text()).toContain('tailing')
+    expect(wrapper.text()).toContain('/var/log/guest.log')
 
     await wrapper.find('[data-test="tab-resources"]').trigger('click')
     expect(store.selectedTab).toBe('resources')
