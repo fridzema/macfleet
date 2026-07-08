@@ -417,3 +417,31 @@ def test_exec_returns_stdout_and_exit_code(tmp_path):
     fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
                   run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
     assert fleet.exec("web", "echo hi") == {"stdout": "hi\n", "exit_code": 2}
+
+
+# --- Fleet suspended tracking ---
+
+
+def test_suspend_marks_and_resume_clears(tmp_path):
+    fleet, calls, spawned, lease = _fleet(tmp_path)
+    fleet.suspend("web")
+    assert lease.suspended() == {"mf-web"}
+    fleet.resume("web")
+    assert lease.suspended() == set()
+
+
+def test_down_and_nuke_clear_suspended(tmp_path):
+    fleet, calls, _, lease = _fleet(tmp_path)
+    lease.suspend("mf-web")
+    fleet.down("web")
+    assert lease.suspended() == set()
+    lease.suspend("mf-web2")
+    fleet.nuke("web2")
+    assert lease.suspended() == set()
+
+
+def test_list_vms_reports_suspended(tmp_path):
+    fleet, _, _, lease = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    lease.suspend("mf-web")
+    row = next(r for r in fleet.list_vms() if r["name"] == "mf-web")
+    assert row["state"] == "suspended"

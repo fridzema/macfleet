@@ -106,9 +106,11 @@ class Fleet:
 
     def suspend(self, name: str) -> None:
         self.tart.suspend(fullname(name))
+        self._leases.suspend(fullname(name))
 
     def resume(self, name: str) -> None:
         self._spawn(["tart", "run", fullname(name), "--no-graphics"])
+        self._leases.unsuspend(fullname(name))
 
     def create(self, name: str, from_snapshot: str | None = None,
                ttl: float | None = None, cpu: int | None = None,
@@ -166,11 +168,15 @@ class Fleet:
         if running:
             with ThreadPoolExecutor(max_workers=min(8, len(running))) as pool:
                 health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
-        return [{"name": v.name, "state": v.state, "source": v.source,
+        suspended = self._leases.suspended()
+        return [{"name": v.name,
+                 "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
+                 "source": v.source,
                  "healthy": health.get(v.name, False)} for v in vms]
 
     def down(self, name: str) -> None:
         self.tart.stop(fullname(name))
+        self._leases.unsuspend(fullname(name))
 
     def nuke(self, name: str) -> None:
         try:
@@ -178,6 +184,7 @@ class Fleet:
         except RuntimeError:
             pass
         self.tart.delete(fullname(name))
+        self._leases.unsuspend(fullname(name))
 
     def ip(self, name: str) -> str:
         return self.tart.ip(fullname(name))
