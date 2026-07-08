@@ -105,8 +105,11 @@ class Fleet:
     def _state(self, full: str) -> str:
         return self.tart.get_config(full)["State"]
 
-    def _fetch_config(self, full: str) -> dict:
-        c = self.tart.get_config(full)
+    def _fetch_config(self, full: str) -> dict | None:
+        try:
+            c = self.tart.get_config(full)
+        except Exception:
+            return None
         return {"cpu": c.get("CPU"), "memory_mb": c.get("Memory"), "disk_gb": c.get("Disk")}
 
     def suspend(self, name: str) -> None:
@@ -177,7 +180,8 @@ class Fleet:
                 if running:
                     health = dict(pool.map(lambda v: (v.name, self.status(shortname(v.name))), running))
                 for name, res in pool.map(lambda v: (v.name, self._fetch_config(v.name)), uncached):
-                    self._res_cache[name] = res
+                    if res is not None:
+                        self._res_cache[name] = res
         suspended = self._leases.suspended()
         return [{"name": v.name,
                  "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
