@@ -133,7 +133,14 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
             return subprocess.CompletedProcess(argv, 0, j.dumps(
                 [{"Name": v.name, "State": v.state, "Source": v.source, "Size": v.size} for v in listing]), "")
         if argv[:2] == ["tart", "get"]:
-            return subprocess.CompletedProcess(argv, 0, '{"State":"running"}', "")
+            # Full config so `resources()`'s strict getter doesn't raise on missing
+            # keys; State reflects the matching VM's actual listed state (falling
+            # back to "running" for VMs not passed into `vms=`, preserving the
+            # snapshot/duplicate tests' assumption that an unlisted target is live).
+            vm = next((v for v in listing if v.name == argv[2]), None)
+            state = vm.state if vm else "running"
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {"State": state, "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}), "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     spawned = []
@@ -260,7 +267,8 @@ def test_list_vms_reaps_first_and_marks_health(tmp_path):
     # structure: name/state/source/healthy for every VM `tart list` returned, minus
     # anything reap() just deleted.
     assert vms == [
-        {"name": "mf-web", "state": "stopped", "source": "local", "healthy": False},
+        {"name": "mf-web", "state": "stopped", "source": "local", "healthy": False,
+         "cpu": 4, "memory_mb": 8192, "disk_gb": 50},
     ]
 
 
@@ -445,3 +453,38 @@ def test_list_vms_reports_suspended(tmp_path):
     lease.suspend("mf-web")
     row = next(r for r in fleet.list_vms() if r["name"] == "mf-web")
     assert row["state"] == "suspended"
+
+
+# --- Fleet configured-resources cache ---
+
+
+def test_list_vms_includes_cached_resources_and_fetches_once(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    rows = fleet.list_vms()
+    row = next(r for r in rows if r["name"] == "mf-web")
+    assert "memory_mb" in row and "cpu" in row and "disk_gb" in row
+    gets = [c for c in calls if c[:2] == ["tart", "get"]]
+    fleet.list_vms()  # second call: cache hit
+    gets2 = [c for c in calls if c[:2] == ["tart", "get"]]
+    assert len(gets2) == len(gets)  # no additional tart get on cache hit
+
+
+def test_set_resources_invalidates_cache(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "stopped", "local")])
+    fleet.list_vms()
+    fleet._res_cache["mf-web"] = {"cpu": 4, "memory_mb": 8192, "disk_gb": 50}
+    fleet.set_resources("web", cpu=8)
+    assert "mf-web" not in fleet._res_cache
+
+
+def test_set_resources_never_shrinks_disk(tmp_path):
+    # fake get_config: stopped VM with 50GB disk; a shrink to 40 must be dropped
+    def run(argv):
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+        if argv[:2] == ["tart", "set"]:
+            assert "--disk-size" not in argv  # shrink dropped
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    from macfleet.leases import Leases
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet.set_resources("web", disk_size=40)  # would shrink -> must be dropped, no error
