@@ -52,6 +52,42 @@ describe('ui store — search / theme', () => {
   })
 })
 
+describe('ui store — selection resets per-VM flags', () => {
+  it('selectVm to a different VM clears an armed delete and open rename (no wrong-VM action)', () => {
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-web', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-db', state: 'running', source: 'local', healthy: true },
+    ]
+    const ui = useUi()
+    // Arm both per-VM flags against "web".
+    ui.startRename('web')
+    ui.askDeleteVm('web')
+    expect(ui.confirmDeleteVm).toBe(true)
+    // Switching to another VM must reset them so the "db" header can't inherit them.
+    ui.selectVm('db')
+    expect(ui.selectedVm).toBe('db')
+    expect(ui.renaming).toBe(false)
+    expect(ui.renameValue).toBe('')
+    expect(ui.confirmDeleteVm).toBe(false)
+  })
+
+  it('palette "Switch to X" clears an armed delete via selectVm', () => {
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-web', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-db', state: 'running', source: 'local', healthy: true },
+    ]
+    const ui = useUi()
+    ui.selectVm('web')
+    ui.askDeleteVm('web')
+    expect(ui.confirmDeleteVm).toBe(true)
+    ui.paletteItems.find((i) => i.label === 'Switch to db')?.run()
+    expect(ui.selectedVm).toBe('db')
+    expect(ui.confirmDeleteVm).toBe(false)
+  })
+})
+
 describe('ui store — command palette state', () => {
   it('openPalette resets query/index and opens', () => {
     const ui = useUi()
