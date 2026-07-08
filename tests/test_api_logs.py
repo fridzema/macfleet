@@ -36,11 +36,11 @@ def test_logs_endpoint_maps_runtime_error_to_409_with_cors():
     client = TestClient(build_app(fleet))
     r = client.get("/vms/cua-tahoe/logs?lines=100", headers={"Origin": "http://localhost:1420"})
     assert r.status_code == 409
-    assert r.headers.get("access-control-allow-origin") == "*"
+    assert r.headers.get("access-control-allow-origin") == "http://localhost:1420"
 
 
 def test_cors_header_present():
     fleet = Fleet(tart=fake_tart(), run=lambda argv: subprocess.CompletedProcess(argv, 0, "[]", ""))
     client = TestClient(build_app(fleet))
     r = client.get("/vms", headers={"Origin": "tauri://localhost"})
-    assert r.headers.get("access-control-allow-origin") == "*"
+    assert r.headers.get("access-control-allow-origin") == "tauri://localhost"

@@ -80,7 +80,9 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAP
 
     api = FastAPI(title="macfleet", lifespan=lifespan)
     api.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+        CORSMiddleware,
+        allow_origins=["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
+        allow_methods=["*"], allow_headers=["*"],
     )
 
     @api.exception_handler(RuntimeError)
@@ -177,6 +179,14 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAP
     @api.get("/vms/{name}/status")
     def status(name: str) -> dict:
         return {"healthy": fleet.status(name)}
+
+    @api.get("/agents/activity")
+    def agents_activity(limit: int = 20) -> list[dict]:
+        return fleet.activity_recent(limit)
+
+    @api.get("/vms/{name}/metrics")
+    def metrics(name: str) -> dict:
+        return fleet.metrics(name)
 
     @api.get("/vms/{name}/logs")
     def logs(name: str, lines: int = 100) -> dict:

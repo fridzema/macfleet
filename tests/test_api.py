@@ -98,6 +98,12 @@ class FakeFleet:
         self.calls.append(("reap",))
         return ["mf-old"]
 
+    def activity_recent(self, limit=20):
+        return [{"who": "claude-code", "action": "created", "target": "web", "ts": 5.0}][:limit]
+
+    def metrics(self, name):
+        return {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
+
 
 def test_list_vms_delegates_to_fleet():
     # Health-marking logic itself is covered by Fleet.list_vms tests (test_connect.py);
@@ -125,7 +131,7 @@ def test_up_missing_golden_returns_409_with_cors():
     fake = FakeFleet(up_error=RuntimeError('tart clone mf-golden mf-test failed: does not exist'))
     r = TestClient(build_app(fake)).post("/vms/test/up", headers={"Origin": "http://localhost:1420"})
     assert r.status_code == 409
-    assert r.headers.get("access-control-allow-origin") == "*"
+    assert r.headers.get("access-control-allow-origin") == "http://localhost:1420"
     assert "mf-golden" in r.json()["detail"]
 
 
@@ -227,3 +233,22 @@ def test_reap_endpoint():
     assert r.status_code == 200
     assert r.json() == {"reaped": ["mf-old"]}
     assert ("reap",) in fake.calls
+
+
+def test_agents_activity_endpoint():
+    r = TestClient(build_app(FakeFleet())).get("/agents/activity?limit=5")
+    assert r.status_code == 200
+    assert r.json()[0]["who"] == "claude-code"
+
+
+def test_metrics_endpoint():
+    r = TestClient(build_app(FakeFleet())).get("/vms/web/metrics")
+    assert r.json() == {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
+
+
+def test_cors_allows_tauri_origin_and_denies_others():
+    client = TestClient(build_app(FakeFleet()))
+    ok = client.get("/vms", headers={"Origin": "http://localhost:1420"})
+    assert ok.headers.get("access-control-allow-origin") == "http://localhost:1420"
+    bad = client.get("/vms", headers={"Origin": "https://evil.example"})
+    assert bad.headers.get("access-control-allow-origin") is None
