@@ -31,11 +31,13 @@ export interface CreateOptions {
   advancedOpen: boolean
 }
 
-// cpu / RAM (GB) / disk (GB) — matches the design comp's presets verbatim.
-const PRESETS: Record<Preset, { cpu: number; memoryGb: number; disk: number }> = {
-  light: { cpu: 2, memoryGb: 4, disk: 40 },
-  standard: { cpu: 4, memoryGb: 8, disk: 50 },
-  heavy: { cpu: 8, memoryGb: 16, disk: 80 },
+// cpu / RAM (GB) — matches the design comp's presets verbatim. No disk: `tart set
+// --disk-size` is grow-only and mf-golden already ships an ~80GB base disk, so sending
+// a preset disk size (e.g. Light's 40GB) would ask tart to shrink it and fail the clone.
+const PRESETS: Record<Preset, { cpu: number; memoryGb: number }> = {
+  light: { cpu: 2, memoryGb: 4 },
+  standard: { cpu: 4, memoryGb: 8 },
+  heavy: { cpu: 8, memoryGb: 16 },
 }
 
 const LEASE_TTL_SECONDS = 600
@@ -266,9 +268,8 @@ export const useFleet = defineStore('fleet', () => {
         ...(opts.ttl ? { ttl: LEASE_TTL_SECONDS } : {}),
         cpu: preset.cpu,
         memory: preset.memoryGb * 1024,
-        disk: preset.disk,
       })
-      createOptions.value = { ...opts, name: '', advancedOpen: false }
+      createOptions.value = { ...opts, name: '', source: 'golden', advancedOpen: false }
       await refresh()
     } catch (e) {
       error.value = String(e)

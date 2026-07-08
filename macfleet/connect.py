@@ -118,9 +118,14 @@ class Fleet:
         if target not in {v.name for v in self.tart.list()}:
             src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
             self.tart.clone(src, target)
-        if cpu is not None or memory is not None or disk is not None:
+        # `tart set --disk-size` is grow-only — shrinking raises. Only pass it through
+        # when it actually grows the freshly-cloned VM's disk.
+        disk_size = disk
+        if disk is not None and disk <= self.tart.get_config(target)["Disk"]:
+            disk_size = None
+        if cpu is not None or memory is not None or disk_size is not None:
             # freshly-cloned VM is stopped, so `tart set` is valid here
-            self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk)
+            self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
         if ttl is not None:
@@ -130,7 +135,7 @@ class Fleet:
         out = self._run(["sysctl", "-n", "hw.memsize", "hw.ncpu"]).stdout
         memsize, cpu_count = out.split()
         name = self._run(["hostname"]).stdout.strip()
-        return {"total_mem_gb": round(int(memsize) / 1e9), "cpu_count": int(cpu_count), "name": name}
+        return {"total_mem_gb": round(int(memsize) / 1024**3), "cpu_count": int(cpu_count), "name": name}
 
     def up(self, name: str) -> None:
         self.create(name)
