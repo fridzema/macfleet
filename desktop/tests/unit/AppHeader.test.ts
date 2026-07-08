@@ -18,6 +18,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   toggleDark = vi.fn()
   vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(false), toggleDark })
+  vi.spyOn(api, 'agentsActivity').mockResolvedValue([])
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -91,6 +92,52 @@ describe('AppHeader', () => {
     const text = wrapper.find('[data-test="capacity-chip"]').text()
     expect(text).toContain('1 running')
     expect(text).not.toContain('GB')
+    wrapper.unmount()
+  })
+
+  it('shows Σ used RAM over host total once running VMs carry memory_mb', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 48, cpu_count: 8, name: 'Mac' })
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true, memory_mb: 8192 },
+      { name: 'mf-b', state: 'running', source: 'local', healthy: true, memory_mb: 4096 },
+      // Suspended VMs have freed their RAM — excluded from the sum despite carrying memory_mb.
+      { name: 'mf-c', state: 'suspended', source: 'local', healthy: true, memory_mb: 999999 },
+    ]
+    const wrapper = mount(AppHeader)
+    await flushPromises()
+    const text = wrapper.find('[data-test="capacity-chip"]').text()
+    expect(text).toContain('12 / 48 GB')
+    wrapper.unmount()
+  })
+
+  it('treats a running VM missing memory_mb as 0 in the sum when others carry it', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 48, cpu_count: 8, name: 'Mac' })
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true, memory_mb: 8192 },
+      { name: 'mf-b', state: 'running', source: 'local', healthy: true },
+    ]
+    const wrapper = mount(AppHeader)
+    await flushPromises()
+    const text = wrapper.find('[data-test="capacity-chip"]').text()
+    expect(text).toContain('8 / 48 GB')
+    wrapper.unmount()
+  })
+
+  it('falls back to the running-count form when no running VM carries memory_mb', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 48, cpu_count: 8, name: 'Mac' })
+    const fleet = useFleet()
+    fleet.vms = [
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-b', state: 'running', source: 'local', healthy: true, memory_mb: undefined },
+    ]
+    const wrapper = mount(AppHeader)
+    await flushPromises()
+    const text = wrapper.find('[data-test="capacity-chip"]').text()
+    expect(text).toContain('2 running')
+    expect(text).toContain('48 GB')
+    expect(text).not.toContain('/')
     wrapper.unmount()
   })
 
