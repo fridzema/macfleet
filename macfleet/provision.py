@@ -70,5 +70,6 @@ def bake_steps() -> list[str]:
         "TCC (Accessibility + Screen Recording) is seeded automatically via sqlite — "
         "SIP is disabled in the base image, so no manual VNC step is needed; all clones "
         "inherit the grants",
-        "tart stop mf-golden  (snapshot template ready)",
+        "macfleet warm  (boots golden, waits for the guest, then SUSPENDS it) — clones of a "
+        "suspended golden resume in ~2s instead of cold-booting macOS for ~30-60s",
     ]

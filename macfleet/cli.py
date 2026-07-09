@@ -59,6 +59,18 @@ def bake() -> None:
 
 
 @app.command()
+def warm() -> None:
+    """Boot mf-golden, wait for the guest, then suspend it so new VMs resume in ~2s
+    instead of cold-booting. One-time (re-run after re-baking golden)."""
+    typer.echo("Warming mf-golden (boot + wait for guest, then suspend)…")
+    if _fleet().warm_golden():
+        typer.echo("mf-golden is warm — new VMs now resume in ~2s")
+    else:
+        typer.echo("golden guest never became reachable; left running for inspection")
+        raise typer.Exit(1)
+
+
+@app.command()
 def suspend(name: str) -> None:
     """Suspend mf-<name> (freeze running state)."""
     _fleet().suspend(name)
