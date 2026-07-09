@@ -202,6 +202,122 @@ def test_create_without_preset_skips_set(tmp_path):
     assert not any(c[:2] == ["tart", "set"] for c in calls)
 
 
+def test_create_existing_running_name_skips_clone_and_set(tmp_path):
+    # Re-creating a name that's already a running VM (no expired lease) must NOT re-clone
+    # and must NOT `tart set` — set on a running VM fails and previously surfaced as a
+    # spurious "failed to create" 409. It just re-issues `tart run` (idempotent).
+    fleet, calls, spawned, _ = _fleet(
+        tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    fleet.create("web", cpu=8, memory=16384)
+    assert not any(c[:2] == ["tart", "clone"] for c in calls)
+    assert not any(c[:2] == ["tart", "set"] for c in calls)
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def test_create_reclaims_expired_target_name(tmp_path):
+    # The target name is held by a VM whose lease already expired: reclaim it (stop+delete)
+    # then clone fresh over the name.
+    fleet, calls, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-web", "running", "local")], clock_val=2000.0)
+    lease.record("mf-web", ttl=-1)  # expired at t=2000
+    fleet.create("web")
+    assert calls.index(["tart", "delete", "mf-web"]) < calls.index(
+        ["tart", "clone", "mf-golden", "mf-web"])
+
+
+def test_create_does_not_reap_unrelated_expired_vm(tmp_path):
+    # An unrelated expired VM must NOT block create with its (slow) graceful stop — the
+    # background reap loop sweeps it, not create. Creating "web" leaves "mf-old" untouched.
+    fleet, calls, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0)
+    lease.record("mf-old", ttl=-1)  # expired, but unrelated to "web"
+    fleet.create("web")
+    assert not any(c[:2] == ["tart", "delete"] for c in calls)
+    assert not any(c[:3] == ["tart", "stop", "mf-old"] for c in calls)
+
+
+def test_ip_is_cached_and_invalidated_on_stop(tmp_path):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "ip"]:
+            return subprocess.CompletedProcess(argv, 0, "192.168.64.7\n", "")
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    assert fleet.ip("web") == "192.168.64.7"
+    assert fleet.ip("web") == "192.168.64.7"
+    assert len([c for c in calls if c[:2] == ["tart", "ip"]]) == 1  # second call cached
+    fleet.down("web")  # stopping the VM invalidates the cached IP
+    fleet.ip("web")
+    assert len([c for c in calls if c[:2] == ["tart", "ip"]]) == 2  # re-resolved after stop
+
+
+def test_warm_golden_suspends_when_guest_becomes_healthy(tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                [{"Name": "mf-golden", "State": "stopped", "Source": "local"}]), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    spawned = []
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+    monkeypatch.setattr(fleet, "status", lambda name: True)  # guest reachable immediately
+    slept = []
+    assert fleet.warm_golden(sleep=slept.append) is True
+    assert ["tart", "run", "mf-golden", "--no-graphics"] in spawned
+    assert ["tart", "suspend", "mf-golden"] in calls
+    assert slept == []  # healthy on the first poll, never slept
+
+
+def test_warm_golden_times_out_without_suspending(tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                [{"Name": "mf-golden", "State": "stopped", "Source": "local"}]), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    now = {"t": 0.0}
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+                  clock=lambda: now["t"])
+    monkeypatch.setattr(fleet, "status", lambda name: False)  # never reachable
+
+    def sleep(p):
+        now["t"] += p
+
+    assert fleet.warm_golden(timeout=10.0, poll=3.0, sleep=sleep) is False
+    assert not any(c[:2] == ["tart", "suspend"] for c in calls)
+
+
+def test_spawn_detaches_into_new_session(monkeypatch):
+    import macfleet.connect as connect_mod
+
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, argv, **kwargs):
+            seen["argv"] = argv
+            seen.update(kwargs)
+
+    monkeypatch.setattr(connect_mod.subprocess, "Popen", FakePopen)
+    connect_mod._spawn(["tart", "run", "mf-x", "--no-graphics"])
+    # Must break out of the engine's process group so a group-SIGTERM on app quit
+    # doesn't kill the VM.
+    assert seen["start_new_session"] is True
+
+
 def test_create_disk_shrink_is_guarded_grow_only(tmp_path):
     # tart's `--disk-size` is grow-only: shrinking raises RuntimeError. mf-golden clones
     # at ~80GB, so a preset requesting a smaller disk (e.g. Light's 40GB) must never

@@ -15,6 +15,7 @@ from typing import Any
 from macfleet.activity import Activity, default_activity_path
 from macfleet.leases import Leases, default_state_path
 from macfleet.vm import (
+    GOLDEN,
     Runner,
     Tart,
     VmInfo,
@@ -37,7 +38,14 @@ SSH_OPTS = [
 
 
 def _spawn(argv: list[str]) -> None:
-    subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # start_new_session detaches the child into its own process group + session so it
+    # OUTLIVES the engine. The desktop host spawns this engine in a process group and
+    # SIGTERMs that whole group on quit (see desktop/src-tauri/src/lib.rs); without the
+    # break, every backgrounded `tart run` would inherit that group and be killed on app
+    # exit — hard-stopping the entire fleet on every quit/dev-rebuild. VMs are a persistent
+    # fleet (also driven by the CLI/MCP), so they must not die with the window.
+    subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
 
 
 def ssh_cmd(ip: str, remote_cmd: str) -> list[str]:
@@ -116,6 +124,12 @@ class Fleet:
         self._clock = clock
         self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
+        # Guest IP keyed by full name. A running VM's IP is stable for its boot, but `tart
+        # ip` is a subprocess on the hot path — status() runs it for every running VM on
+        # every /vms poll, and screenshot/exec/ssh hit it too. Cache it and drop the entry
+        # on any op that stops or renames the VM (invalidated in down/nuke/suspend/resume/
+        # rename), so the next call re-resolves against the fresh boot.
+        self._ip_cache: dict[str, str] = {}
 
     def _state(self, full: str) -> str:
         return self.tart.get_config(full)["State"]
@@ -130,10 +144,12 @@ class Fleet:
     def suspend(self, name: str) -> None:
         ensure_mutable(name)
         self.tart.suspend(fullname(name))
+        self._forget_ip(fullname(name))
         self._leases.suspend(fullname(name))
 
     def resume(self, name: str) -> None:
         ensure_mutable(name)
+        self._forget_ip(fullname(name))
         self._spawn(["tart", "run", fullname(name), "--no-graphics"])
         self._leases.unsuspend(fullname(name))
 
@@ -142,23 +158,57 @@ class Fleet:
                memory: int | None = None, disk: int | None = None) -> None:
         target = ensure_mutable(name)
         validate_name(name)
-        self.reap()
-        if target not in {v.name for v in self.tart.list()}:
+        # One `tart list`, reused for both the reclaim check and the existence check.
+        # Deliberately NOT a full self.reap(): reaping every expired lease here would make
+        # an unrelated expired VM's (slow) graceful stop block this create. The API's
+        # background reap loop and list_vms() sweep those; create only needs to reclaim the
+        # ONE name it's about to take if a lease on it already expired.
+        existing = {v.name for v in self.tart.list()}
+        if target in existing and target in set(self._leases.expired(self._clock())):
+            try:
+                self.nuke(shortname(target))
+            except RuntimeError:
+                pass
+            self._leases.drop(target)
+            existing.discard(target)
+        cloned = target not in existing
+        if cloned:
             src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
             self.tart.clone(src, target)
-        # `tart set --disk-size` is grow-only — shrinking raises. Only pass it through
-        # when it actually grows the freshly-cloned VM's disk.
-        disk_size = disk
-        if disk is not None and disk <= self.tart.get_config(target)["Disk"]:
-            disk_size = None
-        if cpu is not None or memory is not None or disk_size is not None:
-            # freshly-cloned VM is stopped, so `tart set` is valid here
-            self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
-        self._res_cache.pop(target, None)
+            # Resources can only be set on a stopped VM, and only a freshly-cloned one is
+            # stopped here — applying them to a pre-existing (possibly running) VM would
+            # make `tart set` fail. `tart set --disk-size` is also grow-only, so pass it
+            # through only when it grows the clone's disk.
+            disk_size = disk
+            if disk is not None and disk <= self.tart.get_config(target)["Disk"]:
+                disk_size = None
+            if cpu is not None or memory is not None or disk_size is not None:
+                self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
+            self._res_cache.pop(target, None)
         # background `tart run` so it doesn't block the caller
         self._spawn(["tart", "run", target, "--no-graphics"])
         if ttl is not None:
             self._leases.record(target, ttl)
+
+    def warm_golden(self, timeout: float = 180.0, poll: float = 3.0,
+                    sleep: Callable[[float], None] = time.sleep) -> bool:
+        """Boot mf-golden, wait for its guest server, then SUSPEND it — so every future
+        create clones an already-booted image that resumes in ~2s instead of cold-booting
+        macOS for ~30-60s (the dominant cost of `create`). One-time; re-run after re-baking
+        golden. Returns True once golden is suspended-warm, False if the guest never became
+        reachable within `timeout` (golden left running so it can be inspected)."""
+        if GOLDEN not in {v.name for v in self.tart.list()}:
+            raise RuntimeError(f"{GOLDEN} not found — bake it first (see `macfleet bake`)")
+        self._forget_ip(GOLDEN)
+        self._spawn(["tart", "run", GOLDEN, "--no-graphics"])
+        deadline = self._clock() + timeout
+        while self._clock() < deadline:
+            if self.status("golden"):
+                self.tart.suspend(GOLDEN)
+                self._forget_ip(GOLDEN)
+                return True
+            sleep(poll)
+        return False
 
     def host_info(self) -> dict:
         out = self._run(["sysctl", "-n", "hw.memsize", "hw.ncpu"]).stdout
@@ -210,6 +260,7 @@ class Fleet:
     def down(self, name: str) -> None:
         ensure_mutable(name)
         self.tart.stop(fullname(name))
+        self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
 
     def nuke(self, name: str) -> None:
@@ -220,10 +271,21 @@ class Fleet:
             pass
         self.tart.delete(fullname(name))
         self._res_cache.pop(fullname(name), None)
+        self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
 
     def ip(self, name: str) -> str:
-        return self.tart.ip(fullname(name))
+        full = fullname(name)
+        cached = self._ip_cache.get(full)
+        if cached:
+            return cached
+        ip = self.tart.ip(full)
+        if ip:
+            self._ip_cache[full] = ip
+        return ip
+
+    def _forget_ip(self, full: str) -> None:
+        self._ip_cache.pop(full, None)
 
     def ssh(self, name: str, remote_cmd: str) -> str:
         ensure_mutable(name)
@@ -288,6 +350,7 @@ class Fleet:
         validate_name(new)
         self.tart.rename(fullname(old), fullname(new))
         self._res_cache.pop(fullname(old), None)
+        self._forget_ip(fullname(old))
         self._leases.rename(fullname(old), fullname(new))
 
     def duplicate(self, name: str, new: str) -> None:
