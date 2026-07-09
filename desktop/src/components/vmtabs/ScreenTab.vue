@@ -53,9 +53,15 @@ let typedTimer: ReturnType<typeof setTimeout> | null = null
 // otherwise a late screenshot for the OLD vm could paint over the newly-selected one, and
 // a click on that stale frame would be sent to the current (different) VM.
 let generation = 0
+// A screenshot is a 2-3MB PNG the guest serves serially; on a loaded guest one can take
+// longer than the 1s poll. Without this guard the interval would stack overlapping
+// requests, starving the guest's /status healthcheck (which flaps the VM to "booting")
+// and compounding load. Skip a tick while one is still in flight.
+let inFlight = false
 
 async function poll() {
-  if (paused.value || !active.value) return
+  if (paused.value || !active.value || inFlight) return
+  inFlight = true
   const myGen = generation
   const name = props.name
   try {
@@ -65,6 +71,8 @@ async function poll() {
   } catch {
     // Transient failure (guest still settling, screenshot busy, etc.) — keep the last
     // good frame rather than blanking the screen on every miss.
+  } finally {
+    inFlight = false
   }
 }
 

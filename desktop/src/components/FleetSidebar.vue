@@ -119,9 +119,23 @@ function selectRow(name: string): void {
 // `tickTtl`'s comment in stores/fleet.ts) so a component has to call it periodically.
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let ttlTimer: ReturnType<typeof setInterval> | null = null
+// Serialize the polls: /vms fans out a subprocess (tart) + guest round-trip per VM, so
+// under load one refresh can exceed the 2s interval. Firing store.refresh on a bare
+// setInterval would then stack overlapping /vms calls and compound the tart/ssh load that
+// makes the fleet flap in the first place. Skip a tick while one is still in flight.
+let refreshing = false
+async function pollRefresh(): Promise<void> {
+  if (refreshing) return
+  refreshing = true
+  try {
+    await store.refresh()
+  } finally {
+    refreshing = false
+  }
+}
 onMounted(() => {
   store.refresh()
-  refreshTimer = setInterval(store.refresh, 2000)
+  refreshTimer = setInterval(pollRefresh, 2000)
   ttlTimer = setInterval(store.tickTtl, 1000)
 })
 onUnmounted(() => {
