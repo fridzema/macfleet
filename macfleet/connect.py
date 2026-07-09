@@ -310,13 +310,16 @@ class Fleet:
     def snapshot(self, name: str, label: str) -> str:
         src = ensure_mutable(name)
         validate_label(label)
+        sid = f"mfsnap-{shortname(name)}-{label}"
+        if sid in {v.name for v in self.tart.list()}:
+            raise RuntimeError(f"snapshot {shortname(name)}-{label} already exists")
         was_running = self._state(src) == "running"
         if was_running:
             try:
                 self.tart.suspend(src)
             except RuntimeError:
                 self.tart.stop(src)  # clean-disk fallback if the image can't suspend
-        self.tart.clone(src, f"mfsnap-{shortname(name)}-{label}")
+        self.tart.clone(src, sid)
         if was_running:
             self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
             self._leases.unsuspend(src)
@@ -368,6 +371,28 @@ class Fleet:
             self._spawn(["tart", "run", src, "--no-graphics"])
             self._leases.unsuspend(src)
             self._spawn(["tart", "run", fullname(new), "--no-graphics"])
+
+    def restore(self, name: str, snapshot_id: str) -> None:
+        """Restore mf-<name> to a snapshot: stop+delete the current VM (if any), clone the
+        snapshot over its name, and boot it (resumes the captured state). Destructive — the
+        VM's current disk/state is discarded. Works when the VM no longer exists (recreate)."""
+        target = ensure_mutable(name)
+        validate_name(name)
+        snap = f"mfsnap-{snapshot_id}"
+        names = {v.name for v in self.tart.list()}
+        if snap not in names:
+            raise RuntimeError(f"snapshot {snapshot_id} not found")
+        if target in names:
+            try:
+                self.tart.stop(target)
+            except RuntimeError:
+                pass
+            self.tart.delete(target)
+            self._res_cache.pop(target, None)
+            self._forget_ip(target)
+            self._leases.unsuspend(target)
+        self.tart.clone(snap, target)
+        self._spawn(["tart", "run", target, "--no-graphics"])
 
     def resources(self, name: str) -> dict:
         c = self.tart.get_config(fullname(name))

@@ -57,6 +57,19 @@ def test_reap_command(monkeypatch):
     assert result.stdout == "mf-old\nmf-stale\n"
 
 
+def test_restore_command(monkeypatch):
+    calls = {}
+
+    class FakeFleet:
+        def restore(self, name, snapshot_id):
+            calls["restore"] = (name, snapshot_id)
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["restore", "web", "web-clean"])
+    assert result.exit_code == 0
+    assert calls["restore"] == ("web", "web-clean")
+
+
 def test_snapshot_command(monkeypatch):
     calls = {}
 

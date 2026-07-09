@@ -347,3 +347,34 @@ describe('FleetSidebar — polling', () => {
     wrapper.unmount()
   })
 })
+
+describe('FleetSidebar — snapshot rows', () => {
+  it('two-step deletes a snapshot from its row', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'listSnapshots').mockResolvedValue([
+      { id: 'web-clean', vm: 'web', label: 'clean', size: 2 },
+    ])
+    const wrapper = mount(FleetSidebar)
+    const s = useFleet()
+    const del = vi.spyOn(s, 'deleteSnapshot').mockResolvedValue()
+    await flushPromises()
+    await wrapper.find('[data-test="snap-delete"]').trigger('click') // arm
+    expect(del).not.toHaveBeenCalled()
+    await wrapper.find('[data-test="snap-delete"]').trigger('click') // confirm
+    expect(del).toHaveBeenCalledWith('web-clean')
+  })
+
+  it("two-step restores the snapshot's VM from its row", async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'listSnapshots').mockResolvedValue([
+      { id: 'web-clean', vm: 'web', label: 'clean', size: 2 },
+    ])
+    const wrapper = mount(FleetSidebar)
+    const s = useFleet()
+    const restore = vi.spyOn(s, 'restoreVM').mockResolvedValue()
+    await flushPromises()
+    await wrapper.find('[data-test="snap-restore"]').trigger('click')
+    await wrapper.find('[data-test="snap-restore"]').trigger('click')
+    expect(restore).toHaveBeenCalledWith('web', 'web-clean')
+  })
+})
