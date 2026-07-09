@@ -235,6 +235,18 @@ export const useFleet = defineStore('fleet', () => {
   const deleteSnapshot = (id: string) =>
     run(() => api.deleteSnapshot(id), 'Failed to delete snapshot')
 
+  async function restoreVM(name: string, snapshotId: string): Promise<void> {
+    toast(`Restoring ${name}…`, '↺')
+    try {
+      await api.restore(name, snapshotId)
+      await refresh()
+      toast('Restored', '✓')
+    } catch (e) {
+      error.value = String(e)
+      toast(`Failed to restore ${name}`, '⚠')
+    }
+  }
+
   async function snapshotVM(name: string, label: string): Promise<void> {
     toast(`Freezing state of ${name}…`, '◈')
     try {
@@ -363,6 +375,7 @@ export const useFleet = defineStore('fleet', () => {
     suspend,
     resume,
     snapshotVM,
+    restoreVM,
     duplicate,
     rename,
     deleteSnapshot,

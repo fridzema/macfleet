@@ -244,6 +244,23 @@ describe('fleet store — lifecycle mutations', () => {
     expect(useToasts().toasts.value.some((t) => t.msg.includes('delete snapshot'))).toBe(true)
   })
 
+  it('restoreVM calls api.restore then refreshes and toasts', async () => {
+    const restore = vi.spyOn(api, 'restore').mockResolvedValue({})
+    const s = useFleet()
+    await s.restoreVM('web', 'web-clean')
+    expect(restore).toHaveBeenCalledWith('web', 'web-clean')
+    expect(useToasts().toasts.value.some((t) => t.msg === 'Restored')).toBe(true)
+    expect(s.error).toBeNull()
+  })
+
+  it('restoreVM sets error and toasts on failure', async () => {
+    vi.spyOn(api, 'restore').mockRejectedValue(new Error('409'))
+    const s = useFleet()
+    await s.restoreVM('web', 'web-clean')
+    expect(s.error).toContain('409')
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('Failed to restore web'))).toBe(true)
+  })
+
   it('snapshotVM toasts start + calls api.snapshot + refreshes + toasts success', async () => {
     const snap = vi.spyOn(api, 'snapshot').mockResolvedValue({ snapshot_id: 'web-golden' })
     const s = useFleet()
