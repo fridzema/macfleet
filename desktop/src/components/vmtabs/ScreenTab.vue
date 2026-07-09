@@ -21,10 +21,25 @@ const rawState = computed(() => {
   return vm.value?.state ?? 'stopped'
 })
 
-// Gate polling on the tart-reported state, which is stable — NOT on the health flag,
-// which flaps under load (the guest's health check competes with screenshots on the
-// guest) and would otherwise blank the frame on every flap.
-const active = computed(() => rawState.value === 'running')
+// A fresh VM is tart-`running` within seconds but macOS keeps cold-booting for ~30-60s
+// before the in-guest server answers. `everHealthy` goes sticky-true the first time the
+// guest passes a health check: BEFORE that we treat a running VM as still booting (show
+// the overlay, don't hammer the unreachable guest with a screenshot every second); AFTER
+// that we keep polling on the stable raw state, since the health flag flaps under load
+// (the health check competes with screenshots on the guest) and would blank the frame.
+const everHealthy = ref(false)
+watch(
+  () => vm.value?.healthy === true,
+  (h) => {
+    if (h) everHealthy.value = true
+  },
+)
+
+const active = computed(() => rawState.value === 'running' && everHealthy.value)
+// A running-but-never-yet-healthy VM surfaces as `booting` so OVERLAY.booting renders.
+const displayState = computed(() =>
+  rawState.value === 'running' && !everHealthy.value ? 'booting' : rawState.value,
+)
 
 const shot = ref<string | null>(null)
 const paused = ref(false)
@@ -62,6 +77,9 @@ function restart() {
 watch(
   () => props.name,
   () => {
+    // Re-arm the booting gate for the newly-selected VM (a switch to a still-booting
+    // VM must not inherit the previous VM's ever-healthy state).
+    everHealthy.value = vm.value?.healthy === true
     shot.value = null
     restart()
   },
@@ -158,7 +176,7 @@ const OVERLAY: Record<string, { msg: string; sub: string; resumable: boolean; sp
 }
 const overlay = computed(
   () =>
-    OVERLAY[rawState.value] ?? {
+    OVERLAY[displayState.value] ?? {
       msg: 'Stopped',
       sub: 'This VM is powered off. Resume it to see the screen.',
       resumable: true,

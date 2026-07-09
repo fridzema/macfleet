@@ -8,10 +8,20 @@ const store = useFleet()
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
-// Gate tailing on the tart-reported state (stable), same rationale as ScreenTab: logs
-// come from the guest over SSH, only reachable while the VM runs.
+// Logs come from the guest over SSH, which — like the computer-server — only answers
+// once macOS has finished cold-booting (~30-60s after tart reports `running`). Gate
+// tailing on a sticky `everHealthy` (same rationale as ScreenTab): don't poll a
+// still-booting guest, and surface a distinct "booting" hint rather than "not running".
 const vm = computed(() => store.vms.find((v) => short(v.name) === props.name))
-const active = computed(() => vm.value?.state === 'running')
+const everHealthy = ref(false)
+watch(
+  () => vm.value?.healthy === true,
+  (h) => {
+    if (h) everHealthy.value = true
+  },
+)
+const booting = computed(() => vm.value?.state === 'running' && !everHealthy.value)
+const active = computed(() => vm.value?.state === 'running' && everHealthy.value)
 
 // Comp line 714's color map — the real `api.logs` payload is a raw text blob (not
 // structured {t, level, msg} records like the comp's mock data), so each line is
@@ -76,7 +86,14 @@ function restart(): void {
   poll()
   timer = setInterval(poll, 2000)
 }
-watch(() => props.name, restart, { immediate: true })
+watch(
+  () => props.name,
+  () => {
+    everHealthy.value = vm.value?.healthy === true
+    restart()
+  },
+  { immediate: true },
+)
 watch(active, restart)
 onBeforeUnmount(() => timer && clearInterval(timer))
 
@@ -118,7 +135,10 @@ watch(logLines, scrollToBottom, { flush: 'post' })
       data-test="logscroll"
       class="min-h-0 flex-1 overflow-auto rounded-[11px] border border-[var(--border)] bg-black px-[15px] py-3 font-mono text-[11.5px] leading-[1.7]"
     >
-      <div v-if="!active" data-test="not-running" class="text-[#6c6c76]">VM not running</div>
+      <div v-if="booting" data-test="booting" class="text-[#6c6c76]">
+        waiting for the guest to finish booting…
+      </div>
+      <div v-else-if="!active" data-test="not-running" class="text-[#6c6c76]">VM not running</div>
       <div v-else-if="logLines.length === 0" class="text-[#6c6c76]">waiting for logs…</div>
       <template v-else>
         <div v-for="(ln, i) in logLines" :key="i" data-test="log-line" class="flex gap-2.5">

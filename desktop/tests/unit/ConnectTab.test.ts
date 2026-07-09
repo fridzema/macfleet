@@ -4,7 +4,16 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ConnectTab from '../../src/components/vmtabs/ConnectTab.vue'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
-import { api, type ConnectionInfo } from '../../src/shared/api'
+import { api, type ConnectionInfo, type Vm } from '../../src/shared/api'
+import { useFleet } from '../../src/stores/fleet'
+
+const vmRec = (overrides: Partial<Vm> = {}): Vm => ({
+  name: 'mf-web',
+  state: 'running',
+  source: 'local',
+  healthy: true,
+  ...overrides,
+})
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: vi.fn(),
@@ -216,6 +225,54 @@ describe('ConnectTab — unavailable state', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="unavailable"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('ConnectTab — booting-aware', () => {
+  it('shows a booting hint (not the generic unavailable) when a running VM has no IP yet', async () => {
+    const store = useFleet()
+    store.vms = [vmRec({ state: 'running', healthy: false })]
+    vi.spyOn(api, 'connection').mockRejectedValue(new Error('GET /vms/web/connection -> 409'))
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="booting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="unavailable"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('resolves a VM name that does not carry the mf- prefix unchanged (defensive passthrough)', async () => {
+    const store = useFleet()
+    store.vms = [vmRec({ name: 'standalone', state: 'running', healthy: false })]
+    vi.spyOn(api, 'connection').mockRejectedValue(new Error('no ip'))
+    const wrapper = mount(ConnectTab, { props: { name: 'standalone' } })
+    await flushPromises()
+    // Found the running VM via the passthrough → booting hint, not the stopped unavailable.
+    expect(wrapper.find('[data-test="booting"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('re-fetches and shows the cards once the guest becomes healthy', async () => {
+    const store = useFleet()
+    store.vms = [vmRec({ state: 'running', healthy: false })]
+    const fetch = vi
+      .spyOn(api, 'connection')
+      .mockRejectedValueOnce(new Error('GET /vms/web/connection -> 409'))
+      .mockResolvedValue(connection())
+    const wrapper = mount(ConnectTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="connect-item"]')).toHaveLength(0)
+
+    // Guest finishes booting → healthy flips true → connection re-fetched.
+    store.vms = [vmRec({ state: 'running', healthy: true })]
+    await flushPromises()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[data-test="connect-item"]')).toHaveLength(4)
+
+    // A later health flap to false must NOT trigger another fetch (only healthy→true does).
+    store.vms = [vmRec({ state: 'running', healthy: false })]
+    await flushPromises()
+    expect(fetch).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

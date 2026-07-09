@@ -104,6 +104,49 @@ describe('LogsTab — tailing', () => {
   })
 })
 
+describe('LogsTab — booting-aware', () => {
+  it('does not tail SSH while the guest is still booting; shows a booting hint', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: false })]
+    const logs = vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'x' })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(logs).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="booting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="not-running"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('starts tailing once the guest reports healthy', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: false })]
+    const logs = vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'boot ok' })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(logs).not.toHaveBeenCalled()
+
+    store.vms = [vm({ state: 'running', healthy: true })]
+    await flushPromises()
+    expect(logs).toHaveBeenCalledWith('web')
+    wrapper.unmount()
+  })
+
+  it('keeps tailing through a health flap once the guest has been healthy (sticky)', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: true })]
+    const logs = vi.spyOn(api, 'logs').mockResolvedValue({ lines: 'boot ok' })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    const before = logs.mock.calls.length
+
+    store.vms = [vm({ state: 'running', healthy: false })]
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(logs.mock.calls.length).toBeGreaterThan(before)
+    wrapper.unmount()
+  })
+})
+
 describe('LogsTab — pause', () => {
   it('pause toggle stops polling until resumed', async () => {
     vi.useFakeTimers()
