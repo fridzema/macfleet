@@ -317,6 +317,69 @@ describe('ScreenTab — non-running overlays', () => {
   })
 })
 
+describe('ScreenTab — booting-aware polling', () => {
+  it('a tart-running but never-healthy VM shows the Booting overlay and does NOT poll the guest', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: false })]
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    // No screenshot flood while the guest is unreachable during macOS boot.
+    expect(shot).not.toHaveBeenCalled()
+    // The informative booting overlay renders (not the generic "Connecting…").
+    expect(wrapper.find('[data-test="overlay-msg"]').text()).toBe('Booting — waiting for guest')
+    expect(wrapper.find('[data-test="shot"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('starts polling once the guest reports healthy', async () => {
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: false })]
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(shot).not.toHaveBeenCalled()
+
+    // Guest finishes booting → healthy flips true.
+    store.vms = [vm({ state: 'running', healthy: true })]
+    await flushPromises()
+    expect(shot).toHaveBeenCalledWith('web')
+    wrapper.unmount()
+  })
+
+  it('keeps polling through a health flap once the guest has been healthy (anti-flap sticky)', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm({ state: 'running', healthy: true })]
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    const before = shot.mock.calls.length
+
+    // Health flaps false under load — polling must continue (gated on ever-healthy).
+    store.vms = [vm({ state: 'running', healthy: false })]
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(shot.mock.calls.length).toBeGreaterThan(before)
+    wrapper.unmount()
+  })
+
+  it('re-arms the booting gate when switching from a healthy VM to a still-booting one', async () => {
+    const store = useFleet()
+    store.vms = [vm({ name: 'mf-web', healthy: true }), vm({ name: 'mf-db', healthy: false })]
+    const shot = vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(shot).toHaveBeenCalledWith('web')
+
+    await wrapper.setProps({ name: 'db' })
+    await flushPromises()
+    // The booting VM must not be screenshot-polled, and shows the booting overlay.
+    expect(shot).not.toHaveBeenCalledWith('db')
+    expect(wrapper.find('[data-test="overlay-msg"]').text()).toBe('Booting — waiting for guest')
+    wrapper.unmount()
+  })
+})
+
 describe('ScreenTab — pause & fullscreen', () => {
   it('pause toggle stops polling until resumed', async () => {
     vi.useFakeTimers()

@@ -2,9 +2,15 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useToasts } from '../../composables/useToasts'
 import { api, type ConnectionInfo } from '../../shared/api'
+import { useFleet } from '../../stores/fleet'
 
 const props = defineProps<{ name: string }>()
 const { add: toast } = useToasts()
+const store = useFleet()
+
+const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
+const vm = computed(() => store.vms.find((v) => short(v.name) === props.name))
+const isRunning = computed(() => vm.value?.state === 'running')
 
 const connection = ref<ConnectionInfo | null>(null)
 const loading = ref(true)
@@ -24,6 +30,15 @@ async function load(name: string): Promise<void> {
   }
 }
 watch(() => props.name, load, { immediate: true })
+// The initial fetch can fire mid-boot, before tart has assigned an IP, leaving us on the
+// unavailable state permanently. A healthy transition means the guest (and its IP) are
+// now up — re-fetch so the details appear without the user re-selecting the VM.
+watch(
+  () => vm.value?.healthy === true,
+  (h) => {
+    if (h) load(props.name)
+  },
+)
 
 interface ConnectItem {
   key: string
@@ -95,6 +110,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="loading" class="text-sm text-[var(--text-faint)]">Loading connection info…</div>
+    <div v-else-if="items.length === 0 && isRunning" data-test="booting" class="text-sm text-[var(--text-faint)]">
+      Guest is still booting — connection details appear once it's reachable.
+    </div>
     <div v-else-if="items.length === 0" data-test="unavailable" class="text-sm text-[var(--text-faint)]">
       No connection info yet — start the VM to get an IP address.
     </div>
