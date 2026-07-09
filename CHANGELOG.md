@@ -3,6 +3,40 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-07-09
+
+Reliability and performance pass on the VM lifecycle — fleet VMs survive the
+app quitting, creates are faster, and the status display stops flapping — plus
+the `macfleet warm` command and a working computer-use driver.
+
+### Added
+
+- **`macfleet warm`** boots the golden image, waits for its guest server, then
+  suspends it, so new VMs resume in ~2s instead of cold-booting macOS for
+  ~30-60s (the dominant cost of a create). One-time; the bake checklist now
+  ends with this step.
+- **Claude computer-use driver.** `AnthropicDriver` (previously a stub) now
+  drives the guest via Claude's `computer_20251124` tool, holding the
+  conversation across turns and translating each action into the agent
+  harness's click/type/done loop.
+
+### Fixed
+
+- **Fleet VMs survive the desktop app quitting.** `tart run` is detached into
+  its own session, so the app's shutdown SIGTERM to the engine's process group
+  no longer hard-stops every VM and force a cold re-boot on the next launch.
+- **Status no longer flaps between running and booting.** The guest IP is
+  cached off the health-check hot path, and both the Screen-tab screenshot poll
+  and the fleet-list poll skip a tick while a request is still in flight, so a
+  slow 2-3MB screenshot can't starve the guest healthcheck.
+- **Faster VM creation.** `create` lists VMs once instead of twice and no longer
+  runs a full reap first — an unrelated expired VM's slow graceful stop no
+  longer blocks the clone.
+- **Re-creating a running VM name** no longer fails with a 409; resources are
+  applied only to a freshly-cloned (stopped) VM.
+- **"Creating" rows can no longer spin forever** — a create whose boot never
+  lands clears after a 120s deadline with a warning toast.
+
 ## [0.1.1] - 2026-07-09
 
 Security hardening of the local engine API and the golden template, plus fixes to
