@@ -455,6 +455,39 @@ def test_delete_snapshot(tmp_path):
     assert ["tart", "delete", "mfsnap-web-clean"] in calls
 
 
+def test_restore_stops_deletes_clones_runs_when_vm_exists(tmp_path):
+    fleet, calls, spawned, _ = _fleet(tmp_path, vms=[
+        VmInfo("mf-web", "running", "local"),
+        VmInfo("mfsnap-web-clean", "stopped", "local"),
+    ])
+    fleet.restore("web", "web-clean")
+    assert calls.index(["tart", "stop", "mf-web"]) \
+        < calls.index(["tart", "delete", "mf-web"]) \
+        < calls.index(["tart", "clone", "mfsnap-web-clean", "mf-web"])
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def test_restore_recreates_when_vm_absent(tmp_path):
+    fleet, calls, spawned, _ = _fleet(
+        tmp_path, vms=[VmInfo("mfsnap-web-clean", "stopped", "local")])
+    fleet.restore("web", "web-clean")
+    assert not any(c[:2] == ["tart", "delete"] for c in calls)
+    assert ["tart", "clone", "mfsnap-web-clean", "mf-web"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def test_restore_rejects_unknown_snapshot(tmp_path):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    with pytest.raises(RuntimeError, match="not found"):
+        fleet.restore("web", "web-clean")
+
+
+def test_restore_rejects_golden():
+    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")))
+    with pytest.raises(RuntimeError, match="protected template"):
+        fleet.restore("golden", "web-clean")
+
+
 # --- Fleet identity, resources, access ---
 
 
