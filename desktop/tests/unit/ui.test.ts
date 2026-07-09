@@ -208,14 +208,13 @@ describe('ui store — paletteItems', () => {
     expect(suspend).toHaveBeenCalledWith('web')
   })
 
-  it('snapshot item calls fleet.snapshotVM with a default label', () => {
+  it('snapshot item opens the snapshot dialog for the selected VM', () => {
     const fleet = useFleet()
     fleet.vms = [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }]
-    const snapshotVM = vi.spyOn(fleet, 'snapshotVM').mockResolvedValue()
     const ui = useUi()
     ui.selectVm('web')
     ui.paletteItems.find((i) => i.id === 'snap')?.run()
-    expect(snapshotVM).toHaveBeenCalledWith('web', 'web-snap')
+    expect(ui.snapshotTarget).toEqual(['web'])
   })
 
   it('duplicate item calls fleet.duplicate', () => {

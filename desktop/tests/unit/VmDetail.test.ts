@@ -118,12 +118,11 @@ describe('VmDetail — actions', () => {
     wrapper.unmount()
   })
 
-  it('Snapshot calls store.snapshotVM with a default "<name>-snap" label', async () => {
-    const store = useFleet()
-    const snapshotVM = vi.spyOn(store, 'snapshotVM').mockResolvedValue()
+  it('Snapshot opens the snapshot dialog for the VM', async () => {
+    const ui = useUi()
     const wrapper = mount(VmDetail, { props: running })
     await wrapper.find('[data-test="snapshot-btn"]').trigger('click')
-    expect(snapshotVM).toHaveBeenCalledWith('web', 'web-snap')
+    expect(ui.snapshotTarget).toEqual(['web'])
     wrapper.unmount()
   })
 
