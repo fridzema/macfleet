@@ -43,6 +43,9 @@ class FakeFleet:
     def down(self, name):
         self.calls.append(("down", name))
 
+    def restore(self, name, snapshot_id):
+        self.calls.append(("restore", name, snapshot_id))
+
     def nuke(self, name):
         self.calls.append(("nuke", name))
 
@@ -279,3 +282,12 @@ def test_token_disabled_when_unset():
     # Default (no token) keeps the API unauthenticated for CLI/dev use.
     fake = FakeFleet()
     assert TestClient(build_app(fake)).post("/vms/web/nuke").status_code == 200
+
+
+def test_restore_endpoint_calls_fleet():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    r = client.post("/vms/web/restore", json={"snapshot_id": "web-clean"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert ("restore", "web", "web-clean") in fake.calls
