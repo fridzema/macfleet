@@ -25,6 +25,27 @@ def test_bake_prints_checklist():
     assert result.exit_code == 0
 
 
+def test_warm_command_success(monkeypatch):
+    class FakeFleet:
+        def warm_golden(self):
+            return True
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["warm"])
+    assert result.exit_code == 0
+    assert "warm" in result.stdout.lower()
+
+
+def test_warm_command_timeout_exits_nonzero(monkeypatch):
+    class FakeFleet:
+        def warm_golden(self):
+            return False
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["warm"])
+    assert result.exit_code == 1
+
+
 def test_reap_command(monkeypatch):
     class FakeFleet:
         def reap(self):
