@@ -109,6 +109,13 @@ def rename(old: str, new: str) -> None:
 
 
 @app.command()
+def restore(name: str, snapshot_id: str) -> None:
+    """Restore mf-<name> to a snapshot (replaces its disk with the captured state)."""
+    _fleet().restore(name, snapshot_id)
+    typer.echo(f"restored: mf-{name} <- {snapshot_id}")
+
+
+@app.command()
 def duplicate(name: str, new: str) -> None:
     """Duplicate mf-<name> to mf-<new>."""
     _fleet().duplicate(name, new)
