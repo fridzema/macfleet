@@ -14,7 +14,18 @@ from typing import Any
 
 from macfleet.activity import Activity, default_activity_path
 from macfleet.leases import Leases, default_state_path
-from macfleet.vm import Runner, Tart, VmInfo, _run, _run_nocheck, fullname, shortname
+from macfleet.vm import (
+    Runner,
+    Tart,
+    VmInfo,
+    _run,
+    _run_nocheck,
+    ensure_mutable,
+    fullname,
+    shortname,
+    validate_label,
+    validate_name,
+)
 
 GUEST_USER = "admin"
 SERVER_PORT = 8000
@@ -117,18 +128,21 @@ class Fleet:
         return {"cpu": c.get("CPU"), "memory_mb": c.get("Memory"), "disk_gb": c.get("Disk")}
 
     def suspend(self, name: str) -> None:
+        ensure_mutable(name)
         self.tart.suspend(fullname(name))
         self._leases.suspend(fullname(name))
 
     def resume(self, name: str) -> None:
+        ensure_mutable(name)
         self._spawn(["tart", "run", fullname(name), "--no-graphics"])
         self._leases.unsuspend(fullname(name))
 
     def create(self, name: str, from_snapshot: str | None = None,
                ttl: float | None = None, cpu: int | None = None,
                memory: int | None = None, disk: int | None = None) -> None:
+        target = ensure_mutable(name)
+        validate_name(name)
         self.reap()
-        target = fullname(name)
         if target not in {v.name for v in self.tart.list()}:
             src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
             self.tart.clone(src, target)
@@ -194,10 +208,12 @@ class Fleet:
                 for v in vms]
 
     def down(self, name: str) -> None:
+        ensure_mutable(name)
         self.tart.stop(fullname(name))
         self._leases.unsuspend(fullname(name))
 
     def nuke(self, name: str) -> None:
+        ensure_mutable(name)
         try:
             self.tart.stop(fullname(name))
         except RuntimeError:
@@ -210,6 +226,7 @@ class Fleet:
         return self.tart.ip(fullname(name))
 
     def ssh(self, name: str, remote_cmd: str) -> str:
+        ensure_mutable(name)
         return self._run(ssh_cmd(self.ip(name), remote_cmd)).stdout
 
     def status(self, name: str) -> bool:
@@ -229,7 +246,8 @@ class Fleet:
         return self.ssh(name, f"tail -n {int(lines)} {SERVER_LOG} 2>/dev/null || true")
 
     def snapshot(self, name: str, label: str) -> str:
-        src = fullname(name)
+        src = ensure_mutable(name)
+        validate_label(label)
         was_running = self._state(src) == "running"
         if was_running:
             try:
@@ -247,7 +265,9 @@ class Fleet:
         for v in self.tart.list():
             if v.name.startswith("mfsnap-"):
                 sid = v.name[len("mfsnap-"):]
-                vm, _, label = sid.partition("-")
+                # Labels forbid '-' (validate_label), so the last '-' always separates the
+                # (possibly hyphenated) VM name from the label — split from the right.
+                vm, _, label = sid.rpartition("-")
                 out.append({"id": sid, "vm": vm, "label": label, "size": v.size})
         return out
 
@@ -255,6 +275,7 @@ class Fleet:
         self.tart.delete(f"mfsnap-{snapshot_id}")
 
     def computer(self, name: str) -> GuestControl:
+        ensure_mutable(name)
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
             raise RuntimeError(
                 "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only)."
@@ -262,12 +283,17 @@ class Fleet:
         return GuestControl(f"http://{self.ip(name)}:{SERVER_PORT}")
 
     def rename(self, old: str, new: str) -> None:
+        ensure_mutable(old)
+        ensure_mutable(new)
+        validate_name(new)
         self.tart.rename(fullname(old), fullname(new))
         self._res_cache.pop(fullname(old), None)
         self._leases.rename(fullname(old), fullname(new))
 
     def duplicate(self, name: str, new: str) -> None:
-        src = fullname(name)
+        src = ensure_mutable(name)
+        ensure_mutable(new)
+        validate_name(new)
         was_running = self._state(src) == "running"
         if was_running:
             try:
@@ -294,6 +320,7 @@ class Fleet:
 
     def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
                       disk_size: int | None = None, display: str | None = None) -> None:
+        ensure_mutable(name)
         current = self.resources(name)
         if current["state"] == "running":
             raise RuntimeError("stop the VM before changing resources")
@@ -310,10 +337,12 @@ class Fleet:
                 "guest_server": f"http://{ip}:{SERVER_PORT}", "exec": True}
 
     def exec(self, name: str, command: str) -> dict:
+        ensure_mutable(name)
         proc = self._run_nocheck(["tart", "exec", fullname(name), "/bin/sh", "-lc", command])
         return {"stdout": proc.stdout, "exit_code": proc.returncode}
 
     def metrics(self, name: str) -> dict:
+        ensure_mutable(name)
         proc = self._run_nocheck(
             ["tart", "exec", fullname(name), "/bin/sh", "-lc",
              "top -l1 -n0 | grep -E 'CPU usage|PhysMem'"])

@@ -566,3 +566,70 @@ def test_activity_recent_delegates(tmp_path):
                   leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), activity=act)
     r = fleet.activity_recent()
     assert r[0]["who"] == "claude-code" and r[0]["action"] == "created"
+
+
+def test_nuke_rejects_golden_template():
+    # `nuke("golden")` resolves to mf-golden (the clone source); deleting it would break
+    # every future create. Reject via both the short and full name; nothing is deleted.
+    seen = []
+    def tart_run(argv):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+    fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
+    for target in ("golden", "mf-golden"):
+        with pytest.raises(RuntimeError, match="protected template"):
+            fleet.nuke(target)
+    assert not any(a[:2] == ["tart", "delete"] for a in seen)
+
+
+def test_rename_rejects_golden_destination():
+    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")))
+    with pytest.raises(RuntimeError, match="protected template"):
+        fleet.rename("web", "golden")
+
+
+def test_golden_blocks_exec_ssh_computer_and_metrics(tmp_path, monkeypatch):
+    # Command-execution and control paths must refuse mf-golden too, not just the
+    # lifecycle mutations. No tart/ssh command should be issued for any of them.
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
+    fleet, calls, _, _ = _fleet(tmp_path)
+    for call in (lambda: fleet.exec("golden", "rm -rf /"),
+                 lambda: fleet.ssh("golden", "whoami"),
+                 lambda: fleet.computer("golden"),
+                 lambda: fleet.metrics("golden")):
+        with pytest.raises(RuntimeError, match="protected template"):
+            call()
+    assert calls == []
+
+
+def test_duplicate_rejects_golden_source():
+    # duplicate() suspends/stops its source, so a golden *source* must be rejected, not
+    # only a golden destination.
+    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")))
+    with pytest.raises(RuntimeError, match="protected template"):
+        fleet.duplicate("golden", "copy")
+
+
+def test_snapshots_parse_hyphenated_vm_name(tmp_path):
+    # A VM named `web-api` with label `clean` must parse as vm=web-api, label=clean —
+    # split on the LAST hyphen (labels forbid '-').
+    fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mfsnap-web-api-clean", "stopped", "local", 1.0)])
+    assert fleet.snapshots() == [{"id": "web-api-clean", "vm": "web-api", "label": "clean", "size": 1.0}]
+
+
+def test_create_rejects_invalid_name():
+    seen = []
+    def tart_run(argv):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+    fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
+    for bad in ("we/b", "a?b", "x#y", ""):
+        with pytest.raises(RuntimeError, match="invalid VM name"):
+            fleet.create(bad)
+    assert not any(a[:2] == ["tart", "clone"] for a in seen)
+
+
+def test_snapshot_rejects_hyphenated_label(tmp_path):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "stopped", "local")])
+    with pytest.raises(RuntimeError, match="invalid snapshot label"):
+        fleet.snapshot("web", "not-clean")

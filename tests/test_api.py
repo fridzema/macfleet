@@ -252,3 +252,30 @@ def test_cors_allows_tauri_origin_and_denies_others():
     assert ok.headers.get("access-control-allow-origin") == "http://localhost:1420"
     bad = client.get("/vms", headers={"Origin": "https://evil.example"})
     assert bad.headers.get("access-control-allow-origin") is None
+
+
+def test_token_required_on_mutating_route():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake, token="secret"))
+    # No token -> 401, and the mutating op never reached Fleet.
+    r = client.post("/vms/web/nuke")
+    assert r.status_code == 401
+    assert ("nuke", "web") not in fake.calls
+    # Wrong token -> 401.
+    assert client.post("/vms/web/nuke", headers={"X-Macfleet-Token": "nope"}).status_code == 401
+    # Correct token -> passes through.
+    assert client.post("/vms/web/nuke", headers={"X-Macfleet-Token": "secret"}).status_code == 200
+    assert ("nuke", "web") in fake.calls
+
+
+def test_token_required_on_reads_too():
+    # GET /vms triggers reap() (a side effect), so reads are guarded as well.
+    client = TestClient(build_app(FakeFleet(), token="secret"))
+    assert client.get("/vms").status_code == 401
+    assert client.get("/vms", headers={"X-Macfleet-Token": "secret"}).status_code == 200
+
+
+def test_token_disabled_when_unset():
+    # Default (no token) keeps the API unauthenticated for CLI/dev use.
+    fake = FakeFleet()
+    assert TestClient(build_app(fake)).post("/vms/web/nuke").status_code == 200

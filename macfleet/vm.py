@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,6 +28,46 @@ def fullname(name: str) -> str:
 
 def shortname(name: str) -> str:
     return name[len("mf-"):] if name.startswith("mf-") else name
+
+
+GOLDEN = "mf-golden"
+
+# VM names must be safe as a URL path segment and a tart argument. Labels additionally
+# forbid '-' so the `mfsnap-<vm>-<label>` scheme parses unambiguously even when the VM
+# name itself contains hyphens (see Fleet.snapshots, which splits on the last '-').
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._]{0,63}$")
+
+
+def ensure_mutable(name: str) -> str:
+    """Resolve `name` to its full mf- form and reject the protected golden template.
+    Golden is the read-only clone source for every VM; deleting, renaming, or otherwise
+    mutating it would break all future creates, so no fleet op may target it."""
+    full = fullname(name)
+    if full == GOLDEN:
+        raise RuntimeError(f"{GOLDEN} is the protected template and cannot be modified or deleted")
+    return full
+
+
+def validate_name(name: str) -> str:
+    """Reject VM names not usable as a URL path segment / tart argument. Accepts the short
+    or mf- form; validates (and returns) the short form. Applied when a name is created."""
+    short = shortname(name)
+    if not _NAME_RE.fullmatch(short):
+        raise RuntimeError(
+            f"invalid VM name {short!r}: use letters, digits, '.', '_', '-' (max 64 chars)"
+        )
+    return short
+
+
+def validate_label(label: str) -> str:
+    """Reject snapshot labels containing anything but letters, digits, '.', '_' (notably no
+    '-'), keeping the snapshot id delimiter unambiguous."""
+    if not _LABEL_RE.fullmatch(label):
+        raise RuntimeError(
+            f"invalid snapshot label {label!r}: use letters, digits, '.', '_' (max 64 chars)"
+        )
+    return label
 
 
 @dataclass(frozen=True)

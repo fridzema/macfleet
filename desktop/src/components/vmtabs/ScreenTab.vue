@@ -48,11 +48,19 @@ const lastTyped = ref('')
 const showTyped = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 let typedTimer: ReturnType<typeof setTimeout> | null = null
+// Bumped on every restart() so a poll() in flight when the VM is switched (or flips to
+// stopped) can tell its response is stale once the await resolves, and skip the write —
+// otherwise a late screenshot for the OLD vm could paint over the newly-selected one, and
+// a click on that stale frame would be sent to the current (different) VM.
+let generation = 0
 
 async function poll() {
   if (paused.value || !active.value) return
+  const myGen = generation
+  const name = props.name
   try {
-    const { png_b64 } = await api.screenshot(props.name)
+    const { png_b64 } = await api.screenshot(name)
+    if (myGen !== generation || !active.value || props.name !== name) return
     shot.value = `data:image/png;base64,${png_b64}`
   } catch {
     // Transient failure (guest still settling, screenshot busy, etc.) — keep the last
@@ -61,6 +69,7 @@ async function poll() {
 }
 
 function restart() {
+  generation++
   if (timer) clearInterval(timer)
   timer = null
   if (!active.value) {

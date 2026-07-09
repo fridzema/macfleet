@@ -120,11 +120,14 @@ def connect(name: str) -> None:
 @app.command()
 def serve(port: int = 8765) -> None:
     """Start the local API for the desktop app."""
+    import os
+
     import uvicorn
 
     from macfleet.api import build_app
 
-    uvicorn.run(build_app(), host="127.0.0.1", port=port)
+    uvicorn.run(build_app(token=os.environ.get("MACFLEET_API_TOKEN")),
+                host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":
