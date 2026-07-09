@@ -3,6 +3,33 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-07-09
+
+Security hardening of the local engine API and the golden template, plus fixes to
+the desktop screen stream and the documented checks.
+
+### Security
+
+- **Authenticate the local API.** The desktop launches the engine on an ephemeral
+  per-run port (never a fixed `:8765` a stale server could own) and mints a per-run
+  token, both handed to the webview via a `get_api_config` command. Every request
+  now carries an `X-Macfleet-Token` header, required by the engine on all routes
+  (`GET /vms` reaps expired VMs), closing a CSRF / unauthenticated-access hole on
+  the loopback API.
+- **Protect the golden template.** Every mutating and computer-use path
+  (nuke/rename/duplicate/suspend/resume/up/down/snapshot/set_resources/exec/ssh/
+  computer/metrics) now refuses `mf-golden` across the CLI, API, and MCP server.
+- **Validate VM names and snapshot labels** and percent-encode URL path segments,
+  so a name containing `/`, `#`, or `?` can't target the wrong route or become
+  unmanageable. Labels forbid `-` so hyphenated VM names parse correctly.
+
+### Fixed
+
+- Screen tab no longer paints — or routes clicks to — a stale screenshot after
+  switching VMs (a generation guard drops in-flight responses).
+- `make test-engine` runs the `mcp` extra so the full suite passes, and the
+  documented `cargo clippy -- -D warnings` is green again.
+
 ## [0.1.0] - 2026-07-09
 
 First tagged version — a fleet of disposable macOS VMs on one Apple-silicon host,
@@ -35,4 +62,5 @@ managed over [`tart`](https://github.com/cirruslabs/tart), with a Python engine
 - Computer-use requires a one-time manual TCC (Accessibility + Screen Recording)
   grant on the golden image; see `scripts/bake.sh`.
 
+[0.1.1]: https://github.com/fridzema/macfleet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/fridzema/macfleet/releases/tag/v0.1.0
