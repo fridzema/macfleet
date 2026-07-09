@@ -112,7 +112,7 @@ function suspendResume(): void {
   else store.resume(props.name)
 }
 function snapshot(): void {
-  store.snapshotVM(props.name, `${props.name}-snap`)
+  ui.requestSnapshot([props.name])
 }
 function duplicate(): void {
   store.duplicate(props.name)

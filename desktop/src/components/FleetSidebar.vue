@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
-import { type Vm, vmStatus } from '../shared/api'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { type Snapshot, type Vm, vmStatus } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 import { useUi } from '../stores/ui'
 
@@ -111,6 +111,23 @@ function isActive(name: string, status: string): boolean {
 
 function selectRow(name: string): void {
   ui.selectVm(name)
+}
+
+// Snapshot-row Restore/Delete are both destructive, so each is a two-step confirm: the
+// first click arms {id, action}, the second (same id+action) executes. Any other click
+// re-arms, so switching rows/actions never fires the previously-armed one.
+const armedSnap = ref<{ id: string; action: 'delete' | 'restore' } | null>(null)
+function isArmed(id: string, action: 'delete' | 'restore'): boolean {
+  return armedSnap.value?.id === id && armedSnap.value.action === action
+}
+function snapAction(sn: Snapshot, action: 'delete' | 'restore'): void {
+  if (!isArmed(sn.id, action)) {
+    armedSnap.value = { id: sn.id, action }
+    return
+  }
+  armedSnap.value = null
+  if (action === 'delete') store.deleteSnapshot(sn.id)
+  else store.restoreVM(sn.vm, sn.id)
 }
 
 // Poll the fleet on an interval: this both survives the sidecar cold-start race and
@@ -249,6 +266,24 @@ onUnmounted(() => {
           @click="store.newFromSnapshot(sn)"
         >
           ＋ VM
+        </button>
+        <button
+          type="button"
+          data-test="snap-restore"
+          title="Restore this VM to the snapshot"
+          class="h-[26px] shrink-0 rounded-[7px] border border-[var(--border)] px-2 text-[11px] whitespace-nowrap text-[var(--text-dim)]"
+          @click="snapAction(sn, 'restore')"
+        >
+          {{ isArmed(sn.id, 'restore') ? 'Confirm ↺' : '↺' }}
+        </button>
+        <button
+          type="button"
+          data-test="snap-delete"
+          title="Delete snapshot"
+          class="h-[26px] shrink-0 rounded-[7px] border border-[var(--border)] px-2 text-[11px] whitespace-nowrap text-[var(--red)]"
+          @click="snapAction(sn, 'delete')"
+        >
+          {{ isArmed(sn.id, 'delete') ? 'Confirm 🗑' : '🗑' }}
         </button>
       </div>
     </div>

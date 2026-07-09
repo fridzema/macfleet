@@ -152,6 +152,8 @@ export const api = {
   logs: (n: string, lines = 100) => j<{ lines: string }>(`/vms/${enc(n)}/logs?lines=${lines}`),
   snapshot: (n: string, label: string) =>
     postJson<{ snapshot_id: string }>(`/vms/${enc(n)}/snapshot`, { label }),
+  restore: (n: string, snapshotId: string) =>
+    postJson(`/vms/${enc(n)}/restore`, { snapshot_id: snapshotId }),
   listSnapshots: () => j<Snapshot[]>('/snapshots'),
   deleteSnapshot: (id: string) => j(`/snapshots/${enc(id)}`, { method: 'DELETE' }),
   rename: (n: string, newName: string) => postJson(`/vms/${enc(n)}/rename`, { new: newName }),

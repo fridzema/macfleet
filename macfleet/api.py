@@ -43,6 +43,10 @@ class LabelRequest(BaseModel):
     label: str
 
 
+class RestoreRequest(BaseModel):
+    snapshot_id: str
+
+
 class RenameRequest(BaseModel):
     new: str
 
@@ -155,6 +159,11 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     @api.post("/vms/{name}/duplicate")
     def duplicate(name: str, body: RenameRequest) -> dict:
         fleet.duplicate(name, body.new)
+        return {"ok": True}
+
+    @api.post("/vms/{name}/restore")
+    def restore(name: str, body: RestoreRequest) -> dict:
+        fleet.restore(name, body.snapshot_id)
         return {"ok": True}
 
     @api.get("/vms/{name}/resources")
