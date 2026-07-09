@@ -72,7 +72,7 @@ build-debug:
 test: test-engine test-desktop
 
 test-engine:
-	uv run pytest -q
+	uv run --extra mcp pytest -q
 
 test-desktop:
 	$(MAKE) -C desktop test-unit
@@ -107,7 +107,7 @@ format-desktop:
 setup: setup-engine setup-desktop
 
 setup-engine:
-	uv sync --extra dev
+	uv sync --extra dev --extra mcp
 
 setup-desktop:
 	$(MAKE) -C desktop setup
