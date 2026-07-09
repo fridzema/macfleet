@@ -3,9 +3,10 @@
 A fleet of disposable macOS VMs on a single Apple-silicon host, managed over SSH and
 driven with computer use ([trycua](https://github.com/trycua)'s `cua-computer-server`).
 Spin up N named VMs cloned from one provisioned golden image, SSH in for scripted
-work, or hand a VM to a computer-use agent to click/type through a GUI. Today this is
-a Python engine (CLI + local API); a Tauri desktop app (fleet view, tray, live
-screenshots) is a planned follow-up on top of the same core.
+work, or hand a VM to a computer-use agent to click/type through a GUI. It ships as a
+Python engine (CLI + local API + MCP server) and a Tauri desktop app (fleet view, live
+screen, per-VM terminal/logs/resources) built on the same core. The desktop app is
+currently dev-only — run it with `make dev`; a bundled, signed build is a follow-up.
 
 ## Prerequisites
 
