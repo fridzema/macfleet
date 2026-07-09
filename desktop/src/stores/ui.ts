@@ -47,6 +47,17 @@ export const useUi = defineStore('ui', () => {
   const renameValue = ref('')
   const confirmDeleteVm = ref(false)
 
+  // The VM(s) the SnapshotDialog is naming a snapshot for (short names), or null when
+  // closed. A list so a bulk snapshot can name one label for many VMs. The dialog is the
+  // only place snapshot labels are built — keeping the hyphen-free rule in one spot.
+  const snapshotTarget = ref<string[] | null>(null)
+  function requestSnapshot(names: string[]): void {
+    snapshotTarget.value = names
+  }
+  function closeSnapshot(): void {
+    snapshotTarget.value = null
+  }
+
   function selectVm(name: string | null): void {
     selectedVm.value = name
     // These flags are per-VM-scoped but stored globally, so they MUST reset on every
@@ -131,7 +142,7 @@ export const useUi = defineStore('ui', () => {
       : undefined
     if (sel) {
       const name = short(sel.name)
-      push('snap', `Snapshot ${name}`, 'VM', () => fleet.snapshotVM(name, `${name}-snap`))
+      push('snap', `Snapshot ${name}`, 'VM', () => requestSnapshot([name]))
       push('susp', `${sel.state === 'running' ? 'Suspend' : 'Resume'} ${name}`, 'VM', () =>
         sel.state === 'running' ? fleet.suspend(name) : fleet.resume(name),
       )
@@ -173,6 +184,9 @@ export const useUi = defineStore('ui', () => {
     renaming,
     renameValue,
     confirmDeleteVm,
+    snapshotTarget,
+    requestSnapshot,
+    closeSnapshot,
     startRename,
     cancelRename,
     askDeleteVm,
