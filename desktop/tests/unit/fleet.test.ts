@@ -572,3 +572,27 @@ describe('fleet store — TTL countdown', () => {
     expect(s.leases.db).toBe(4)
   })
 })
+
+describe('fleet store — pending create timeout', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'create').mockResolvedValue({})
+  })
+
+  it('drops a pending create that never lands running, and toasts', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    const s = useFleet()
+    s.createOptions.name = 'web'
+    await s.create()
+    expect(s.pending).toContain('web') // never appeared running in the polled list
+
+    await s.tickTtl() // still within the deadline -> not dropped
+    expect(s.pending).toContain('web')
+
+    now.mockReturnValue(1_000_000 + 120_001) // past CREATE_TIMEOUT_MS
+    await s.tickTtl()
+    expect(s.pending).not.toContain('web')
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('timed out'))).toBe(true)
+    now.mockRestore()
+  })
+})

@@ -42,22 +42,35 @@ const PRESETS: Record<Preset, { cpu: number; memoryGb: number }> = {
 
 const LEASE_TTL_SECONDS = 600
 
+// A create/duplicate clones fast but then cold-boots the guest. If `tart run` fails (disk
+// full, resource limits) the VM never reaches `running`, so its optimistic "creating" row
+// would otherwise spin forever with no error. Give each pending row a generous deadline —
+// well past even a cold ~60s boot — after which it's dropped with a warning toast.
+const CREATE_TIMEOUT_MS = 120_000
+
 // Smooth transient health misses: the guest's /status check competes with the 3MB
 // screenshot stream and occasionally times out, which would otherwise flap a running
 // VM's status to "booting". Hold a previously-healthy VM healthy across a single miss;
 // flip only after two consecutive misses. A never-healthy (booting) VM is unaffected.
 function healthSmoother() {
   const seen = new Map<string, { healthy: boolean; miss: number }>()
-  return (v: Vm): Vm => {
-    const prev = seen.get(v.name)
-    if (v.healthy) {
-      seen.set(v.name, { healthy: true, miss: 0 })
-      return v
-    }
-    const miss = (prev?.miss ?? 0) + 1
-    const held = (prev?.healthy ?? false) && miss < 2
-    seen.set(v.name, { healthy: held, miss })
-    return held ? { ...v, healthy: true } : v
+  return {
+    apply(v: Vm): Vm {
+      const prev = seen.get(v.name)
+      if (v.healthy) {
+        seen.set(v.name, { healthy: true, miss: 0 })
+        return v
+      }
+      const miss = (prev?.miss ?? 0) + 1
+      const held = (prev?.healthy ?? false) && miss < 2
+      seen.set(v.name, { healthy: held, miss })
+      return held ? { ...v, healthy: true } : v
+    },
+    // Drop state for VMs no longer in the fleet so the map doesn't grow unbounded as VMs
+    // are created and nuked over a long-running session.
+    prune(names: Set<string>): void {
+      for (const name of seen.keys()) if (!names.has(name)) seen.delete(name)
+    },
   }
 }
 
@@ -75,6 +88,22 @@ export const useFleet = defineStore('fleet', () => {
   // Short names of VMs being created. Rendered as "creating" rows for instant
   // feedback and pruned once the VM shows up running in the polled list.
   const pending = ref<string[]>([])
+  // Creation deadline (epoch ms) per pending name — drives the boot-failure timeout in
+  // `tickTtl` so a VM whose `tart run` silently failed doesn't spin "creating" forever.
+  const pendingSince = ref<Record<string, number>>({})
+
+  function markPending(name: string): void {
+    if (!pending.value.includes(name)) pending.value = [...pending.value, name]
+    pendingSince.value = { ...pendingSince.value, [name]: Date.now() + CREATE_TIMEOUT_MS }
+  }
+  function clearPending(names: string[]): void {
+    if (!names.length) return
+    const drop = new Set(names)
+    pending.value = pending.value.filter((n) => !drop.has(n))
+    const next = { ...pendingSince.value }
+    for (const n of names) delete next[n]
+    pendingSince.value = next
+  }
 
   const selectedTab = ref<Tab>('screen')
   const createOptions = ref<CreateOptions>({
@@ -150,13 +179,15 @@ export const useFleet = defineStore('fleet', () => {
       const rawVms = await api.listVms()
       // Only mf- fleet VMs are operable; base/OCI images can't be controlled, and
       // mf-golden is the read-only clone template, not a work VM.
-      vms.value = rawVms
-        .filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
-        .map(smooth)
+      const fleetVms = rawVms.filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
+      vms.value = fleetVms.map(smooth.apply)
+      smooth.prune(new Set(fleetVms.map((v) => v.name)))
       error.value = null
       loaded.value = true
-      pending.value = pending.value.filter(
-        (n) => !vms.value.some((v) => short(v.name) === n && v.state === 'running'),
+      clearPending(
+        pending.value.filter((n) =>
+          vms.value.some((v) => short(v.name) === n && v.state === 'running'),
+        ),
       )
     } catch (e) {
       error.value = String(e)
@@ -222,14 +253,14 @@ export const useFleet = defineStore('fleet', () => {
     // START toast — readiness is conveyed by the pending row flipping to "running" once
     // the polled list catches up, NOT a premature toast (the clone's `tart run` is
     // non-blocking, so the VM is still booting when `api.duplicate` resolves).
-    if (!pending.value.includes(newName)) pending.value = [...pending.value, newName]
+    markPending(newName)
     toast(`Duplicating ${name}…`, '⧉')
     try {
       await api.duplicate(name, newName)
       await refresh()
     } catch (e) {
       error.value = String(e)
-      pending.value = pending.value.filter((n) => n !== newName)
+      clearPending([newName])
       toast(`Failed to duplicate ${name}`, '⚠')
     }
   }
@@ -246,7 +277,7 @@ export const useFleet = defineStore('fleet', () => {
 
     // Optimistic: a "creating" row (and, if leased, its countdown) the instant the
     // user asks for it — cloning/booting takes real time server-side.
-    if (!pending.value.includes(name)) pending.value = [...pending.value, name]
+    markPending(name)
     if (opts.ttl) leases.value = { ...leases.value, [name]: LEASE_TTL_SECONDS }
     toast(snap ? `Cloning from ${snap.label}…` : `Creating ${name}…`, '⚡')
 
@@ -261,7 +292,7 @@ export const useFleet = defineStore('fleet', () => {
       await refresh()
     } catch (e) {
       error.value = String(e)
-      pending.value = pending.value.filter((n) => n !== name)
+      clearPending([name])
       if (opts.ttl) {
         const nextLeases = { ...leases.value }
         delete nextLeases[name]
@@ -294,6 +325,18 @@ export const useFleet = defineStore('fleet', () => {
     leases.value = next
     if (expired.length) {
       for (const name of expired) toast(`Lease expired — ${name}`, '⏱')
+      await refresh()
+    }
+
+    // Drop pending rows whose boot never landed (see CREATE_TIMEOUT_MS) so a failed
+    // create surfaces as an error toast instead of spinning "creating" indefinitely.
+    const now = Date.now()
+    const stuck = Object.entries(pendingSince.value)
+      .filter(([, deadline]) => now > deadline)
+      .map(([name]) => name)
+    if (stuck.length) {
+      clearPending(stuck)
+      for (const name of stuck) toast(`Creating ${name} timed out — check the logs`, '⚠')
       await refresh()
     }
   }
