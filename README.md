@@ -16,8 +16,30 @@ screenshots) is a planned follow-up on top of the same core.
 ## Setup
 
 ```bash
-make setup   # uv sync --extra dev
+make setup   # engine venv (uv sync) + desktop deps (bun, Playwright, hooks)
 ```
+
+Engine-only: `make setup-engine`. Desktop-only: `make setup-desktop`.
+
+## Common tasks
+
+`make` (or `make help`) lists all targets. The top-level ones cover both the engine
+and the desktop app:
+
+```bash
+make dev      # run the desktop app (Tauri window; auto-spawns the engine API sidecar)
+make serve    # run the engine API only (:8765)
+make mcp      # run the stdio MCP server
+make build    # build the desktop app bundle
+make test     # all unit tests (engine pytest + desktop vitest)
+make lint     # lint everything (ruff + eslint/biome/clippy)
+make format   # format everything (ruff + biome/cargo fmt)
+```
+
+Scoped variants exist for one half — `make test-engine` / `make test-desktop`,
+`make lint-engine` / `make lint-desktop`, etc. The whole-project aggregates need both
+halves installed; use the scoped targets to run just one. `make e2e` runs the desktop
+Playwright suite (mocked API, no VM needed).
 
 ## Baking the golden image
 
@@ -97,7 +119,7 @@ rename/duplicate, get/set_resources, get_connection, exec, and — when
 ## Verification ladder (L0-L3)
 
 - **L0 — offline, no hardware.** Unit + integration tests against injectable
-  fakes (no real `tart`/SSH). Run with `make test` or `make demo`
+  fakes (no real `tart`/SSH). Run with `make test-engine` or `make demo`
   (`tests/test_integration_l0.py`, a scripted list -> up -> list flow through the API).
 - **L1 — tart reachable.** After `scripts/bake.sh`, run `tart list` and confirm
   `mf-golden` is listed.
