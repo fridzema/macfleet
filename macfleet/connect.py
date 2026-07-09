@@ -372,6 +372,28 @@ class Fleet:
             self._leases.unsuspend(src)
             self._spawn(["tart", "run", fullname(new), "--no-graphics"])
 
+    def restore(self, name: str, snapshot_id: str) -> None:
+        """Restore mf-<name> to a snapshot: stop+delete the current VM (if any), clone the
+        snapshot over its name, and boot it (resumes the captured state). Destructive — the
+        VM's current disk/state is discarded. Works when the VM no longer exists (recreate)."""
+        target = ensure_mutable(name)
+        validate_name(name)
+        snap = f"mfsnap-{snapshot_id}"
+        names = {v.name for v in self.tart.list()}
+        if snap not in names:
+            raise RuntimeError(f"snapshot {snapshot_id} not found")
+        if target in names:
+            try:
+                self.tart.stop(target)
+            except RuntimeError:
+                pass
+            self.tart.delete(target)
+            self._res_cache.pop(target, None)
+            self._forget_ip(target)
+            self._leases.unsuspend(target)
+        self.tart.clone(snap, target)
+        self._spawn(["tart", "run", target, "--no-graphics"])
+
     def resources(self, name: str) -> dict:
         c = self.tart.get_config(fullname(name))
 
