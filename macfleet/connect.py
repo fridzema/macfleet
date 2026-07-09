@@ -310,13 +310,16 @@ class Fleet:
     def snapshot(self, name: str, label: str) -> str:
         src = ensure_mutable(name)
         validate_label(label)
+        sid = f"mfsnap-{shortname(name)}-{label}"
+        if sid in {v.name for v in self.tart.list()}:
+            raise RuntimeError(f"snapshot {shortname(name)}-{label} already exists")
         was_running = self._state(src) == "running"
         if was_running:
             try:
                 self.tart.suspend(src)
             except RuntimeError:
                 self.tart.stop(src)  # clean-disk fallback if the image can't suspend
-        self.tart.clone(src, f"mfsnap-{shortname(name)}-{label}")
+        self.tart.clone(src, sid)
         if was_running:
             self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
             self._leases.unsuspend(src)
