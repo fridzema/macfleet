@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -57,8 +58,20 @@ class ExecRequest(BaseModel):
     command: str
 
 
-def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAPI:
+def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
+              token: str | None = None) -> FastAPI:
     fleet = fleet or Fleet()
+
+    async def _guard(request: Request) -> None:
+        # CSRF/auth: cross-origin form POSTs carry no custom header and CORS does not block
+        # them, so the per-run token is required. Enforced on EVERY route, not just mutating
+        # ones — GET /vms has a side effect (reap() can delete expired VMs) and reads should
+        # not be reachable by an unauthenticated local page/process either. OPTIONS is exempt
+        # so CORS preflight still works. Only enforced when a token is configured.
+        if request.method == "OPTIONS":
+            return
+        if not secrets.compare_digest(request.headers.get("x-macfleet-token", ""), token or ""):
+            raise HTTPException(status_code=401, detail="invalid or missing API token")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -78,7 +91,8 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0) -> FastAP
         finally:
             task.cancel()
 
-    api = FastAPI(title="macfleet", lifespan=lifespan)
+    api = FastAPI(title="macfleet", lifespan=lifespan,
+                  dependencies=[Depends(_guard)] if token else None)
     api.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],

@@ -1,6 +1,6 @@
 use crate::commands;
 use crate::error::AppResult;
-use crate::state::AppState;
+use crate::state::{ApiConfig, AppState};
 use log::info;
 
 #[tauri::command]
@@ -20,4 +20,10 @@ pub fn greet_checked(name: &str) -> AppResult<String> {
 pub fn get_app_info(state: tauri::State<'_, AppState>) -> AppResult<commands::AppInfo> {
     info!("get_app_info called");
     commands::get_app_info(&state)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn get_api_config(state: tauri::State<'_, ApiConfig>) -> ApiConfig {
+    state.inner().clone()
 }
