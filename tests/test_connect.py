@@ -431,6 +431,15 @@ def test_snapshot_falls_back_to_stop_when_suspend_fails(tmp_path):
     assert ["tart", "stop", "mf-web"] in calls  # clean-disk fallback
 
 
+def test_snapshot_rejects_duplicate_id(tmp_path):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[
+        VmInfo("mf-web", "stopped", "local"),
+        VmInfo("mfsnap-web-clean", "stopped", "local"),
+    ])
+    with pytest.raises(RuntimeError, match="already exists"):
+        fleet.snapshot("web", "clean")
+
+
 def test_snapshots_lists_and_parses(tmp_path):
     fleet, _, _, _ = _fleet(tmp_path, vms=[
         VmInfo("mfsnap-web-clean", "stopped", "local", 3.2),
