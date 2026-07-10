@@ -110,6 +110,10 @@ class FakeFleet:
         self.calls.append(("reap",))
         return ["mf-old"]
 
+    def suspend_all(self):
+        self.calls.append(("suspend_all",))
+        return []
+
     def activity_recent(self, limit=20):
         return [{"who": "claude-code", "action": "created", "target": "web", "ts": 5.0}][:limit]
 
@@ -321,3 +325,17 @@ def test_restart_endpoint():
     client = TestClient(build_app(fake))
     assert client.post("/vms/web/restart").status_code == 200
     assert ("restart", "web") in fake.calls
+
+
+def test_lifespan_suspends_all_on_shutdown_when_enabled():
+    fake = FakeFleet()
+    with TestClient(build_app(fake, suspend_vms_on_exit=True)):
+        pass  # __exit__ runs the ASGI lifespan shutdown
+    assert ("suspend_all",) in fake.calls
+
+
+def test_lifespan_leaves_vms_alone_by_default():
+    fake = FakeFleet()
+    with TestClient(build_app(fake)):
+        pass
+    assert ("suspend_all",) not in fake.calls

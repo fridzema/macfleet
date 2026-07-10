@@ -25,6 +25,17 @@ def test_bake_prints_checklist():
     assert result.exit_code == 0
 
 
+def test_resolve_api_token_uses_env_when_set():
+    assert cli._resolve_api_token("supplied") == ("supplied", False)
+
+
+def test_resolve_api_token_generates_when_unset_or_empty():
+    for env in (None, ""):
+        token, generated = cli._resolve_api_token(env)
+        assert generated is True
+        assert token  # non-empty, so the API is never left unauthenticated
+
+
 def test_warm_command_success(monkeypatch):
     class FakeFleet:
         def warm_golden(self):

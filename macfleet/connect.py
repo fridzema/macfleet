@@ -37,16 +37,24 @@ SSH_OPTS = [
     "-o", "ConnectTimeout=8",
 ]
 
+# Substrings that mark an SSH failure as a transient connection problem (guest still booting)
+# worth retrying — as opposed to a genuine nonzero exit from the remote command, which is not.
+_SSH_TRANSIENT = (
+    "connection refused", "connection timed out", "operation timed out",
+    "connection closed", "no route to host", "timed out",
+)
 
-def _spawn(argv: list[str]) -> None:
+
+def _spawn(argv: list[str]) -> "subprocess.Popen[bytes]":
     # start_new_session detaches the child into its own process group + session so it
     # OUTLIVES the engine. The desktop host spawns this engine in a process group and
     # SIGTERMs that whole group on quit (see desktop/src-tauri/src/lib.rs); without the
     # break, every backgrounded `tart run` would inherit that group and be killed on app
     # exit — hard-stopping the entire fleet on every quit/dev-rebuild. VMs are a persistent
-    # fleet (also driven by the CLI/MCP), so they must not die with the window.
-    subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
+    # fleet (also driven by the CLI/MCP), so they must not die with the window. The handle is
+    # returned so Fleet can reap it once the VM stops (see Fleet._boot).
+    return subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
 
 
 def ssh_cmd(ip: str, remote_cmd: str) -> list[str]:
@@ -112,7 +120,7 @@ class GuestControl:
 
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
-                 spawn: Callable[[list[str]], None] = _spawn,
+                 spawn: Callable[[list[str]], Any] = _spawn,
                  run_nocheck: Runner = _run_nocheck,
                  leases: Leases | None = None,
                  clock: Callable[[], float] = time.time,
@@ -127,6 +135,10 @@ class Fleet:
         self._clock = clock
         self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
+        # Handles for backgrounded `tart run` children, kept so their zombies are reaped once
+        # the VM stops (a detached `tart run` stays a direct child of the engine, so nothing
+        # reaps its defunct entry otherwise). Swept on every boot; see _boot.
+        self._spawned: list = []
         # Guest IP keyed by full name. A running VM's IP is stable for its boot, but `tart
         # ip` is a subprocess on the hot path — status() runs it for every running VM on
         # every /vms poll, and screenshot/exec/ssh hit it too. Cache it and drop the entry
@@ -153,8 +165,35 @@ class Fleet:
     def resume(self, name: str) -> None:
         ensure_mutable(name)
         self._forget_ip(fullname(name))
-        self._spawn(self._run_argv(fullname(name)))
+        self._boot(self._run_argv(fullname(name)))
         self._leases.unsuspend(fullname(name))
+
+    def suspend_all(self) -> list[str]:
+        """Suspend every running fleet VM (mf-* except golden) — used by the desktop app on
+        quit so the fleet freezes cleanly and resumes fast next launch. Best-effort: a hung
+        or failing VM must not block the others. Returns the full names it suspended."""
+        already = set(self._leases.suspended())
+        targets = [v.name for v in self.tart.list()
+                   if v.state == "running" and v.name != GOLDEN and v.name not in already]
+        if not targets:
+            return []
+
+        def _suspend(full: str) -> str | None:
+            try:
+                self.tart.suspend(full)
+                return full
+            except RuntimeError:
+                return None
+
+        # `tart suspend` is the slow part (writes VM memory to disk) — run it concurrently.
+        with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+            done = [full for full in pool.map(_suspend, targets) if full]
+        # Lease writes are a read-modify-write of state.json, so do them serially after the
+        # pool to avoid clobbering the file.
+        for full in done:
+            self._forget_ip(full)
+            self._leases.suspend(full)
+        return done
 
     def create(self, name: str, from_snapshot: str | None = None,
                ttl: float | None = None, cpu: int | None = None,
@@ -189,7 +228,7 @@ class Fleet:
                 self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
             self._res_cache.pop(target, None)
         # background `tart run` so it doesn't block the caller
-        self._spawn(self._run_argv(target))
+        self._boot(self._run_argv(target))
         if ttl is not None:
             self._leases.record(target, ttl)
 
@@ -203,7 +242,7 @@ class Fleet:
         if GOLDEN not in {v.name for v in self.tart.list()}:
             raise RuntimeError(f"{GOLDEN} not found — bake it first (see `macfleet bake`)")
         self._forget_ip(GOLDEN)
-        self._spawn(self._run_argv(GOLDEN))
+        self._boot(self._run_argv(GOLDEN))
         deadline = self._clock() + timeout
         while self._clock() < deadline:
             if self.status("golden"):
@@ -277,7 +316,7 @@ class Fleet:
             pass
         self._forget_ip(full)
         self._leases.unsuspend(full)
-        self._spawn(self._run_argv(full))
+        self._boot(self._run_argv(full))
 
     def nuke(self, name: str) -> None:
         ensure_mutable(name)
@@ -297,12 +336,25 @@ class Fleet:
         if cached:
             return cached
         ip = self.tart.ip(full)
-        if ip:
-            self._ip_cache[full] = ip
+        if not ip:
+            # `tart ip` exits 0 with empty output while the guest network is still coming up.
+            # Returning "" would silently build `admin@` / `http://:8000` URLs that fail with
+            # a baffling error; raise a clear one instead so callers (and the API 409) say why.
+            raise RuntimeError(f"{shortname(full)} has no IP yet — is it running?")
+        self._ip_cache[full] = ip
         return ip
 
     def _forget_ip(self, full: str) -> None:
         self._ip_cache.pop(full, None)
+
+    def _boot(self, argv: list[str]) -> None:
+        """Background a `tart run` through the injected spawn and track the child so its
+        zombie is reaped when the VM later stops. poll() reaps any that have exited since the
+        last boot; injected test spawns return None and are simply not tracked."""
+        self._spawned = [p for p in self._spawned if p.poll() is None]
+        child = self._spawn(argv)
+        if child is not None:
+            self._spawned.append(child)
 
     def _run_argv(self, full: str) -> list[str]:
         """`tart run` command for a VM, including its shared-folder `--dir` flags. Every
@@ -341,9 +393,23 @@ class Fleet:
                                "read_only": bool(s.get("read_only", True))})
         self._shares.set(fullname(name), normalized)
 
-    def ssh(self, name: str, remote_cmd: str) -> str:
+    def ssh(self, name: str, remote_cmd: str, retries: int = 3, backoff: float = 2.0,
+            sleep: Callable[[float], None] = time.sleep) -> str:
+        # Right after `up`, the guest is `running` but SSH is not yet answering for ~30s (see
+        # README). Retry ONLY connection-level failures (ssh exits 255) — a nonzero exit from
+        # the remote command itself is a real result and must surface immediately, not after
+        # three slow retries. Re-resolve the IP between tries in case it changed on reboot.
         ensure_mutable(name)
-        return self._run(ssh_cmd(self.ip(name), remote_cmd)).stdout
+        for attempt in range(retries):
+            try:
+                return self._run(ssh_cmd(self.ip(name), remote_cmd)).stdout
+            except RuntimeError as exc:
+                transient = any(s in str(exc).lower() for s in _SSH_TRANSIENT)
+                if not transient or attempt + 1 >= retries:
+                    raise
+                self._forget_ip(fullname(name))
+                sleep(backoff)
+        raise RuntimeError("unreachable")  # loop either returns or raises
 
     def status(self, name: str) -> bool:
         # Short timeout: this runs on every /vms poll, so a slow/contended guest must
@@ -375,7 +441,7 @@ class Fleet:
                 self.tart.stop(src)  # clean-disk fallback if the image can't suspend
         self.tart.clone(src, sid)
         if was_running:
-            self._spawn(self._run_argv(src))  # resume original
+            self._boot(self._run_argv(src))  # resume original
             self._leases.unsuspend(src)
         return f"{shortname(name)}-{label}"
 
@@ -423,9 +489,9 @@ class Fleet:
                 self.tart.stop(src)
         self.tart.clone(src, fullname(new))
         if was_running:
-            self._spawn(self._run_argv(src))
+            self._boot(self._run_argv(src))
             self._leases.unsuspend(src)
-            self._spawn(self._run_argv(fullname(new)))
+            self._boot(self._run_argv(fullname(new)))
 
     def restore(self, name: str, snapshot_id: str) -> None:
         """Restore mf-<name> to a snapshot: stop+delete the current VM (if any), clone the
@@ -447,7 +513,7 @@ class Fleet:
             self._forget_ip(target)
             self._leases.unsuspend(target)
         self.tart.clone(snap, target)
-        self._spawn(self._run_argv(target))
+        self._boot(self._run_argv(target))
 
     def resources(self, name: str) -> dict:
         c = self.tart.get_config(fullname(name))
