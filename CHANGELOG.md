@@ -3,6 +3,37 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-10
+
+Fleet UX: working snapshots with a full lifecycle, a right-click menu and
+multi-select for bulk actions, and host↔guest shared folders.
+
+### Added
+
+- **Snapshot lifecycle.** Snapshots are named (a hyphen-free timestamp by
+  default), can be **restored in place** (`Fleet.restore`, `POST
+  /vms/{name}/restore`, `macfleet restore`), and can be deleted from the sidebar.
+  A dedicated `SnapshotDialog` builds the label, so the previously-broken button
+  works. Duplicate snapshot ids are rejected with a clear message.
+- **Right-click context menu** on fleet and snapshot rows, surfacing the existing
+  per-VM actions (start/stop, suspend/resume, snapshot, duplicate, rename,
+  connect, delete) — and bulk actions when a multi-selection is right-clicked.
+- **Multi-select** with ⌘/⇧-click (plus a selected-row highlight) and a
+  **bulk-action panel** shown when 2+ VMs are selected: suspend / resume / stop /
+  snapshot-all / delete. Bulk operations fan out with a concurrency cap of 3 to
+  avoid a `tart` subprocess storm.
+- **Shared folders.** Mount host directories into a guest, read-only by default.
+  A new `Shares` store (`~/.macfleet/shares.json`), a single `Fleet._run_argv`
+  that threads `--dir=` flags through every VM boot, `GET`/`PUT
+  /vms/{name}/shares`, `POST /vms/{name}/restart` (+ `macfleet restart`), and a
+  **Folders** tab with the Tauri folder picker. Changes apply on the VM's next
+  start.
+
+### Fixed
+
+- The Snapshot button no longer fails with `409 invalid snapshot label` — the UI
+  was sending a hyphenated label the engine rejects.
+
 ## [0.2.0] - 2026-07-09
 
 Reliability and performance pass on the VM lifecycle — fleet VMs survive the
