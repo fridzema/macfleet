@@ -228,6 +228,42 @@ export const useFleet = defineStore('fleet', () => {
   }
   const down = (name: string) => run(() => api.down(name))
   const nuke = (name: string) => run(() => api.nuke(name))
+
+  // Fan out a per-VM op with a concurrency cap so a bulk action doesn't spawn a burst of
+  // tart subprocesses (the load that made the fleet flap). One refresh + one summary toast.
+  async function runBulk(
+    names: string[],
+    fn: (name: string) => Promise<unknown>,
+    verb: string,
+  ): Promise<void> {
+    const failed: string[] = []
+    const queue = [...names]
+    async function worker(): Promise<void> {
+      while (queue.length) {
+        const name = queue.shift() as string
+        try {
+          await fn(name)
+        } catch {
+          failed.push(name)
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, names.length) }, worker))
+    await refresh()
+    if (failed.length) {
+      error.value = `${verb} failed for ${failed.join(', ')}`
+      toast(
+        `${verb} ${names.length - failed.length}/${names.length} — ${failed.length} failed`,
+        '⚠',
+      )
+    } else {
+      toast(`${verb} ${names.length} VMs`, '✓')
+    }
+  }
+  const bulkSuspend = (names: string[]) => runBulk(names, (n) => api.suspend(n), 'Suspended')
+  const bulkStop = (names: string[]) => runBulk(names, (n) => api.down(n), 'Stopped')
+  const bulkResume = (names: string[]) => runBulk(names, (n) => api.resume(n), 'Resumed')
+  const bulkNuke = (names: string[]) => runBulk(names, (n) => api.nuke(n), 'Deleted')
   const suspend = (name: string) => run(() => api.suspend(name), `Failed to suspend ${name}`)
   const resume = (name: string) => run(() => api.resume(name), `Failed to resume ${name}`)
   const rename = (oldName: string, newName: string) =>
@@ -372,6 +408,10 @@ export const useFleet = defineStore('fleet', () => {
     setResources,
     down,
     nuke,
+    bulkSuspend,
+    bulkStop,
+    bulkResume,
+    bulkNuke,
     suspend,
     resume,
     snapshotVM,
