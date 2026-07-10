@@ -17,7 +17,7 @@ import {
 /* istanbul ignore next */
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
-export type Tab = 'screen' | 'terminal' | 'logs' | 'resources' | 'connect'
+export type Tab = 'screen' | 'terminal' | 'logs' | 'resources' | 'connect' | 'folders'
 export type Preset = 'light' | 'standard' | 'heavy'
 
 // One in-guest command run in the Terminal tab. `code: null` means the exec call
