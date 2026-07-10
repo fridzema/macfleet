@@ -96,7 +96,7 @@ export const useUi = defineStore('ui', () => {
     else set.add(name)
     selectedVms.value = [...set]
     selectionAnchor.value = name
-    if (selectedVms.value.length === 1) selectVm(selectedVms.value[0])
+    if (selectedVms.value.length === 1) selectVm(selectedVms.value[0] ?? null)
     else if (selectedVms.value.length === 0) selectVm(null)
   }
   function selectRange(name: string, ordered: string[]): void {
