@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useToasts } from '../composables/useToasts'
-import { api, type HostInfo, type Resources, type Snapshot, type Vm } from '../shared/api'
+import {
+  api,
+  type HostInfo,
+  type Resources,
+  type Share,
+  type Snapshot,
+  type Vm,
+} from '../shared/api'
 
 // Its only caller (below, in refresh()) always feeds it a name from `vms.value`, which is
 // itself filtered to `mf-`-prefixed names two lines earlier — the pass-through branch is
@@ -124,6 +131,9 @@ export const useFleet = defineStore('fleet', () => {
   // bundled into the polled `/vms` list, which doesn't carry it.
   const resources = ref<Record<string, Resources>>({})
 
+  // Per-VM shared folders, keyed by short name. Fetched on demand by the Folders tab.
+  const shares = ref<Record<string, Share[]>>({})
+
   // Terminal tab scrollback, keyed by short name — kept in the store (rather than
   // component-local state) so it survives the VmDetail `:key="ui.selectedVm"` remount
   // when switching VMs and back.
@@ -141,6 +151,35 @@ export const useFleet = defineStore('fleet', () => {
     terminalHistory.value = {
       ...terminalHistory.value,
       [name]: [...(terminalHistory.value[name] ?? []), entry],
+    }
+  }
+
+  async function fetchShares(name: string): Promise<void> {
+    try {
+      const { shares: list } = await api.getShares(name)
+      shares.value = { ...shares.value, [name]: list }
+    } catch (e) {
+      error.value = String(e)
+    }
+  }
+  async function setShares(name: string, list: Share[]): Promise<void> {
+    try {
+      await api.setShares(name, list)
+      await fetchShares(name)
+      toast('Shared folders saved', '✓')
+    } catch (e) {
+      error.value = String(e)
+      toast(`Failed to save shared folders for ${name}`, '⚠')
+    }
+  }
+  async function restart(name: string): Promise<void> {
+    toast(`Restarting ${name}…`, '↻')
+    try {
+      await api.restartVm(name)
+      await refresh()
+    } catch (e) {
+      error.value = String(e)
+      toast(`Failed to restart ${name}`, '⚠')
     }
   }
 
@@ -406,6 +445,10 @@ export const useFleet = defineStore('fleet', () => {
     fetchHost,
     fetchResources,
     setResources,
+    shares,
+    fetchShares,
+    setShares,
+    restart,
     down,
     nuke,
     bulkSuspend,
