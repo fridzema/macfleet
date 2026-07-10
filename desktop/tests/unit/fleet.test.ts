@@ -261,6 +261,32 @@ describe('fleet store — lifecycle mutations', () => {
     expect(useToasts().toasts.value.some((t) => t.msg.includes('Failed to restore web'))).toBe(true)
   })
 
+  it('fetchShares populates the shares cache', async () => {
+    vi.spyOn(api, 'getShares').mockResolvedValue({
+      shares: [{ tag: 'src', host_path: '/h', read_only: true }],
+    })
+    const s = useFleet()
+    await s.fetchShares('web')
+    expect(s.shares.web).toEqual([{ tag: 'src', host_path: '/h', read_only: true }])
+  })
+
+  it('setShares calls api.setShares, refetches, and toasts', async () => {
+    const set = vi.spyOn(api, 'setShares').mockResolvedValue({})
+    vi.spyOn(api, 'getShares').mockResolvedValue({ shares: [] })
+    const s = useFleet()
+    await s.setShares('web', [{ tag: 'src', host_path: '/h', read_only: true }])
+    expect(set).toHaveBeenCalledWith('web', [{ tag: 'src', host_path: '/h', read_only: true }])
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('Shared folders saved'))).toBe(true)
+  })
+
+  it('restart calls api.restartVm then refreshes', async () => {
+    const restart = vi.spyOn(api, 'restartVm').mockResolvedValue({})
+    const s = useFleet()
+    await s.restart('web')
+    expect(restart).toHaveBeenCalledWith('web')
+    expect(s.error).toBeNull()
+  })
+
   it('bulkSuspend runs every name and toasts a success summary', async () => {
     const suspend = vi.spyOn(api, 'suspend').mockResolvedValue({})
     suspend.mockClear() // call count accumulates across this file's shared spy
