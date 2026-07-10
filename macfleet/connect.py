@@ -266,6 +266,19 @@ class Fleet:
         self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
 
+    def restart(self, name: str) -> None:
+        """Stop mf-<name> and boot it again — the way to apply a shared-folder change to a
+        running VM (shares only take effect on `tart run`)."""
+        ensure_mutable(name)
+        full = fullname(name)
+        try:
+            self.tart.stop(full)
+        except RuntimeError:
+            pass
+        self._forget_ip(full)
+        self._leases.unsuspend(full)
+        self._spawn(self._run_argv(full))
+
     def nuke(self, name: str) -> None:
         ensure_mutable(name)
         try:

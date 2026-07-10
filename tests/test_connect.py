@@ -868,3 +868,12 @@ def test_rename_and_nuke_propagate_to_shares(tmp_path):
     assert shares.get("mf-prod") and shares.get("mf-web") == []
     fleet.nuke("prod")
     assert shares.get("mf-prod") == []
+
+
+def test_restart_stops_then_boots_with_shares(tmp_path):
+    shares = Shares(str(tmp_path / "s.json"))
+    shares.set("mf-web", [{"tag": "src", "host_path": "/h", "read_only": True}])
+    fleet, calls, spawned = _fleet_with_shares(tmp_path, shares)
+    fleet.restart("web")
+    assert ["tart", "stop", "mf-web"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics", "--dir=src:/h:ro"] in spawned
