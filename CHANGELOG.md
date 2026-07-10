@@ -3,6 +3,50 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-07-10
+
+A reliability and security hardening pass across the engine and desktop client,
+plus freezing the fleet on desktop quit. No new user-facing commands.
+
+### Added
+
+- **Freeze the fleet on quit.** The desktop app suspends every running VM on
+  exit (`Fleet.suspend_all`, `MACFLEET_SUSPEND_VMS_ON_EXIT`) so a relaunch
+  resumes fast; the quit path bounds uvicorn's graceful shutdown, then SIGKILLs
+  the sidecar group so a hung shutdown can't block app exit.
+- **Sidecar readiness + diagnostics.** The host probes the engine port for
+  readiness and logs spawn failures (previously swallowed), and augments `PATH`
+  so a Finder-launched build can still find `uv`.
+
+### Security
+
+- **`macfleet serve` is never unauthenticated.** It now generates a random API
+  token when `MACFLEET_API_TOKEN` is unset or empty (a set-but-empty token was
+  the same hole), so the loopback API — whose `/exec` runs guest commands —
+  always requires a token. The desktop sidecar keeps passing its own.
+
+### Fixed
+
+- **Packaged builds reach the engine.** The CSP `connect-src` now allows the
+  sidecar's ephemeral port (`127.0.0.1:*`) instead of a hardcoded `:8765`, which
+  only worked in dev.
+- **A hung shell-out can't wedge the API.** Every `tart`/`ssh`/`scp` call has a
+  timeout; a stuck command no longer permanently consumes a request-thread.
+- **`tart exec` output is bounded.** stdout is capped at 16 MiB so a runaway
+  command (`cat /dev/zero`) can't OOM the engine.
+- **No more lost state updates.** `state.json`, `shares.json`, and
+  `activity.jsonl` are file-locked across the request threadpool, the reap loop,
+  and separate MCP/CLI processes, so a TTL lease is no longer silently dropped
+  (which leaked a VM past its expiry).
+- **Polling can't freeze the UI.** Fleet-list, screen, logs, metrics, and status
+  reads abort after 10s; the logs and resources tabs guard against overlapping
+  and stale responses; the TTL countdown stops re-rendering the whole sidebar
+  every second; and a slow fleet refresh can no longer clobber newer state.
+- **Clearer connection errors.** `ip()` raises instead of returning an empty
+  string, and `ssh()` retries only transient connection failures during the
+  guest's boot window. Detached `tart run` children are reaped so zombies don't
+  accumulate.
+
 ## [0.3.0] - 2026-07-10
 
 Fleet UX: working snapshots with a full lifecycle, a right-click menu and
