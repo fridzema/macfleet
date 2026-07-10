@@ -261,6 +261,25 @@ describe('fleet store — lifecycle mutations', () => {
     expect(useToasts().toasts.value.some((t) => t.msg.includes('Failed to restore web'))).toBe(true)
   })
 
+  it('bulkSuspend runs every name and toasts a success summary', async () => {
+    const suspend = vi.spyOn(api, 'suspend').mockResolvedValue({})
+    suspend.mockClear() // call count accumulates across this file's shared spy
+    const s = useFleet()
+    await s.bulkSuspend(['a', 'b', 'c'])
+    expect(suspend).toHaveBeenCalledTimes(3)
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('Suspended 3 VMs'))).toBe(true)
+  })
+
+  it('bulkNuke reports failures in the summary and error', async () => {
+    vi.spyOn(api, 'nuke').mockImplementation((n: string) =>
+      n === 'b' ? Promise.reject(new Error('boom')) : Promise.resolve({}),
+    )
+    const s = useFleet()
+    await s.bulkNuke(['a', 'b'])
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('1 failed'))).toBe(true)
+    expect(s.error).toContain('b')
+  })
+
   it('snapshotVM toasts start + calls api.snapshot + refreshes + toasts success', async () => {
     const snap = vi.spyOn(api, 'snapshot').mockResolvedValue({ snapshot_id: 'web-golden' })
     const s = useFleet()

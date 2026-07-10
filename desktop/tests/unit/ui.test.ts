@@ -338,3 +338,46 @@ describe('ui store — toasts', () => {
     expect(ui.toasts.some((t) => t.msg === 'Copied to clipboard')).toBe(true)
   })
 })
+
+describe('ui store — selection', () => {
+  it('selectOnly sets a single selection and opens the detail', () => {
+    const ui = useUi()
+    ui.selectOnly('web')
+    expect(ui.selectedVms).toEqual(['web'])
+    expect(ui.selectedVm).toBe('web')
+  })
+  it('toggleSelect adds then removes, collapsing the detail target', () => {
+    const ui = useUi()
+    ui.selectOnly('web')
+    ui.toggleSelect('db')
+    expect(ui.selectedVms).toEqual(['web', 'db'])
+    ui.toggleSelect('web')
+    expect(ui.selectedVms).toEqual(['db'])
+    expect(ui.selectedVm).toBe('db')
+  })
+  it('selectRange fills between anchor and target over the given order', () => {
+    const ui = useUi()
+    ui.selectOnly('b')
+    ui.selectRange('d', ['a', 'b', 'c', 'd'])
+    expect(ui.selectedVms).toEqual(['b', 'c', 'd'])
+  })
+  it('clearSelection empties the selection', () => {
+    const ui = useUi()
+    ui.selectOnly('web')
+    ui.toggleSelect('db')
+    ui.clearSelection()
+    expect(ui.selectedVms).toEqual([])
+    expect(ui.selectionCount).toBe(0)
+  })
+})
+
+describe('ui store — context menu', () => {
+  it('opens with position + items and closes to null', () => {
+    const ui = useUi()
+    ui.openContextMenu(10, 20, [{ label: 'X', run: () => {} }])
+    expect(ui.contextMenu?.x).toBe(10)
+    expect(ui.contextMenu?.items).toHaveLength(1)
+    ui.closeContextMenu()
+    expect(ui.contextMenu).toBeNull()
+  })
+})

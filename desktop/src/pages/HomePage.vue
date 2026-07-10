@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import BulkPanel from '../components/BulkPanel.vue'
 import FleetSidebar from '../components/FleetSidebar.vue'
 import VmDetail from '../components/VmDetail.vue'
 import { useFleet } from '../stores/fleet'
@@ -37,8 +38,9 @@ const emptySub = computed(() =>
   <div class="flex h-full">
     <FleetSidebar />
     <main class="flex min-w-0 flex-1 flex-col">
+      <BulkPanel v-if="ui.selectionCount >= 2" />
       <VmDetail
-        v-if="selectedVm"
+        v-else-if="selectedVm"
         :key="ui.selectedVm!"
         :name="ui.selectedVm!"
         :state="selectedVm.state"

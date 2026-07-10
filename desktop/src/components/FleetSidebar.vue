@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { type Snapshot, type Vm, vmStatus } from '../shared/api'
 import { useFleet } from '../stores/fleet'
-import { useUi } from '../stores/ui'
+import { type ContextMenuItem, useUi } from '../stores/ui'
 
 const store = useFleet()
 const ui = useUi()
@@ -109,8 +109,56 @@ function isActive(name: string, status: string): boolean {
   return ui.selectedVm === name && status !== 'creating'
 }
 
-function selectRow(name: string): void {
-  ui.selectVm(name)
+function orderedNames(): string[] {
+  return filteredRows.value.map((r) => r.name)
+}
+function onRowClick(e: MouseEvent, name: string): void {
+  if (e.metaKey || e.ctrlKey) ui.toggleSelect(name)
+  else if (e.shiftKey) ui.selectRange(name, orderedNames())
+  else ui.selectOnly(name)
+}
+
+// Build the right-click menu for a row: single-VM actions, or bulk actions when the row
+// is part of a 2+ selection. Restore stays on snapshot rows (needs a confirm), and bulk
+// delete stays in the BulkPanel — neither belongs in a one-shot menu.
+function vmMenuItems(row: Row): ContextMenuItem[] {
+  const name = row.name
+  const items: ContextMenuItem[] = [{ label: 'Open', run: () => ui.selectOnly(name) }]
+  if (row.status === 'running') {
+    items.push({ label: 'Suspend', run: () => store.suspend(name) })
+    items.push({ label: 'Stop', run: () => store.down(name) })
+  } else {
+    items.push({
+      label: row.status === 'suspended' ? 'Resume' : 'Start',
+      run: () => store.resume(name),
+    })
+  }
+  items.push({ label: 'Snapshot…', run: () => ui.requestSnapshot([name]) })
+  items.push({ label: 'Duplicate', run: () => store.duplicate(name) })
+  items.push({ label: 'Rename', run: () => ui.startRename(name) })
+  items.push({
+    label: 'Connect',
+    run: () => {
+      ui.selectVm(name)
+      store.selectedTab = 'connect'
+    },
+  })
+  items.push({ label: 'Delete', danger: true, run: () => ui.askDeleteVm(name) })
+  return items
+}
+function bulkMenuItems(names: string[]): ContextMenuItem[] {
+  return [
+    { label: `Suspend ${names.length}`, run: () => store.bulkSuspend(names) },
+    { label: `Stop ${names.length}`, run: () => store.bulkStop(names) },
+    { label: `Resume ${names.length}`, run: () => store.bulkResume(names) },
+    { label: `Snapshot ${names.length}…`, run: () => ui.requestSnapshot(names) },
+  ]
+}
+function onContext(e: MouseEvent, row: Row): void {
+  if (row.status === 'creating') return
+  const sel = ui.selectedVms
+  const items = sel.length >= 2 && sel.includes(row.name) ? bulkMenuItems(sel) : vmMenuItems(row)
+  ui.openContextMenu(e.clientX, e.clientY, items)
 }
 
 // Snapshot-row Restore/Delete are both destructive, so each is a two-step confirm: the
@@ -212,8 +260,10 @@ onUnmounted(() => {
           isActive(row.name, row.status) && row.status === 'running'
             ? 'animate-[mfglow_2.6s_ease-in-out_infinite]'
             : '',
+          ui.isSelected(row.name) ? 'ring-1 ring-[var(--emerald)]' : '',
         ]"
-        @click="selectRow(row.name)"
+        @click="onRowClick($event, row.name)"
+        @contextmenu.prevent="onContext($event, row)"
       >
         <span class="h-[9px] w-[9px] shrink-0 rounded-full" :class="meta(row.status).dotClass" />
         <span class="min-w-0 flex-1 text-left">
