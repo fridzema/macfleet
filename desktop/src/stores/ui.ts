@@ -70,6 +70,50 @@ export const useUi = defineStore('ui', () => {
     confirmDeleteVm.value = false
   }
 
+  // Multi-selection (short names) + the range anchor for shift-click. Kept coherent with
+  // selectedVm (the single detail target): a lone selection sets the detail target; an
+  // empty selection clears it. 2+ selected switches the main pane to the bulk panel.
+  const selectedVms = ref<string[]>([])
+  const selectionAnchor = ref<string | null>(null)
+  const selectionCount = computed(() => selectedVms.value.length)
+  function isSelected(name: string): boolean {
+    return selectedVms.value.includes(name)
+  }
+  function selectOnly(name: string): void {
+    selectedVms.value = [name]
+    selectionAnchor.value = name
+    selectVm(name)
+  }
+  function toggleSelect(name: string): void {
+    const set = new Set(selectedVms.value)
+    if (set.has(name)) set.delete(name)
+    else set.add(name)
+    selectedVms.value = [...set]
+    selectionAnchor.value = name
+    if (selectedVms.value.length === 1) selectVm(selectedVms.value[0])
+    else if (selectedVms.value.length === 0) selectVm(null)
+  }
+  function selectRange(name: string, ordered: string[]): void {
+    const anchor = selectionAnchor.value ?? name
+    const a = ordered.indexOf(anchor)
+    const b = ordered.indexOf(name)
+    if (a === -1 || b === -1) {
+      selectOnly(name)
+      return
+    }
+    const [lo, hi] = a <= b ? [a, b] : [b, a]
+    selectedVms.value = ordered.slice(lo, hi + 1)
+    if (selectedVms.value.length === 1) selectVm(name)
+  }
+  function selectAll(names: string[]): void {
+    selectedVms.value = [...names]
+    selectionAnchor.value = names[0] ?? null
+  }
+  function clearSelection(): void {
+    selectedVms.value = []
+    selectionAnchor.value = null
+  }
+
   function startRename(name: string): void {
     selectVm(name)
     renameValue.value = name
@@ -181,6 +225,14 @@ export const useUi = defineStore('ui', () => {
     search,
     selectedVm,
     selectVm,
+    selectedVms,
+    selectionCount,
+    isSelected,
+    selectOnly,
+    toggleSelect,
+    selectRange,
+    selectAll,
+    clearSelection,
     renaming,
     renameValue,
     confirmDeleteVm,
