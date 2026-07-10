@@ -69,16 +69,35 @@ const logLines = computed(() =>
 )
 
 let timer: ReturnType<typeof setInterval> | null = null
+// A log tail is an SSH round-trip that can outlast the 2s interval on a loaded guest; without
+// this guard the interval stacks overlapping requests (same failure ScreenTab guards). Skip a
+// tick while one is in flight.
+let inFlight = false
+// Bumped on every restart() so a poll() resolving after the VM was switched (or went inactive)
+// can tell its response is stale and skip the write, instead of painting the old VM's logs.
+let generation = 0
 
 async function poll(): Promise<void> {
-  if (paused.value || !active.value) return
+  if (paused.value || !active.value || inFlight) return
+  inFlight = true
+  const myGen = generation
+  const name = props.name
   try {
-    text.value = (await api.logs(props.name)).lines
+    const lines = (await api.logs(name)).lines
+    if (myGen !== generation || props.name !== name) return
+    text.value = lines
   } catch (e) {
+    if (myGen !== generation || props.name !== name) return
     text.value = String(e)
+  } finally {
+    inFlight = false
   }
 }
 function restart(): void {
+  generation++
+  // Abandon any in-flight request's slot: its response is now stale (generation bumped) and
+  // must not block the fresh poll below for the newly-selected VM.
+  inFlight = false
   if (timer) clearInterval(timer)
   timer = null
   text.value = ''
