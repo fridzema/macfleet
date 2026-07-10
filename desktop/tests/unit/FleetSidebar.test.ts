@@ -378,3 +378,30 @@ describe('FleetSidebar — snapshot rows', () => {
     expect(restore).toHaveBeenCalledWith('web', 'web-clean')
   })
 })
+
+describe('FleetSidebar — selection + context menu', () => {
+  it('plain click selects one, cmd-click adds to the selection', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true },
+      { name: 'mf-b', state: 'running', source: 'local', healthy: true },
+    ])
+    const wrapper = mount(FleetSidebar)
+    const ui = useUi()
+    await flushPromises()
+    const rows = wrapper.findAll('[data-test="vm-row"]')
+    await rows[0].trigger('click')
+    await rows[1].trigger('click', { metaKey: true })
+    expect(ui.selectedVms).toEqual(['a', 'b'])
+  })
+
+  it('right-click opens a context menu with a Suspend action for a running VM', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-a', state: 'running', source: 'local', healthy: true },
+    ])
+    const wrapper = mount(FleetSidebar)
+    const ui = useUi()
+    await flushPromises()
+    await wrapper.find('[data-test="vm-row"]').trigger('contextmenu')
+    expect(ui.contextMenu?.items.some((i) => i.label === 'Suspend')).toBe(true)
+  })
+})
