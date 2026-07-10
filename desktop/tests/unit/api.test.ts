@@ -16,7 +16,10 @@ describe('api', () => {
   it('listVms GETs /vms', async () => {
     const f = mockFetch(200, [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }])
     const vms = await api.listVms()
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms`, undefined)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(vms[0].name).toBe('mf-a')
   })
 
@@ -77,7 +80,10 @@ describe('api', () => {
   it('status GETs /vms/{n}/status', async () => {
     const f = mockFetch(200, { healthy: true })
     const res = await api.status('mf-a')
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/status`, undefined)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/mf-a/status`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(res).toEqual({ healthy: true })
   })
 
@@ -102,14 +108,20 @@ describe('api', () => {
   it('logs GETs /vms/{n}/logs with a default lines=100', async () => {
     const f = mockFetch(200, { lines: 'boot ok' })
     const res = await api.logs('mf-a')
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/logs?lines=100`, undefined)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/mf-a/logs?lines=100`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(res).toEqual({ lines: 'boot ok' })
   })
 
   it('logs GETs /vms/{n}/logs with an explicit lines count', async () => {
     const f = mockFetch(200, { lines: 'boot ok' })
     await api.logs('mf-a', 25)
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/mf-a/logs?lines=25`, undefined)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/mf-a/logs?lines=25`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
   })
 
   it('suspend POSTs /vms/{n}/suspend', async () => {
@@ -235,7 +247,28 @@ describe('api', () => {
   it('metrics GETs /vms/{n}/metrics', async () => {
     const f = mockFetch(200, { cpu_pct: 12.5, mem_used_mb: 512, mem_total_mb: 4096 })
     const res = await api.metrics('web')
-    expect(f).toHaveBeenCalledWith(`${API_BASE}/vms/web/metrics`, undefined)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/web/metrics`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(res).toEqual({ cpu_pct: 12.5, mem_used_mb: 512, mem_total_mb: 4096 })
+  })
+
+  it('aborts a polled read that never settles past the timeout budget', async () => {
+    vi.useFakeTimers()
+    // Never resolve — only reject when the request's own AbortSignal fires, exactly like a
+    // real fetch does on abort. Without the timeout, the poll loop's in-flight guard would
+    // stay pinned forever; with it, this rejects and the guard resets.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        }),
+    )
+    const pending = api.listVms()
+    const settled = expect(pending).rejects.toThrow('aborted')
+    await vi.advanceTimersByTimeAsync(10_000)
+    await settled
+    vi.useRealTimers()
   })
 })

@@ -28,6 +28,25 @@ describe('fleet store', () => {
     expect(s.error).toBeNull()
   })
 
+  it('refresh ignores a stale /vms response superseded by a newer refresh', async () => {
+    type Vms = Awaited<ReturnType<typeof api.listVms>>
+    let resolveSlow!: (v: Vms) => void
+    const slow = new Promise<Vms>((r) => {
+      resolveSlow = r
+    })
+    vi.spyOn(api, 'listVms')
+      .mockReturnValueOnce(slow) // older refresh — resolves LAST
+      .mockResolvedValueOnce([{ name: 'mf-new', state: 'running', source: 'local', healthy: true }])
+    const s = useFleet()
+    const older = s.refresh() // seq 1, awaits `slow`
+    const newer = s.refresh() // seq 2, resolves immediately with mf-new
+    await newer
+    expect(s.vms.map((v) => v.name)).toEqual(['mf-new'])
+    resolveSlow([{ name: 'mf-old', state: 'running', source: 'local', healthy: true }])
+    await older
+    expect(s.vms.map((v) => v.name)).toEqual(['mf-new']) // stale response did not clobber
+  })
+
   it('refresh drops non-fleet VMs (base/OCI images) and the golden template', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([
       { name: 'mf-a', state: 'running', source: 'local', healthy: true },

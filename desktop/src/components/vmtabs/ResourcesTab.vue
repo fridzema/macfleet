@@ -38,21 +38,28 @@ let timer: ReturnType<typeof setInterval> | null = null
 // otherwise a late response for the OLD vm/state could land after the new poll cycle
 // has already started, overwriting the new card's numbers or reviving a stopped VM's bar.
 let generation = 0
+// A metrics fetch is a guest round-trip that can outlast the 3s interval under load; guard so
+// the interval doesn't stack overlapping requests (mirrors ScreenTab/LogsTab).
+let inFlight = false
 
 async function poll(): Promise<void> {
+  if (inFlight) return
+  inFlight = true
   const myGen = generation
   const name = props.name
-  let result: Metrics | null
   try {
-    result = await api.metrics(name)
-  } catch {
-    result = null
+    const result = await api.metrics(name).catch(() => null)
+    if (myGen !== generation || !active.value || props.name !== name) return
+    metrics.value = result
+  } finally {
+    inFlight = false
   }
-  if (myGen !== generation || !active.value || props.name !== name) return
-  metrics.value = result
 }
 function restart(): void {
   generation++
+  // Abandon any in-flight request's slot: its response is now stale (generation bumped) and
+  // must not block the fresh poll below for the newly-selected VM.
+  inFlight = false
   if (timer) clearInterval(timer)
   timer = null
   metrics.value = null

@@ -21,6 +21,25 @@ fn free_port() -> u16 {
         .map_or(8765, |a| a.port())
 }
 
+/// Prepend the usual `uv` install locations to the inherited PATH. A macOS app launched from
+/// Finder gets a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that omits Homebrew,
+/// `~/.local/bin`, and `~/.cargo/bin` — where `uv` typically lives — so a bare `Command::new("uv")`
+/// fails to resolve and the engine never starts. Idempotent: skips any dir already on PATH.
+fn augmented_path() -> String {
+    let mut path = std::env::var("PATH").unwrap_or_default();
+    let mut extra = vec!["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()];
+    if let Ok(home) = std::env::var("HOME") {
+        extra.push(format!("{home}/.local/bin"));
+        extra.push(format!("{home}/.cargo/bin"));
+    }
+    for dir in extra {
+        if !path.split(':').any(|p| p == dir) {
+            path = if path.is_empty() { dir } else { format!("{dir}:{path}") };
+        }
+    }
+    path
+}
+
 /// # Errors
 ///
 /// Returns an error if the Tauri runtime fails to initialize or run.
@@ -30,6 +49,7 @@ fn free_port() -> u16 {
 /// Panics if the app has no default window icon (needed for the tray icon)
 /// or if the sidecar mutex is poisoned during shutdown.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::too_many_lines)] // one long Tauri builder + setup closure; splitting hurts clarity
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Workaround for tauri-apps/tauri#6200 and #14427: scrolling is broken in
     // AppImage bundles on Wayland because the bundled webkit2gtk uses the
@@ -74,19 +94,61 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut cmd = Command::new("uv");
             cmd.args(["run", "macfleet", "serve", "--port", &port_arg])
                 .current_dir("..")
+                // Resolve `uv` even when launched from Finder with a minimal PATH (see augmented_path).
+                .env("PATH", augmented_path())
                 // Enable computer-use control. Safe: Fleet.computer() only ever targets
                 // fleet VMs over their guest IP, never the host. This is the app's purpose.
                 .env("MACFLEET_ALLOW_CONTROL", "1")
-                .env("MACFLEET_API_TOKEN", &token);
+                .env("MACFLEET_API_TOKEN", &token)
+                // Freeze the fleet on app quit: RunEvent::Exit SIGTERMs this group, uvicorn
+                // shuts down gracefully, and its lifespan suspends every running VM before
+                // the process exits. Scoped to the desktop sidecar so a standalone
+                // `macfleet serve` (CLI) never suspends VMs on Ctrl-C.
+                .env("MACFLEET_SUSPEND_VMS_ON_EXIT", "1");
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
                 // 0 => a new process group whose id equals the child's pid.
                 cmd.process_group(0);
             }
-            let child = cmd.spawn().ok();
+            // Log a spawn failure instead of `.ok()` swallowing it — otherwise a missing `uv`
+            // leaves the app running against a port nobody listens on, with no clue why.
+            let child = match cmd.spawn() {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    log::error!(
+                        "failed to start engine sidecar `uv run macfleet serve`: {e}; is `uv` installed and on PATH?"
+                    );
+                    None
+                }
+            };
+            let started = child.is_some();
             app.manage(Sidecar(Mutex::new(child)));
             app.manage(state::ApiConfig { port, token });
+
+            // Readiness probe: uvicorn cold-starts over a few seconds. Poll the loopback port
+            // so a spawn-ok-but-crashed engine (or one that never binds) surfaces in the log
+            // rather than as silent connection-refused in the webview.
+            if started {
+                std::thread::spawn(move || {
+                    use std::net::TcpStream;
+                    use std::time::{Duration, Instant};
+                    let deadline = Instant::now() + Duration::from_secs(30);
+                    loop {
+                        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                            log::info!("engine sidecar ready on 127.0.0.1:{port}");
+                            return;
+                        }
+                        if Instant::now() >= deadline {
+                            log::error!(
+                                "engine sidecar did not become ready on 127.0.0.1:{port} within 30s"
+                            );
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(250));
+                    }
+                });
+            }
 
             let show = MenuItem::with_id(app, "show", "Show macfleet", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -123,12 +185,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             unsafe {
                                 libc::kill(-pid, libc::SIGTERM);
                             }
+                            // Bound the graceful window: uvicorn's shutdown suspends the fleet
+                            // (can be slow), but a hung shutdown must not block app exit forever.
+                            // Wait up to ~10s, then SIGKILL the group and reap.
+                            let deadline =
+                                std::time::Instant::now() + std::time::Duration::from_secs(10);
+                            loop {
+                                if matches!(child.try_wait(), Ok(Some(_))) {
+                                    break;
+                                }
+                                if std::time::Instant::now() >= deadline {
+                                    unsafe {
+                                        libc::kill(-pid, libc::SIGKILL);
+                                    }
+                                    let _ = child.wait();
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
                         }
                         #[cfg(not(unix))]
                         {
                             let _ = child.kill();
+                            let _ = child.wait();
                         }
-                        let _ = child.wait();
                     }
                 }
             }

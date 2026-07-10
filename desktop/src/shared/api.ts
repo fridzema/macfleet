@@ -105,16 +105,34 @@ export function vmStatus(vm: Pick<Vm, 'state' | 'healthy'>): VmStatus {
   return 'stopped'
 }
 
-async function j<T>(path: string, init?: RequestInit): Promise<T> {
+// Abort budget for polled reads (fleet list, screenshot, metrics, logs, status). They run on
+// repeating timers guarded by an in-flight flag reset only in `finally`; a request that never
+// settles (sidecar alive but stalled under load) would pin that flag and freeze the loop
+// forever. Aborting after this budget rejects the request so the guard resets and the loop
+// recovers. Mutations (nuke/snapshot/restore/…) are deliberately left un-timed — their
+// server-side `tart stop`/`clone` can legitimately outlast any poll.
+const POLL_TIMEOUT_MS = 10_000
+
+async function j<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   const { base, token } = await apiConfig()
   if (token) {
     const headers = new Headers(init?.headers)
     headers.set('X-Macfleet-Token', token)
     init = { ...init, headers }
   }
-  const res = await fetch(`${base}${path}`, init)
-  if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}`)
-  return (await res.json()) as T
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (timeoutMs !== undefined) {
+    const ctrl = new AbortController()
+    timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    init = { ...init, signal: ctrl.signal }
+  }
+  try {
+    const res = await fetch(`${base}${path}`, init)
+    if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}`)
+    return (await res.json()) as T
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function postJson<T = unknown>(path: string, payload: unknown): Promise<T> {
@@ -134,7 +152,7 @@ function putJson<T = unknown>(path: string, payload: unknown): Promise<T> {
 }
 
 export const api = {
-  listVms: () => j<Vm[]>('/vms'),
+  listVms: () => j<Vm[]>('/vms', undefined, POLL_TIMEOUT_MS),
   create: (
     name: string,
     opts: {
@@ -149,13 +167,15 @@ export const api = {
   nuke: (n: string) => j(`/vms/${enc(n)}/nuke`, { method: 'POST' }),
   suspend: (n: string) => j(`/vms/${enc(n)}/suspend`, { method: 'POST' }),
   resume: (n: string) => j(`/vms/${enc(n)}/resume`, { method: 'POST' }),
-  status: (n: string) => j<{ healthy: boolean }>(`/vms/${enc(n)}/status`),
+  status: (n: string) =>
+    j<{ healthy: boolean }>(`/vms/${enc(n)}/status`, undefined, POLL_TIMEOUT_MS),
   screenshot: (n: string) =>
-    j<{ png_b64: string }>(`/vms/${enc(n)}/screenshot`, { method: 'POST' }),
+    j<{ png_b64: string }>(`/vms/${enc(n)}/screenshot`, { method: 'POST' }, POLL_TIMEOUT_MS),
   click: (n: string, x: number, y: number) => postJson(`/vms/${enc(n)}/click`, { x, y }),
   typeText: (n: string, text: string) => postJson(`/vms/${enc(n)}/type`, { text }),
   key: (n: string, combo: string) => postJson(`/vms/${enc(n)}/key`, { combo }),
-  logs: (n: string, lines = 100) => j<{ lines: string }>(`/vms/${enc(n)}/logs?lines=${lines}`),
+  logs: (n: string, lines = 100) =>
+    j<{ lines: string }>(`/vms/${enc(n)}/logs?lines=${lines}`, undefined, POLL_TIMEOUT_MS),
   snapshot: (n: string, label: string) =>
     postJson<{ snapshot_id: string }>(`/vms/${enc(n)}/snapshot`, { label }),
   restore: (n: string, snapshotId: string) =>
@@ -177,5 +197,5 @@ export const api = {
   host: () => j<HostInfo>('/host'),
   agentsActivity: (limit?: number) =>
     j<AgentActivity[]>(`/agents/activity${limit !== undefined ? `?limit=${limit}` : ''}`),
-  metrics: (n: string) => j<Metrics>(`/vms/${enc(n)}/metrics`),
+  metrics: (n: string) => j<Metrics>(`/vms/${enc(n)}/metrics`, undefined, POLL_TIMEOUT_MS),
 }

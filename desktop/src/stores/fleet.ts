@@ -213,9 +213,16 @@ export const useFleet = defineStore('fleet', () => {
     }
   }
 
+  // Monotonic refresh token. refresh() runs both from the 2s poll and directly after every
+  // mutation, so two can be in flight at once; stamping each and bailing when a newer one has
+  // started keeps a slow/older response from overwriting fresher state (last-writer-wins).
+  let refreshSeq = 0
+
   async function refresh(): Promise<void> {
+    const seq = ++refreshSeq
     try {
       const rawVms = await api.listVms()
+      if (seq !== refreshSeq) return // a newer refresh superseded this one
       // Only mf- fleet VMs are operable; base/OCI images can't be controlled, and
       // mf-golden is the read-only clone template, not a work VM.
       const fleetVms = rawVms.filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
@@ -229,6 +236,7 @@ export const useFleet = defineStore('fleet', () => {
         ),
       )
     } catch (e) {
+      if (seq !== refreshSeq) return
       error.value = String(e)
       return
     }
@@ -238,7 +246,9 @@ export const useFleet = defineStore('fleet', () => {
     // sidebar reads as an overall connectivity problem). Keep the last-known
     // snapshots rather than clearing them on a miss.
     try {
-      snapshots.value = await api.listSnapshots()
+      const snaps = await api.listSnapshots()
+      if (seq !== refreshSeq) return
+      snapshots.value = snaps
     } catch {
       // ignored — see above
     }
@@ -409,7 +419,10 @@ export const useFleet = defineStore('fleet', () => {
       if (n <= 0) expired.push(name)
       else next[name] = n
     }
-    leases.value = next
+    // Only reassign when there was something to count down — otherwise every idle tick would
+    // hand `leases` a fresh empty object, dirtying the sidebar's `rows`/`filteredRows`
+    // computeds (they read `store.leases`) and re-rendering the whole fleet list each second.
+    if (Object.keys(leases.value).length > 0) leases.value = next
     if (expired.length) {
       for (const name of expired) toast(`Lease expired — ${name}`, '⏱')
       await refresh()
