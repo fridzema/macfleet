@@ -13,6 +13,12 @@ export interface PaletteItem {
   run: () => void
 }
 
+export interface ContextMenuItem {
+  label: string
+  run: () => void
+  danger?: boolean
+}
+
 /** Subsequence match (comp `fuzzy` line 498): every char of `query`, in order, somewhere
  * in `str`. Empty query matches everything. */
 export function fuzzy(query: string, str: string): boolean {
@@ -112,6 +118,15 @@ export const useUi = defineStore('ui', () => {
   function clearSelection(): void {
     selectedVms.value = []
     selectionAnchor.value = null
+  }
+
+  // Right-click menu descriptor: cursor position + the items to show, or null when closed.
+  const contextMenu = ref<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
+  function openContextMenu(x: number, y: number, items: ContextMenuItem[]): void {
+    contextMenu.value = { x, y, items }
+  }
+  function closeContextMenu(): void {
+    contextMenu.value = null
   }
 
   function startRename(name: string): void {
@@ -233,6 +248,9 @@ export const useUi = defineStore('ui', () => {
     selectRange,
     selectAll,
     clearSelection,
+    contextMenu,
+    openContextMenu,
+    closeContextMenu,
     renaming,
     renameValue,
     confirmDeleteVm,

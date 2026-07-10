@@ -370,3 +370,14 @@ describe('ui store — selection', () => {
     expect(ui.selectionCount).toBe(0)
   })
 })
+
+describe('ui store — context menu', () => {
+  it('opens with position + items and closes to null', () => {
+    const ui = useUi()
+    ui.openContextMenu(10, 20, [{ label: 'X', run: () => {} }])
+    expect(ui.contextMenu?.x).toBe(10)
+    expect(ui.contextMenu?.items).toHaveLength(1)
+    ui.closeContextMenu()
+    expect(ui.contextMenu).toBeNull()
+  })
+})
