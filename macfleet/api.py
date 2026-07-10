@@ -47,6 +47,16 @@ class RestoreRequest(BaseModel):
     snapshot_id: str
 
 
+class Share(BaseModel):
+    tag: str
+    host_path: str
+    read_only: bool = True
+
+
+class SharesRequest(BaseModel):
+    shares: list[Share]
+
+
 class RenameRequest(BaseModel):
     new: str
 
@@ -164,6 +174,20 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     @api.post("/vms/{name}/restore")
     def restore(name: str, body: RestoreRequest) -> dict:
         fleet.restore(name, body.snapshot_id)
+        return {"ok": True}
+
+    @api.get("/vms/{name}/shares")
+    def get_shares(name: str) -> dict:
+        return {"shares": fleet.get_shares(name)}
+
+    @api.put("/vms/{name}/shares")
+    def put_shares(name: str, body: SharesRequest) -> dict:
+        fleet.set_shares(name, [s.model_dump() for s in body.shares])
+        return {"ok": True}
+
+    @api.post("/vms/{name}/restart")
+    def restart(name: str) -> dict:
+        fleet.restart(name)
         return {"ok": True}
 
     @api.get("/vms/{name}/resources")

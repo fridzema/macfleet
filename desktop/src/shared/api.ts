@@ -61,6 +61,12 @@ export interface Resources {
   state: string
 }
 
+export interface Share {
+  tag: string
+  host_path: string
+  read_only: boolean
+}
+
 export interface ConnectionInfo {
   ip: string
   ssh: string
@@ -154,6 +160,9 @@ export const api = {
     postJson<{ snapshot_id: string }>(`/vms/${enc(n)}/snapshot`, { label }),
   restore: (n: string, snapshotId: string) =>
     postJson(`/vms/${enc(n)}/restore`, { snapshot_id: snapshotId }),
+  getShares: (n: string) => j<{ shares: Share[] }>(`/vms/${enc(n)}/shares`),
+  setShares: (n: string, shares: Share[]) => putJson(`/vms/${enc(n)}/shares`, { shares }),
+  restartVm: (n: string) => j(`/vms/${enc(n)}/restart`, { method: 'POST' }),
   listSnapshots: () => j<Snapshot[]>('/snapshots'),
   deleteSnapshot: (id: string) => j(`/snapshots/${enc(id)}`, { method: 'DELETE' }),
   rename: (n: string, newName: string) => postJson(`/vms/${enc(n)}/rename`, { new: newName }),

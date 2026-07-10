@@ -46,6 +46,15 @@ class FakeFleet:
     def restore(self, name, snapshot_id):
         self.calls.append(("restore", name, snapshot_id))
 
+    def get_shares(self, name):
+        return [{"tag": "src", "host_path": "/h", "read_only": True}]
+
+    def set_shares(self, name, shares):
+        self.calls.append(("set_shares", name, shares))
+
+    def restart(self, name):
+        self.calls.append(("restart", name))
+
     def nuke(self, name):
         self.calls.append(("nuke", name))
 
@@ -291,3 +300,24 @@ def test_restore_endpoint_calls_fleet():
     assert r.status_code == 200
     assert r.json() == {"ok": True}
     assert ("restore", "web", "web-clean") in fake.calls
+
+
+def test_get_shares_endpoint():
+    client = TestClient(build_app(FakeFleet()))
+    assert client.get("/vms/web/shares").json()["shares"][0]["tag"] == "src"
+
+
+def test_put_shares_endpoint():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    body = {"shares": [{"tag": "src", "host_path": "/h", "read_only": True}]}
+    assert client.put("/vms/web/shares", json=body).status_code == 200
+    assert ("set_shares", "web",
+            [{"tag": "src", "host_path": "/h", "read_only": True}]) in fake.calls
+
+
+def test_restart_endpoint():
+    fake = FakeFleet()
+    client = TestClient(build_app(fake))
+    assert client.post("/vms/web/restart").status_code == 200
+    assert ("restart", "web") in fake.calls

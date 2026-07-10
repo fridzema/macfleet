@@ -5,6 +5,7 @@ import urllib.error
 import pytest
 from macfleet.connect import ssh_cmd, scp_push_cmd, Fleet, GuestControl, SSH_OPTS
 from macfleet.leases import Leases
+from macfleet.shares import Shares
 from macfleet.vm import Tart, VmInfo
 
 
@@ -791,3 +792,88 @@ def test_snapshot_rejects_hyphenated_label(tmp_path):
     fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "stopped", "local")])
     with pytest.raises(RuntimeError, match="invalid snapshot label"):
         fleet.snapshot("web", "not-clean")
+
+
+# --- Shared folders: _run_argv, set_shares validation, rename/nuke propagation ---
+
+
+def _fleet_with_shares(tmp_path, shares):
+    calls = []
+    spawned = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
+                  leases=Leases(str(tmp_path / "l.json"), clock=lambda: 0.0),
+                  shares=shares, clock=lambda: 0.0)
+    return fleet, calls, spawned
+
+
+def test_run_argv_appends_dir_flags(tmp_path):
+    shares = Shares(str(tmp_path / "s.json"))
+    shares.set("mf-web", [
+        {"tag": "src", "host_path": "/h/src", "read_only": True},
+        {"tag": "out", "host_path": "/h/out", "read_only": False},
+    ])
+    fleet, _, _ = _fleet_with_shares(tmp_path, shares)
+    assert fleet._run_argv("mf-web") == [
+        "tart", "run", "mf-web", "--no-graphics",
+        "--dir=src:/h/src:ro", "--dir=out:/h/out",
+    ]
+
+
+def test_run_argv_base_when_no_shares(tmp_path):
+    fleet, _, _ = _fleet_with_shares(tmp_path, Shares(str(tmp_path / "s.json")))
+    assert fleet._run_argv("mf-web") == ["tart", "run", "mf-web", "--no-graphics"]
+
+
+def test_create_boots_with_share_flags(tmp_path):
+    shares = Shares(str(tmp_path / "s.json"))
+    shares.set("mf-web", [{"tag": "src", "host_path": "/h", "read_only": True}])
+    fleet, _, spawned = _fleet_with_shares(tmp_path, shares)
+    fleet.create("web")
+    assert ["tart", "run", "mf-web", "--no-graphics", "--dir=src:/h:ro"] in spawned
+
+
+def test_set_shares_validates_and_normalizes(tmp_path):
+    d = tmp_path / "share"
+    d.mkdir()
+    fleet, _, _ = _fleet_with_shares(tmp_path, Shares(str(tmp_path / "s.json")))
+    fleet.set_shares("web", [{"tag": "src", "host_path": str(d)}])
+    assert fleet.get_shares("web") == [{"tag": "src", "host_path": str(d), "read_only": True}]
+    with pytest.raises(RuntimeError, match="not found"):
+        fleet.set_shares("web", [{"tag": "x", "host_path": str(tmp_path / "missing")}])
+    with pytest.raises(RuntimeError, match="invalid share tag"):
+        fleet.set_shares("web", [{"tag": "bad/tag", "host_path": str(d)}])
+    with pytest.raises(RuntimeError, match="duplicate share tag"):
+        fleet.set_shares("web", [{"tag": "src", "host_path": str(d)},
+                                 {"tag": "src", "host_path": str(d)}])
+
+
+def test_set_shares_rejects_golden(tmp_path):
+    fleet, _, _ = _fleet_with_shares(tmp_path, Shares(str(tmp_path / "s.json")))
+    with pytest.raises(RuntimeError, match="protected template"):
+        fleet.set_shares("golden", [])
+
+
+def test_rename_and_nuke_propagate_to_shares(tmp_path):
+    shares = Shares(str(tmp_path / "s.json"))
+    shares.set("mf-web", [{"tag": "src", "host_path": "/h", "read_only": True}])
+    fleet, _, _ = _fleet_with_shares(tmp_path, shares)
+    fleet.rename("web", "prod")
+    assert shares.get("mf-prod") and shares.get("mf-web") == []
+    fleet.nuke("prod")
+    assert shares.get("mf-prod") == []
+
+
+def test_restart_stops_then_boots_with_shares(tmp_path):
+    shares = Shares(str(tmp_path / "s.json"))
+    shares.set("mf-web", [{"tag": "src", "host_path": "/h", "read_only": True}])
+    fleet, calls, spawned = _fleet_with_shares(tmp_path, shares)
+    fleet.restart("web")
+    assert ["tart", "stop", "mf-web"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics", "--dir=src:/h:ro"] in spawned
