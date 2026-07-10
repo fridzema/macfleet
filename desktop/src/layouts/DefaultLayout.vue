@@ -2,6 +2,7 @@
 import { RouterView } from 'vue-router'
 import AppHeader from '../components/AppHeader.vue'
 import CommandPalette from '../components/CommandPalette.vue'
+import ContextMenu from '../components/ContextMenu.vue'
 import SnapshotDialog from '../components/SnapshotDialog.vue'
 import ToastStack from '../components/ToastStack.vue'
 </script>
@@ -20,6 +21,7 @@ import ToastStack from '../components/ToastStack.vue'
     </main>
     <CommandPalette />
     <SnapshotDialog />
+    <ContextMenu />
     <ToastStack />
   </div>
 </template>
