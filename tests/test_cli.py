@@ -84,3 +84,16 @@ def test_snapshot_command(monkeypatch):
     assert result.exit_code == 0
     assert calls["snap"] == ("web", "clean")
     assert "web-clean" in result.stdout
+
+
+def test_restart_command(monkeypatch):
+    calls = {}
+
+    class FakeFleet:
+        def restart(self, name):
+            calls["restart"] = name
+
+    monkeypatch.setattr(cli, "_fleet", lambda: FakeFleet())
+    result = runner.invoke(cli.app, ["restart", "web"])
+    assert result.exit_code == 0
+    assert calls["restart"] == "web"

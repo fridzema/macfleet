@@ -14,6 +14,7 @@ from typing import Any
 
 from macfleet.activity import Activity, default_activity_path
 from macfleet.leases import Leases, default_state_path
+from macfleet.shares import Shares, default_shares_path
 from macfleet.vm import (
     GOLDEN,
     Runner,
@@ -115,12 +116,14 @@ class Fleet:
                  run_nocheck: Runner = _run_nocheck,
                  leases: Leases | None = None,
                  clock: Callable[[], float] = time.time,
-                 activity: Activity | None = None) -> None:
+                 activity: Activity | None = None,
+                 shares: Shares | None = None) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
         self._run_nocheck = run_nocheck
         self._leases = leases or Leases(default_state_path())
+        self._shares = shares or Shares(default_shares_path())
         self._clock = clock
         self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
@@ -150,7 +153,7 @@ class Fleet:
     def resume(self, name: str) -> None:
         ensure_mutable(name)
         self._forget_ip(fullname(name))
-        self._spawn(["tart", "run", fullname(name), "--no-graphics"])
+        self._spawn(self._run_argv(fullname(name)))
         self._leases.unsuspend(fullname(name))
 
     def create(self, name: str, from_snapshot: str | None = None,
@@ -186,7 +189,7 @@ class Fleet:
                 self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
             self._res_cache.pop(target, None)
         # background `tart run` so it doesn't block the caller
-        self._spawn(["tart", "run", target, "--no-graphics"])
+        self._spawn(self._run_argv(target))
         if ttl is not None:
             self._leases.record(target, ttl)
 
@@ -200,7 +203,7 @@ class Fleet:
         if GOLDEN not in {v.name for v in self.tart.list()}:
             raise RuntimeError(f"{GOLDEN} not found — bake it first (see `macfleet bake`)")
         self._forget_ip(GOLDEN)
-        self._spawn(["tart", "run", GOLDEN, "--no-graphics"])
+        self._spawn(self._run_argv(GOLDEN))
         deadline = self._clock() + timeout
         while self._clock() < deadline:
             if self.status("golden"):
@@ -263,6 +266,19 @@ class Fleet:
         self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
 
+    def restart(self, name: str) -> None:
+        """Stop mf-<name> and boot it again — the way to apply a shared-folder change to a
+        running VM (shares only take effect on `tart run`)."""
+        ensure_mutable(name)
+        full = fullname(name)
+        try:
+            self.tart.stop(full)
+        except RuntimeError:
+            pass
+        self._forget_ip(full)
+        self._leases.unsuspend(full)
+        self._spawn(self._run_argv(full))
+
     def nuke(self, name: str) -> None:
         ensure_mutable(name)
         try:
@@ -273,6 +289,7 @@ class Fleet:
         self._res_cache.pop(fullname(name), None)
         self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
+        self._shares.drop(fullname(name))
 
     def ip(self, name: str) -> str:
         full = fullname(name)
@@ -286,6 +303,43 @@ class Fleet:
 
     def _forget_ip(self, full: str) -> None:
         self._ip_cache.pop(full, None)
+
+    def _run_argv(self, full: str) -> list[str]:
+        """`tart run` command for a VM, including its shared-folder `--dir` flags. Every
+        boot site goes through this so shares are (re)applied on each start."""
+        argv = ["tart", "run", full, "--no-graphics"]
+        for s in self._shares.get(full):
+            flag = f"--dir={s['tag']}:{s['host_path']}"
+            if s.get("read_only"):
+                flag += ":ro"
+            argv.append(flag)
+        return argv
+
+    def get_shares(self, name: str) -> list[dict]:
+        return self._shares.get(fullname(name))
+
+    def set_shares(self, name: str, shares: list[dict]) -> None:
+        """Replace a VM's shared folders. Validates each tag (filesystem-safe, unique) and
+        that the host path is an existing directory; expands `~`; read-only defaults True.
+        Takes effect on the VM's next start (see restart)."""
+        ensure_mutable(name)
+        tag_re = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+        seen: set[str] = set()
+        normalized: list[dict] = []
+        for s in shares:
+            tag = str(s.get("tag", ""))
+            host_path = os.path.expanduser(str(s.get("host_path", "")))
+            if not tag_re.fullmatch(tag):
+                raise RuntimeError(
+                    f"invalid share tag {tag!r}: use letters, digits, '.', '_', '-'")
+            if tag in seen:
+                raise RuntimeError(f"duplicate share tag {tag!r}")
+            seen.add(tag)
+            if not os.path.isdir(host_path):
+                raise RuntimeError(f"shared folder not found: {host_path}")
+            normalized.append({"tag": tag, "host_path": host_path,
+                               "read_only": bool(s.get("read_only", True))})
+        self._shares.set(fullname(name), normalized)
 
     def ssh(self, name: str, remote_cmd: str) -> str:
         ensure_mutable(name)
@@ -321,7 +375,7 @@ class Fleet:
                 self.tart.stop(src)  # clean-disk fallback if the image can't suspend
         self.tart.clone(src, sid)
         if was_running:
-            self._spawn(["tart", "run", src, "--no-graphics"])  # resume original
+            self._spawn(self._run_argv(src))  # resume original
             self._leases.unsuspend(src)
         return f"{shortname(name)}-{label}"
 
@@ -355,6 +409,7 @@ class Fleet:
         self._res_cache.pop(fullname(old), None)
         self._forget_ip(fullname(old))
         self._leases.rename(fullname(old), fullname(new))
+        self._shares.rename(fullname(old), fullname(new))
 
     def duplicate(self, name: str, new: str) -> None:
         src = ensure_mutable(name)
@@ -368,9 +423,9 @@ class Fleet:
                 self.tart.stop(src)
         self.tart.clone(src, fullname(new))
         if was_running:
-            self._spawn(["tart", "run", src, "--no-graphics"])
+            self._spawn(self._run_argv(src))
             self._leases.unsuspend(src)
-            self._spawn(["tart", "run", fullname(new), "--no-graphics"])
+            self._spawn(self._run_argv(fullname(new)))
 
     def restore(self, name: str, snapshot_id: str) -> None:
         """Restore mf-<name> to a snapshot: stop+delete the current VM (if any), clone the
@@ -392,7 +447,7 @@ class Fleet:
             self._forget_ip(target)
             self._leases.unsuspend(target)
         self.tart.clone(snap, target)
-        self._spawn(["tart", "run", target, "--no-graphics"])
+        self._spawn(self._run_argv(target))
 
     def resources(self, name: str) -> dict:
         c = self.tart.get_config(fullname(name))
