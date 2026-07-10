@@ -116,6 +116,13 @@ def restore(name: str, snapshot_id: str) -> None:
 
 
 @app.command()
+def restart(name: str) -> None:
+    """Stop mf-<name> and boot it again with its current shared folders."""
+    _fleet().restart(name)
+    typer.echo(f"restarted: mf-{name}")
+
+
+@app.command()
 def duplicate(name: str, new: str) -> None:
     """Duplicate mf-<name> to mf-<new>."""
     _fleet().duplicate(name, new)
