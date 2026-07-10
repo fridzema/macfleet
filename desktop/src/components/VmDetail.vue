@@ -4,6 +4,7 @@ import { vmStatus } from '../shared/api'
 import { type Tab, useFleet } from '../stores/fleet'
 import { useUi } from '../stores/ui'
 import ConnectTab from './vmtabs/ConnectTab.vue'
+import FoldersTab from './vmtabs/FoldersTab.vue'
 import LogsTab from './vmtabs/LogsTab.vue'
 import ResourcesTab from './vmtabs/ResourcesTab.vue'
 import ScreenTab from './vmtabs/ScreenTab.vue'
@@ -95,6 +96,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'logs', label: 'Logs' },
   { id: 'resources', label: 'Resources' },
+  { id: 'folders', label: 'Folders' },
   { id: 'connect', label: 'Connect' },
 ]
 const TAB_COMPONENTS: Record<Tab, Component> = {
@@ -102,6 +104,7 @@ const TAB_COMPONENTS: Record<Tab, Component> = {
   terminal: TerminalTab,
   logs: LogsTab,
   resources: ResourcesTab,
+  folders: FoldersTab,
   connect: ConnectTab,
 }
 const activeTab = computed(() => TAB_COMPONENTS[store.selectedTab])
