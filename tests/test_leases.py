@@ -1,4 +1,24 @@
+import threading
+
 from macfleet.leases import Leases
+
+
+def test_concurrent_records_do_not_lose_updates(tmp_path):
+    # Each record() is a load-modify-save; without the state_lock, threads interleave and the
+    # later os.replace drops the others' new leases. With it, all N survive.
+    lease = Leases(str(tmp_path / "state.json"), clock=lambda: 1000.0)
+    start = threading.Barrier(8)
+
+    def worker(i):
+        start.wait()  # maximize overlap on the read-modify-write
+        lease.record(f"mf-{i}", ttl=60)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert set(lease.expired(2000.0)) == {f"mf-{i}" for i in range(8)}
 
 
 def _leases(tmp_path):

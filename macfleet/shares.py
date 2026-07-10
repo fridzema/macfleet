@@ -4,6 +4,8 @@ import json
 import os
 import tempfile
 
+from macfleet._lock import state_lock
+
 
 def default_shares_path() -> str:
     return os.path.expanduser("~/.macfleet/shares.json")
@@ -42,20 +44,23 @@ class Shares:
         return self._load().get(name, [])
 
     def set(self, name: str, shares: list[dict]) -> None:
-        doc = self._load()
-        if shares:
-            doc[name] = shares
-        else:
-            doc.pop(name, None)
-        self._save(doc)
+        with state_lock(self._path):
+            doc = self._load()
+            if shares:
+                doc[name] = shares
+            else:
+                doc.pop(name, None)
+            self._save(doc)
 
     def drop(self, name: str) -> None:
-        doc = self._load()
-        if doc.pop(name, None) is not None:
-            self._save(doc)
+        with state_lock(self._path):
+            doc = self._load()
+            if doc.pop(name, None) is not None:
+                self._save(doc)
 
     def rename(self, old: str, new: str) -> None:
-        doc = self._load()
-        if old in doc:
-            doc[new] = doc.pop(old)
-            self._save(doc)
+        with state_lock(self._path):
+            doc = self._load()
+            if old in doc:
+                doc[new] = doc.pop(old)
+                self._save(doc)

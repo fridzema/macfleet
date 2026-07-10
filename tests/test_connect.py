@@ -159,6 +159,34 @@ def test_suspend_resume(tmp_path):
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
 
 
+def test_suspend_all_freezes_running_non_golden_only(tmp_path):
+    vms = [
+        VmInfo("mf-web", "running", ""),
+        VmInfo("mf-api", "running", ""),
+        VmInfo("mf-golden", "running", ""),   # protected template — never touched
+        VmInfo("mf-idle", "stopped", ""),     # not running — skipped
+        VmInfo("mf-frozen", "running", ""),   # already suspended (below) — skipped
+    ]
+    fleet, calls, _, lease = _fleet(tmp_path, vms=vms)
+    lease.suspend("mf-frozen")
+
+    done = fleet.suspend_all()
+
+    assert set(done) == {"mf-web", "mf-api"}
+    assert ["tart", "suspend", "mf-web"] in calls
+    assert ["tart", "suspend", "mf-api"] in calls
+    assert ["tart", "suspend", "mf-golden"] not in calls
+    assert not any(c == ["tart", "suspend", "mf-idle"] for c in calls)
+    assert not any(c == ["tart", "suspend", "mf-frozen"] for c in calls)
+    assert set(lease.suspended()) == {"mf-web", "mf-api", "mf-frozen"}
+
+
+def test_suspend_all_noop_when_nothing_running(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-idle", "stopped", "")])
+    assert fleet.suspend_all() == []
+    assert not any(c[:2] == ["tart", "suspend"] for c in calls)
+
+
 def test_create_clones_golden_and_records_ttl(tmp_path):
     fleet, calls, spawned, lease = _fleet(tmp_path)
     fleet.create("web", ttl=60)
@@ -256,6 +284,50 @@ def test_ip_is_cached_and_invalidated_on_stop(tmp_path):
     fleet.down("web")  # stopping the VM invalidates the cached IP
     fleet.ip("web")
     assert len([c for c in calls if c[:2] == ["tart", "ip"]]) == 2  # re-resolved after stop
+
+
+def test_ip_raises_when_empty(tmp_path):
+    # `tart ip` exits 0 with no output while the guest network is still coming up. ip() must
+    # raise a clear error rather than return "" and let callers build broken admin@/http:// URLs.
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 0, "" if argv[:2] == ["tart", "ip"] else "[]", "")
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    with pytest.raises(RuntimeError, match="has no IP yet"):
+        fleet.ip("web")
+
+
+def test_ssh_retries_transient_connection_error(tmp_path):
+    attempts = {"n": 0}
+
+    def run(argv):
+        if argv[0] == "ssh":
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise RuntimeError("ssh: connect to host: Connection refused")
+            return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+        return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    assert fleet.ssh("web", "whoami", sleep=lambda _: None) == "ok\n"
+    assert attempts["n"] == 3
+
+
+def test_ssh_does_not_retry_command_failure(tmp_path):
+    attempts = {"n": 0}
+
+    def run(argv):
+        if argv[0] == "ssh":
+            attempts["n"] += 1
+            raise RuntimeError("ssh mf-web whoami failed: some-command: not found")
+        return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    with pytest.raises(RuntimeError, match="not found"):
+        fleet.ssh("web", "whoami", sleep=lambda _: None)
+    assert attempts["n"] == 1  # a real command failure surfaces immediately, no retry
 
 
 def test_warm_golden_suspends_when_guest_becomes_healthy(tmp_path, monkeypatch):

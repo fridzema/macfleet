@@ -25,6 +25,13 @@ def down(name: str) -> None:
     _fleet().down(name)
 
 
+@app.command("suspend-all")
+def suspend_all() -> None:
+    """Suspend all running fleet VMs (mf-* except golden). Used by the desktop app on quit."""
+    for full in _fleet().suspend_all():
+        typer.echo(full)
+
+
 @app.command()
 def nuke(name: str) -> None:
     """Stop + delete mf-<name>."""
@@ -143,6 +150,18 @@ def connect(name: str) -> None:
         typer.echo(f"{k}: {v}")
 
 
+def _resolve_api_token(env_token: str | None) -> tuple[str, bool]:
+    """Resolve the API auth token. Returns (token, generated). A set, non-empty
+    MACFLEET_API_TOKEN (the desktop sidecar passes one) is used as-is. When it is unset OR
+    empty, generate a random one so the loopback API is never left unauthenticated — an
+    open API means any local page/process can drive `/exec` and nuke the fleet."""
+    import secrets
+
+    if env_token:
+        return env_token, False
+    return secrets.token_urlsafe(32), True
+
+
 @app.command()
 def serve(port: int = 8765) -> None:
     """Start the local API for the desktop app."""
@@ -152,7 +171,11 @@ def serve(port: int = 8765) -> None:
 
     from macfleet.api import build_app
 
-    uvicorn.run(build_app(token=os.environ.get("MACFLEET_API_TOKEN")),
+    token, generated = _resolve_api_token(os.environ.get("MACFLEET_API_TOKEN"))
+    if generated:
+        typer.echo(f"API token (send as X-Macfleet-Token): {token}", err=True)
+    uvicorn.run(build_app(token=token,
+                          suspend_vms_on_exit=os.environ.get("MACFLEET_SUSPEND_VMS_ON_EXIT") == "1"),
                 host="127.0.0.1", port=port)
 
 

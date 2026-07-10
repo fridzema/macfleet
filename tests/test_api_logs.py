@@ -9,7 +9,12 @@ def fake_tart(name="mf-a"):
     import json
 
     def run(argv):
-        out = json.dumps([{"Name": name, "State": "running", "Source": "local"}]) if argv[:2] == ["tart", "list"] else ""
+        if argv[:2] == ["tart", "list"]:
+            out = json.dumps([{"Name": name, "State": "running", "Source": "local"}])
+        elif argv[:2] == ["tart", "ip"]:
+            out = "192.168.64.4"  # a running VM has an IP; ip() now raises on empty
+        else:
+            out = ""
         return subprocess.CompletedProcess(argv, 0, out, "")
     return Tart(run=run)
 
@@ -28,10 +33,10 @@ def test_logs_endpoint_returns_tail():
 
 
 def test_logs_endpoint_maps_runtime_error_to_409_with_cors():
-    # A non-fleet / stopped VM makes `tart ip` fail -> RuntimeError. The route must
-    # return a clean 409 (not a bare 500), so the CORS header survives the middleware.
+    # A non-fleet / stopped VM makes the guest unreachable -> ssh raises RuntimeError. The
+    # route must return a clean 409 (not a bare 500), so the CORS header survives the middleware.
     def run(argv):
-        raise RuntimeError("tart ip mf-cua-tahoe: no such VM")
+        raise RuntimeError("ssh: connect to host failed")
     fleet = Fleet(tart=fake_tart(), run=run)
     client = TestClient(build_app(fleet))
     r = client.get("/vms/cua-tahoe/logs?lines=100", headers={"Origin": "http://localhost:1420"})

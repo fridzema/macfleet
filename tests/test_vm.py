@@ -1,6 +1,7 @@
 import json
 import subprocess
-from macfleet.vm import Tart, VmInfo, _run_nocheck, fullname, shortname
+import pytest
+from macfleet.vm import Tart, VmInfo, _run, _run_nocheck, fullname, shortname
 
 
 def fake_runner(script):
@@ -83,3 +84,30 @@ def test_run_nocheck_returns_nonzero_without_raising():
     # patch subprocess.run indirectly by calling a command that exits 1
     proc = _run_nocheck(["sh", "-c", "printf out; exit 3"])
     assert proc.returncode == 3 and proc.stdout == "out"
+
+
+def test_run_passes_timeout_and_raises_on_expiry(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="timed out"):
+        _run(["tart", "exec", "mf-a", "sleep", "999"], timeout=5)
+    assert seen["timeout"] == 5
+
+
+def test_run_nocheck_raises_on_timeout():
+    # A hung command is a genuine failure even though nonzero exits are not — it must not
+    # return normally and pin a worker. Real child so the Popen+select timeout path is exercised.
+    with pytest.raises(RuntimeError, match="timed out"):
+        _run_nocheck(["sleep", "2"], timeout=0.3)
+
+
+def test_run_nocheck_caps_stdout():
+    # A firehose (`yes` prints forever) must be bounded, not buffered into memory unbounded.
+    proc = _run_nocheck(["yes"], timeout=5, max_bytes=1000)
+    assert len(proc.stdout.encode()) <= 1000 + 65536  # cap + at most one read chunk
+    assert proc.returncode != 0  # killed once the ceiling was hit

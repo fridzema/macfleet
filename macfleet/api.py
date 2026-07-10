@@ -73,7 +73,7 @@ class ExecRequest(BaseModel):
 
 
 def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
-              token: str | None = None) -> FastAPI:
+              token: str | None = None, suspend_vms_on_exit: bool = False) -> FastAPI:
     fleet = fleet or Fleet()
 
     async def _guard(request: Request) -> None:
@@ -104,6 +104,14 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
             yield
         finally:
             task.cancel()
+            # Desktop app quit: SIGTERM triggers this graceful shutdown, and the Rust host
+            # blocks on it, so suspending here freezes the fleet before the process exits.
+            # Off by default so a standalone `macfleet serve` Ctrl-C never touches VMs.
+            if suspend_vms_on_exit:
+                try:
+                    await asyncio.to_thread(fleet.suspend_all)
+                except Exception:
+                    logger.exception("suspend-on-exit failed")
 
     api = FastAPI(title="macfleet", lifespan=lifespan,
                   dependencies=[Depends(_guard)] if token else None)
