@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { type Snapshot, type Vm, vmStatus } from '../shared/api'
+import { useDocumentVisibility } from '@vueuse/core'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { api, type Snapshot, type Vm, vmStatus } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 import { type ContextMenuItem, useUi } from '../stores/ui'
 
@@ -178,32 +179,66 @@ function snapAction(sn: Snapshot, action: 'delete' | 'restore'): void {
   else store.restoreVM(sn.vm, sn.id)
 }
 
-// Poll the fleet on an interval: this both survives the sidecar cold-start race and
-// keeps health/state dots live (so a freshly-created VM turns green on its own). TTL
-// countdown is driven the same way — the store never wires its own timer (see
-// `tickTtl`'s comment in stores/fleet.ts) so a component has to call it periodically.
+// Changed fleet snapshots arrive over one authenticated event stream. A slow fallback poll
+// recovers from sidecar restarts/proxy stream failures without putting Tart back on a tight
+// loop. Both stop when the app is hidden; visibility restoration refreshes immediately.
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let ttlTimer: ReturnType<typeof setInterval> | null = null
-// Serialize the polls: /vms fans out a subprocess (tart) + guest round-trip per VM, so
-// under load one refresh can exceed the 2s interval. Firing store.refresh on a bare
-// setInterval would then stack overlapping /vms calls and compound the tart/ssh load that
-// makes the fleet flap in the first place. Skip a tick while one is still in flight.
+let streamRetry: ReturnType<typeof setTimeout> | null = null
+let streamController: AbortController | null = null
+let mounted = false
+const visibility = useDocumentVisibility()
+// Serialize fallback/visibility refreshes: /vms still shells out to Tart, so a sidecar stall
+// must not stack recovery calls while the event stream reconnects.
 let refreshing = false
 async function pollRefresh(): Promise<void> {
-  if (refreshing) return
+  if (refreshing || visibility.value !== 'visible') return
   refreshing = true
   try {
-    await store.refresh()
+    // The infrequent fallback also discovers snapshots created by CLI/MCP clients.
+    await Promise.all([store.refresh(), store.refreshSnapshots()])
   } finally {
     refreshing = false
   }
 }
+function stopStream(): void {
+  streamController?.abort()
+  streamController = null
+  if (streamRetry) clearTimeout(streamRetry)
+  streamRetry = null
+}
+function startStream(): void {
+  stopStream()
+  if (!mounted || visibility.value !== 'visible') return
+  const controller = new AbortController()
+  streamController = controller
+  api
+    .watchFleet(controller.signal, store.acceptFleetUpdate)
+    .catch(() => {})
+    .finally(() => {
+      if (mounted && !controller.signal.aborted && visibility.value === 'visible') {
+        streamRetry = setTimeout(startStream, 2000)
+      }
+    })
+}
+watch(visibility, (state) => {
+  if (!mounted) return
+  if (state === 'visible') {
+    pollRefresh()
+    startStream()
+  } else {
+    stopStream()
+  }
+})
 onMounted(() => {
-  store.refresh()
-  refreshTimer = setInterval(pollRefresh, 2000)
+  mounted = true
+  Promise.all([store.refresh(), store.refreshSnapshots()]).then(startStream)
+  refreshTimer = setInterval(pollRefresh, 30_000)
   ttlTimer = setInterval(store.tickTtl, 1000)
 })
 onUnmounted(() => {
+  mounted = false
+  stopStream()
   // Both timers are unconditionally set in onMounted above, which always runs before a
   // component can unmount — the null-guard only exists to satisfy the `| null` type, not
   // because either is ever actually null here.
