@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "bun run dev",
-    "beforeBuildCommand": "bun run build"
+    "beforeBuildCommand": "bun run build && bun run build:engine"
   },
   "app": {
     "windows": [
@@ -20,12 +20,18 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:*"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:*"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../../macfleet/*.py": "engine/macfleet/",
+      "../../pyproject.toml": "engine/pyproject.toml",
+      "../../uv.lock": "engine/uv.lock",
+      "binaries/macfleet-engine": "engine-sidecar/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

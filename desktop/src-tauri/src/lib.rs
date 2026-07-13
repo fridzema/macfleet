@@ -3,6 +3,7 @@ mod error;
 mod handlers;
 mod state;
 
+use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
@@ -27,17 +28,35 @@ fn free_port() -> u16 {
 /// fails to resolve and the engine never starts. Idempotent: skips any dir already on PATH.
 fn augmented_path() -> String {
     let mut path = std::env::var("PATH").unwrap_or_default();
-    let mut extra = vec!["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()];
+    let mut extra = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+    ];
     if let Ok(home) = std::env::var("HOME") {
         extra.push(format!("{home}/.local/bin"));
         extra.push(format!("{home}/.cargo/bin"));
     }
     for dir in extra {
         if !path.split(':').any(|p| p == dir) {
-            path = if path.is_empty() { dir } else { format!("{dir}:{path}") };
+            path = if path.is_empty() {
+                dir
+            } else {
+                format!("{dir}:{path}")
+            };
         }
     }
     path
+}
+
+fn engine_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Bundles (including debug .app bundles) carry the engine under Resources. `tauri dev`
+    // does not copy bundle resources, so fall back to the repository root only there.
+    let bundled = app.path().resource_dir()?.join("engine");
+    if bundled.join("pyproject.toml").is_file() {
+        Ok(bundled)
+    } else {
+        Ok(PathBuf::from(".."))
+    }
 }
 
 /// # Errors
@@ -85,16 +104,27 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let port = free_port();
             let port_arg = port.to_string();
             let token = uuid::Uuid::new_v4().to_string();
+            let engine_dir = engine_dir(app)?;
+            let bundled_engine = app
+                .path()
+                .resource_dir()?
+                .join("engine-sidecar")
+                .join("macfleet-engine");
 
-            // Spawn the Python engine's local API as a managed sidecar.
-            // In dev the app runs from `desktop/`, so the engine repo root is `..`.
-            // Put it in its own process group so we can later kill the whole tree:
-            // `uv run` spawns a uvicorn grandchild that actually holds the port, and
-            // killing only `uv` would orphan it (leaking the server across restarts).
-            let mut cmd = Command::new("uv");
-            cmd.args(["run", "macfleet", "serve", "--port", &port_arg])
-                .current_dir("..")
-                // Resolve `uv` even when launched from Finder with a minimal PATH (see augmented_path).
+            // Release bundles carry a standalone engine, avoiding Python discovery and uv's
+            // environment check on every launch. Source/dev builds retain the uv fallback.
+            let standalone = bundled_engine.is_file();
+            let mut cmd = if standalone {
+                let mut command = Command::new(&bundled_engine);
+                command.args(["--port", &port_arg]);
+                command
+            } else {
+                let mut command = Command::new("uv");
+                command.args(["run", "--frozen", "macfleet", "serve", "--port", &port_arg]);
+                command
+            };
+            cmd.current_dir(&engine_dir)
+                // Resolve uv in source/dev builds launched from Finder.
                 .env("PATH", augmented_path())
                 // Enable computer-use control. Safe: Fleet.computer() only ever targets
                 // fleet VMs over their guest IP, never the host. This is the app's purpose.
@@ -116,9 +146,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let child = match cmd.spawn() {
                 Ok(c) => Some(c),
                 Err(e) => {
-                    log::error!(
-                        "failed to start engine sidecar `uv run macfleet serve`: {e}; is `uv` installed and on PATH?"
-                    );
+                    let mode = if standalone { "standalone" } else { "uv" };
+                    log::error!("failed to start {mode} engine sidecar: {e}");
                     None
                 }
             };
@@ -187,9 +216,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             // Bound the graceful window: uvicorn's shutdown suspends the fleet
                             // (can be slow), but a hung shutdown must not block app exit forever.
-                            // Wait up to ~10s, then SIGKILL the group and reap.
+                            // Each suspend has a 300s engine ceiling and runs concurrently;
+                            // allow that operation to finish rather than killing Tart midway.
                             let deadline =
-                                std::time::Instant::now() + std::time::Duration::from_secs(10);
+                                std::time::Instant::now() + std::time::Duration::from_secs(330);
                             loop {
                                 if matches!(child.try_wait(), Ok(Some(_))) {
                                     break;

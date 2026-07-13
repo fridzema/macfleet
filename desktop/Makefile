@@ -95,7 +95,9 @@ rust-format:
 
 rust-audit:
 	@command -v cargo-audit >/dev/null 2>&1 || { echo "cargo-audit not installed. Run: cargo install cargo-audit"; exit 1; }
-	cd src-tauri && cargo audit
+	# These advisories are confined to Linux's wayland-scanner build-time parser, which
+	# only consumes trusted protocol XML. Remove the ignores when that chain upgrades.
+	cd src-tauri && cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
 rust-test:
 	cd src-tauri && cargo test
@@ -149,7 +151,7 @@ bootstrap:
 	bash scripts/bootstrap.sh
 
 clean:
-	rm -rf node_modules dist
+	rm -rf node_modules dist src-tauri/binaries
 	cd src-tauri && cargo clean
 
 # Release
