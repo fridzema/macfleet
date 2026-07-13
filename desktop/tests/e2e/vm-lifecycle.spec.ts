@@ -27,10 +27,13 @@ test('snapshotting a selected VM adds it to the sidebar snapshot list', async ({
 
   await page.getByTestId('vm-row').click()
   await page.getByTestId('snapshot-btn').click()
+  await expect(page.getByTestId('snapshot-dialog')).toBeVisible()
+  await page.getByTestId('snapshot-label').fill('web_snap')
+  await page.getByTestId('snapshot-save').click()
 
   const snapRow = page.getByTestId('snap-row')
   await expect(snapRow).toBeVisible()
-  await expect(snapRow).toContainText('web-snap')
+  await expect(snapRow).toContainText('web_snap')
 })
 
 test('two-step delete: arms a confirm, then Yes removes the VM from the fleet', async ({
