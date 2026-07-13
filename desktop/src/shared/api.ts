@@ -99,6 +99,12 @@ export interface Metrics {
   mem_total_mb: number
 }
 
+export interface LogChunk {
+  lines: string
+  cursor?: number
+  reset?: boolean
+}
+
 /** running = up + server healthy; booting = up but server not answering yet. */
 export function vmStatus(vm: Pick<Vm, 'state' | 'healthy'>): VmStatus {
   if (vm.state === 'running') return vm.healthy ? 'running' : 'booting'
@@ -128,10 +134,63 @@ async function j<T>(path: string, init?: RequestInit, timeoutMs?: number): Promi
   }
   try {
     const res = await fetch(`${base}${path}`, init)
-    if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}`)
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as { detail?: unknown } | null
+      const detail = typeof payload?.detail === 'string' ? `: ${payload.detail}` : ''
+      throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}${detail}`)
+    }
     return (await res.json()) as T
   } finally {
     if (timer) clearTimeout(timer)
+  }
+}
+
+async function binary(path: string, init?: RequestInit, timeoutMs?: number): Promise<Blob> {
+  const { base, token } = await apiConfig()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('X-Macfleet-Token', token)
+  const ctrl = new AbortController()
+  const timer = timeoutMs === undefined ? undefined : setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${base}${path}`, { ...init, headers, signal: ctrl.signal })
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as { detail?: unknown } | null
+      const detail = typeof payload?.detail === 'string' ? `: ${payload.detail}` : ''
+      throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}${detail}`)
+    }
+    return await res.blob()
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** Consume authenticated server-sent fleet updates using fetch (EventSource cannot attach
+ * the per-run authentication header). Resolves when aborted or the server closes the stream. */
+async function watchFleet(signal: AbortSignal, onUpdate: (vms: Vm[]) => void): Promise<void> {
+  const { base, token } = await apiConfig()
+  const headers = new Headers({ Accept: 'text/event-stream' })
+  if (token) headers.set('X-Macfleet-Token', token)
+  const res = await fetch(`${base}/fleet/events`, { headers, signal })
+  if (!res.ok || !res.body) throw new Error(`GET /fleet/events -> ${res.status}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  while (!signal.aborted) {
+    const { value, done } = await reader.read()
+    if (done) break
+    pending += decoder.decode(value, { stream: true })
+    let boundary = pending.indexOf('\n\n')
+    while (boundary >= 0) {
+      const event = pending.slice(0, boundary)
+      pending = pending.slice(boundary + 2)
+      const data = event
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n')
+      if (data && !event.startsWith('event: error')) onUpdate(JSON.parse(data) as Vm[])
+      boundary = pending.indexOf('\n\n')
+    }
   }
 }
 
@@ -170,12 +229,16 @@ export const api = {
   status: (n: string) =>
     j<{ healthy: boolean }>(`/vms/${enc(n)}/status`, undefined, POLL_TIMEOUT_MS),
   screenshot: (n: string) =>
-    j<{ png_b64: string }>(`/vms/${enc(n)}/screenshot`, { method: 'POST' }, POLL_TIMEOUT_MS),
+    binary(`/vms/${enc(n)}/screenshot`, { method: 'POST' }, POLL_TIMEOUT_MS),
   click: (n: string, x: number, y: number) => postJson(`/vms/${enc(n)}/click`, { x, y }),
   typeText: (n: string, text: string) => postJson(`/vms/${enc(n)}/type`, { text }),
   key: (n: string, combo: string) => postJson(`/vms/${enc(n)}/key`, { combo }),
-  logs: (n: string, lines = 100) =>
-    j<{ lines: string }>(`/vms/${enc(n)}/logs?lines=${lines}`, undefined, POLL_TIMEOUT_MS),
+  logs: (n: string, lines = 100, cursor?: number) =>
+    j<LogChunk>(
+      `/vms/${enc(n)}/logs?lines=${lines}${cursor === undefined ? '' : `&cursor=${cursor}`}`,
+      undefined,
+      POLL_TIMEOUT_MS,
+    ),
   snapshot: (n: string, label: string) =>
     postJson<{ snapshot_id: string }>(`/vms/${enc(n)}/snapshot`, { label }),
   restore: (n: string, snapshotId: string) =>
@@ -198,4 +261,5 @@ export const api = {
   agentsActivity: (limit?: number) =>
     j<AgentActivity[]>(`/agents/activity${limit !== undefined ? `?limit=${limit}` : ''}`),
   metrics: (n: string) => j<Metrics>(`/vms/${enc(n)}/metrics`, undefined, POLL_TIMEOUT_MS),
+  watchFleet,
 }
