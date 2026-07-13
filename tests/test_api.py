@@ -118,6 +118,18 @@ class FakeFleet:
     def metrics(self, name):
         return {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
 
+    def provisioning(self):
+        return {"b": {"name": "b",
+                      "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
+                      "done": False, "error": None}}
+
+    def provision(self, name):
+        if name != "web":
+            return None
+        return {"name": "web",
+                "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
+                "done": False, "error": None}
+
 
 def test_list_vms_delegates_to_fleet():
     # Health-marking logic itself is covered by Fleet.list_vms tests (test_connect.py);
@@ -164,6 +176,34 @@ def test_nuke_endpoint():
 def test_status_endpoint():
     fake = FakeFleet(healthy=("web",))
     assert TestClient(build_app(fake)).get("/vms/web/status").json() == {"healthy": True}
+
+
+def test_provision_endpoint_returns_record():
+    r = TestClient(build_app(FakeFleet())).get("/vms/web/provision")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "web"
+    assert body["steps"][0]["status"] == "active"
+
+
+def test_provision_endpoint_is_null_when_not_provisioning():
+    r = TestClient(build_app(FakeFleet())).get("/vms/idle/provision")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+def test_fleet_snapshot_frame_carries_vms_and_provisioning():
+    # The frame the SSE stream emits each tick (the stream itself loops forever, so exercise the
+    # composed frame directly).
+    import anyio
+
+    from macfleet.api import _fleet_snapshot
+
+    fake = FakeFleet()
+    frame = anyio.run(_fleet_snapshot, fake)
+    assert set(frame.keys()) == {"vms", "provisioning"}
+    assert frame["vms"] == fake.list_vms()
+    assert "b" in frame["provisioning"]
 
 
 def test_screenshot_success_returns_binary_png():

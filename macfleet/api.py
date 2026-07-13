@@ -17,6 +17,14 @@ from macfleet.connect import Fleet
 logger = logging.getLogger(__name__)
 
 
+async def _fleet_snapshot(fleet: Fleet) -> dict:
+    # One `/fleet/events` frame. list_vms() advances the provisioning steppers as a side effect,
+    # so call it first, then read the (now up-to-date) provisioning map. Factored out of the SSE
+    # generator so it can be exercised directly (the stream itself loops forever).
+    vms = await asyncio.to_thread(fleet.list_vms)
+    return {"vms": vms, "provisioning": fleet.provisioning()}
+
+
 class ClickRequest(BaseModel):
     x: int = Field(ge=0, le=32768)
     y: int = Field(ge=0, le=32768)
@@ -141,7 +149,7 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
             while not await request.is_disconnected():
                 try:
                     current = json.dumps(
-                        await asyncio.to_thread(fleet.list_vms), separators=(",", ":")
+                        await _fleet_snapshot(fleet), separators=(",", ":")
                     )
                     if current != previous:
                         previous = current
@@ -257,6 +265,13 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     @api.get("/vms/{name}/status")
     def status(name: str) -> dict:
         return {"healthy": fleet.status(name)}
+
+    @api.get("/vms/{name}/provision")
+    def provision(name: str) -> dict | None:
+        # Provisioning progress for a just-created VM, or null once it's complete/unknown. The
+        # desktop fetches this once on mount for an instant first paint; the SSE stream (which
+        # carries the same records) drives subsequent updates.
+        return fleet.provision(name)
 
     @api.get("/agents/activity")
     def agents_activity(limit: int = Query(default=20, ge=1, le=200)) -> list[dict]:
