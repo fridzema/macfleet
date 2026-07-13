@@ -1,6 +1,6 @@
 [project]
 name = "macfleet"
-version = "0.3.1"
+version = "0.4.0"
 description = "Spin up and control a fleet of macOS VMs via tart + cua"
 requires-python = ">=3.12"
 dependencies = ["typer>=0.12", "fastapi>=0.111", "uvicorn>=0.30"]
