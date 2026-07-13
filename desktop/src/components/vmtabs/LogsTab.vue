@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDocumentVisibility } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../../shared/api'
 import { useFleet } from '../../stores/fleet'
@@ -22,6 +23,8 @@ watch(
 )
 const booting = computed(() => vm.value?.state === 'running' && !everHealthy.value)
 const active = computed(() => vm.value?.state === 'running' && everHealthy.value)
+const visibility = useDocumentVisibility()
+const pollActive = computed(() => active.value && visibility.value === 'visible')
 
 // Comp line 714's color map — the real `api.logs` payload is a raw text blob (not
 // structured {t, level, msg} records like the comp's mock data), so each line is
@@ -76,16 +79,18 @@ let inFlight = false
 // Bumped on every restart() so a poll() resolving after the VM was switched (or went inactive)
 // can tell its response is stale and skip the write, instead of painting the old VM's logs.
 let generation = 0
+let cursor: number | undefined
 
 async function poll(): Promise<void> {
-  if (paused.value || !active.value || inFlight) return
+  if (paused.value || !pollActive.value || inFlight) return
   inFlight = true
   const myGen = generation
   const name = props.name
   try {
-    const lines = (await api.logs(name)).lines
+    const chunk = cursor === undefined ? await api.logs(name) : await api.logs(name, 100, cursor)
     if (myGen !== generation || props.name !== name) return
-    text.value = lines
+    text.value = cursor === undefined || chunk.reset ? chunk.lines : text.value + chunk.lines
+    cursor = chunk.cursor
   } catch (e) {
     if (myGen !== generation || props.name !== name) return
     text.value = String(e)
@@ -101,7 +106,8 @@ function restart(): void {
   if (timer) clearInterval(timer)
   timer = null
   text.value = ''
-  if (!active.value) return
+  cursor = undefined
+  if (!pollActive.value) return
   poll()
   timer = setInterval(poll, 2000)
 }
@@ -114,10 +120,12 @@ watch(
   { immediate: true },
 )
 watch(active, restart)
+watch(visibility, restart)
 onBeforeUnmount(() => timer && clearInterval(timer))
 
 function togglePause(): void {
   paused.value = !paused.value
+  if (!paused.value) poll()
 }
 
 const scrollEl = ref<HTMLElement | null>(null)
