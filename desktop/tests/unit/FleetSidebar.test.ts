@@ -20,8 +20,9 @@ beforeEach(() => {
   // setTimeout — swap in a no-op so nothing dangles past the test.
   setToastScheduler(() => {})
   useToasts().toasts.value = []
-  // refresh() also lists snapshots now — default to empty for tests that don't care.
+  // Snapshot initialization is independent of the hot fleet path.
   vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
+  vi.spyOn(api, 'watchFleet').mockImplementation(() => new Promise(() => {}))
 })
 
 afterEach(() => {
@@ -330,7 +331,7 @@ describe('FleetSidebar — create panel', () => {
 })
 
 describe('FleetSidebar — polling', () => {
-  it('refreshes on mount, then polls the fleet and TTL countdown on their own timers', async () => {
+  it('refreshes on mount, then uses a slow recovery poll while TTL ticks locally', async () => {
     vi.useFakeTimers()
     const listVms = vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()
@@ -338,7 +339,7 @@ describe('FleetSidebar — polling', () => {
     const wrapper = mount(FleetSidebar)
     await vi.waitFor(() => expect(listVms).toHaveBeenCalledTimes(1))
 
-    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(30_000)
     expect(listVms).toHaveBeenCalledTimes(2)
 
     await vi.advanceTimersByTimeAsync(1000)
