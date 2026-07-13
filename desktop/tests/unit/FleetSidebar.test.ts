@@ -46,6 +46,15 @@ describe('FleetSidebar — fleet rows', () => {
     wrapper.unmount()
   })
 
+  it('hides the spin-up form and shows "Connecting to engine…" until the engine connects', async () => {
+    vi.spyOn(api, 'listVms').mockRejectedValue(new Error('connection refused'))
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    expect(wrapper.find('[data-test="up-form"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Connecting to engine')
+    wrapper.unmount()
+  })
+
   it('shows a disabled "Creating" row for a pending VM', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const store = useFleet()
@@ -269,6 +278,7 @@ describe('FleetSidebar — create panel', () => {
     const store = useFleet()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
     const wrapper = mount(FleetSidebar)
+    await flushPromises() // engine connects (loaded) — the spin-up form only renders once ready
     await wrapper.find('[data-test="up-name"]').setValue('web')
     expect(store.createOptions.name).toBe('web')
     await wrapper.find('[data-test="up-form"]').trigger('submit')

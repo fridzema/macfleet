@@ -3,12 +3,15 @@ import { ref } from 'vue'
 import { useToasts } from '../composables/useToasts'
 import {
   api,
+  type FleetUpdate,
   type HostInfo,
+  type ProvisionRecord,
   type Resources,
   type Share,
   type Snapshot,
   type Vm,
 } from '../shared/api'
+import { useUi } from './ui'
 
 // Its only caller (below, in refresh()) always feeds it a name from `vms.value`, which is
 // itself filtered to `mf-`-prefixed names two lines earlier — the pass-through branch is
@@ -98,6 +101,10 @@ export const useFleet = defineStore('fleet', () => {
   // Creation deadline (epoch ms) per pending name — drives the boot-failure timeout in
   // `tickTtl` so a VM whose `tart run` silently failed doesn't spin "creating" forever.
   const pendingSince = ref<Record<string, number>>({})
+  // Live provisioning steppers for just-created VMs, keyed by short name. Pushed by the engine
+  // over the fleet SSE stream (and fetched once on mount by VmProvisioning); drives the
+  // provisioning panel until the guest is healthy, after which the record is dropped server-side.
+  const provisioning = ref<Record<string, ProvisionRecord>>({})
 
   function markPending(name: string): void {
     if (!pending.value.includes(name)) pending.value = [...pending.value, name]
@@ -254,9 +261,12 @@ export const useFleet = defineStore('fleet', () => {
     }
   }
 
-  function acceptFleetUpdate(rawVms: Vm[]): void {
+  function acceptFleetUpdate(update: FleetUpdate): void {
     refreshSeq++ // supersede any slower fallback refresh already in flight
-    applyFleet(rawVms)
+    // Defensive: `watchFleet` normalizes the wire shape, but never let a malformed frame throw
+    // here — the throw would fire AFTER the refreshSeq bump above, poisoning the fallback poll.
+    applyFleet(update.vms ?? [])
+    provisioning.value = update.provisioning ?? {}
   }
 
   async function fetchHost(): Promise<void> {
@@ -375,6 +385,13 @@ export const useFleet = defineStore('fleet', () => {
   }
 
   async function create(): Promise<void> {
+    // Block spin-up until the engine's first successful list. The UI hides the create affordances
+    // until then, but the command palette can still reach create() — no-op with a nudge rather
+    // than firing a POST at a sidecar that isn't up yet.
+    if (!loaded.value) {
+      toast('Engine still starting — hold on a moment', '⏳')
+      return
+    }
     const opts = createOptions.value
     const name = (opts.name.trim() || `vm-${Math.random().toString(16).slice(2, 6)}`).replace(
       /\s+/g,
@@ -387,6 +404,10 @@ export const useFleet = defineStore('fleet', () => {
     // Optimistic: a "creating" row (and, if leased, its countdown) the instant the
     // user asks for it — cloning/booting takes real time server-side.
     markPending(name)
+    // Focus the new VM immediately so the detail pane shows its provisioning stepper. selectOnly
+    // collapses any prior multi-selection to just this VM. Cross-store call (ui imports fleet);
+    // resolved lazily at call time so the module cycle never breaks.
+    useUi().selectOnly(name)
     if (opts.ttl) leases.value = { ...leases.value, [name]: LEASE_TTL_SECONDS }
     toast(snap ? `Cloning from ${snap.label}…` : `Creating ${name}…`, '⚡')
 
@@ -402,6 +423,10 @@ export const useFleet = defineStore('fleet', () => {
     } catch (e) {
       error.value = String(e)
       clearPending([name])
+      // Drop the focus we grabbed above unless the engine recorded a provisioning error to show
+      // in the panel — otherwise the pane would strand on an empty selection.
+      const ui = useUi()
+      if (ui.selectedVm === name && !provisioning.value[name]) ui.selectVm(null)
       if (opts.ttl) {
         const nextLeases = { ...leases.value }
         delete nextLeases[name]
@@ -460,6 +485,7 @@ export const useFleet = defineStore('fleet', () => {
     error,
     loaded,
     pending,
+    provisioning,
     selectedTab,
     createOptions,
     leases,

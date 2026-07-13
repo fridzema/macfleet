@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import BulkPanel from '../components/BulkPanel.vue'
 import FleetSidebar from '../components/FleetSidebar.vue'
 import VmDetail from '../components/VmDetail.vue'
+import VmProvisioning from '../components/VmProvisioning.vue'
 import { useFleet } from '../stores/fleet'
 import { useUi } from '../stores/ui'
 
@@ -14,11 +15,37 @@ const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 // state changes — a booting VM starts streaming once healthy; a stopped one stops.
 const selectedVm = computed(() => store.vms.find((v) => short(v.name) === ui.selectedVm) ?? null)
 
-// Drop the selection if its VM disappears (nuked).
+// Provisioning record for the current selection, if the engine is still spinning it up.
+const provision = computed(() =>
+  ui.selectedVm ? (store.provisioning[ui.selectedVm] ?? null) : null,
+)
+
+// Show the provisioning stepper (instead of the detail pane) while a just-created VM isn't ready
+// yet. "Ready" = the engine marked the record done, or — before any record lands — the VM is
+// already healthy. Scoped to just-created VMs (a live record, or a still-pending name) so
+// selecting an already-booting existing VM opens VmDetail, not the stepper.
+const showProvisioning = computed(() => {
+  const name = ui.selectedVm
+  if (!name) return false
+  const justCreated = provision.value !== null || store.pending.includes(name)
+  if (!justCreated) return false
+  const ready = provision.value ? provision.value.done : (selectedVm.value?.healthy ?? false)
+  return !ready
+})
+
+// Drop the selection if its VM disappears (nuked) — but keep it while the VM is still being
+// created (pending / has a provisioning record), where it legitimately isn't in the list yet.
 watch(
   () => store.vms,
   () => {
-    if (ui.selectedVm && !selectedVm.value) ui.selectVm(null)
+    if (
+      ui.selectedVm &&
+      !selectedVm.value &&
+      !store.pending.includes(ui.selectedVm) &&
+      !(ui.selectedVm in store.provisioning)
+    ) {
+      ui.selectVm(null)
+    }
   },
 )
 
@@ -38,7 +65,24 @@ const emptySub = computed(() =>
   <div class="flex h-full">
     <FleetSidebar />
     <main class="flex min-w-0 flex-1 flex-col">
+      <!-- Until the engine's first successful list, gate the entire pane on a booting state so no
+           create/spin-up action is reachable against an unstarted sidecar. -->
+      <div
+        v-if="!store.loaded"
+        data-test="engine-booting"
+        class="flex flex-1 flex-col items-center justify-center gap-4 text-[var(--text-faint)]"
+      >
+        <div
+          class="h-[30px] w-[30px] rounded-full border-[3px] border-[var(--border-strong)] border-t-[var(--amber)] animate-[mfspin_.8s_linear_infinite]"
+        />
+        <div class="text-[15px] font-[550] text-[var(--text-dim)]">Starting engine…</div>
+        <div class="max-w-[280px] text-center text-[12.5px]">
+          Booting the macfleet engine — this only takes a couple of seconds.
+        </div>
+      </div>
+      <template v-else>
       <BulkPanel v-if="ui.selectionCount >= 2" />
+      <VmProvisioning v-else-if="showProvisioning" :key="ui.selectedVm!" :name="ui.selectedVm!" />
       <VmDetail
         v-else-if="selectedVm"
         :key="ui.selectedVm!"
@@ -67,6 +111,7 @@ const emptySub = computed(() =>
           ⚡ Spin up your first VM
         </button>
       </div>
+      </template>
     </main>
   </div>
 </template>

@@ -46,6 +46,28 @@ export interface Vm {
 
 export type VmStatus = 'running' | 'booting' | 'stopped'
 
+export type ProvisionStatus = 'pending' | 'active' | 'done' | 'skipped' | 'error'
+
+export interface ProvisionStep {
+  key: string
+  label: string
+  status: ProvisionStatus
+}
+
+/** Live provisioning progress for a just-created VM (see macfleet/connect.py). */
+export interface ProvisionRecord {
+  name: string
+  steps: ProvisionStep[]
+  done: boolean
+  error: string | null
+}
+
+/** One `/fleet/events` frame: the fleet list plus in-flight provisioning records by short name. */
+export interface FleetUpdate {
+  vms: Vm[]
+  provisioning: Record<string, ProvisionRecord>
+}
+
 export interface Snapshot {
   id: string
   vm: string
@@ -166,7 +188,10 @@ async function binary(path: string, init?: RequestInit, timeoutMs?: number): Pro
 
 /** Consume authenticated server-sent fleet updates using fetch (EventSource cannot attach
  * the per-run authentication header). Resolves when aborted or the server closes the stream. */
-async function watchFleet(signal: AbortSignal, onUpdate: (vms: Vm[]) => void): Promise<void> {
+async function watchFleet(
+  signal: AbortSignal,
+  onUpdate: (update: FleetUpdate) => void,
+): Promise<void> {
   const { base, token } = await apiConfig()
   const headers = new Headers({ Accept: 'text/event-stream' })
   if (token) headers.set('X-Macfleet-Token', token)
@@ -188,7 +213,18 @@ async function watchFleet(signal: AbortSignal, onUpdate: (vms: Vm[]) => void): P
         .filter((line) => line.startsWith('data:'))
         .map((line) => line.slice(5).trimStart())
         .join('\n')
-      if (data && !event.startsWith('event: error')) onUpdate(JSON.parse(data) as Vm[])
+      if (data && !event.startsWith('event: error')) {
+        // Rolling-upgrade tolerance: an engine built before the provisioning change streams a
+        // bare `Vm[]`; the current one streams `{vms, provisioning}`. Normalize either so a
+        // version-skewed engine never throws here — a throw would kill the stream AND leave the
+        // fallback poll's refresh sequence bumped, freezing the whole fleet view.
+        const raw = JSON.parse(data) as Vm[] | Partial<FleetUpdate>
+        onUpdate(
+          Array.isArray(raw)
+            ? { vms: raw, provisioning: {} }
+            : { vms: raw.vms ?? [], provisioning: raw.provisioning ?? {} },
+        )
+      }
       boundary = pending.indexOf('\n\n')
     }
   }
@@ -228,6 +264,8 @@ export const api = {
   resume: (n: string) => j(`/vms/${enc(n)}/resume`, { method: 'POST' }),
   status: (n: string) =>
     j<{ healthy: boolean }>(`/vms/${enc(n)}/status`, undefined, POLL_TIMEOUT_MS),
+  provision: (n: string) =>
+    j<ProvisionRecord | null>(`/vms/${enc(n)}/provision`, undefined, POLL_TIMEOUT_MS),
   screenshot: (n: string) =>
     binary(`/vms/${enc(n)}/screenshot`, { method: 'POST' }, POLL_TIMEOUT_MS),
   click: (n: string, x: number, y: number) => postJson(`/vms/${enc(n)}/click`, { x, y }),

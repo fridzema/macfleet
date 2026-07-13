@@ -29,14 +29,21 @@ describe('api', () => {
     )
   })
 
-  it('parses changed fleet snapshots from the authenticated event stream', async () => {
+  it('parses changed fleet snapshots (vms + provisioning) from the authenticated event stream', async () => {
+    const frame = {
+      vms: [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }],
+      provisioning: {
+        b: {
+          name: 'b',
+          steps: [{ key: 'clone', label: 'Clone image', status: 'done' }],
+          done: false,
+          error: null,
+        },
+      },
+    }
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(
-          new TextEncoder().encode(
-            'data: [{"name":"mf-a","state":"running","source":"local","healthy":true}]\n\n',
-          ),
-        )
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(frame)}\n\n`))
         controller.close()
       },
     })
@@ -44,8 +51,42 @@ describe('api', () => {
       new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
     )
     const updates: unknown[] = []
-    await api.watchFleet(new AbortController().signal, (vms) => updates.push(vms))
-    expect(updates).toEqual([[{ name: 'mf-a', state: 'running', source: 'local', healthy: true }]])
+    await api.watchFleet(new AbortController().signal, (u) => updates.push(u))
+    expect(updates).toEqual([frame])
+  })
+
+  it('normalizes a legacy bare-array fleet frame from an older engine to {vms, provisioning}', async () => {
+    // An engine built before the provisioning change streams a bare `Vm[]`. The client must not
+    // crash on it (rolling-upgrade tolerance, like ScreenTab's screenshot fallback).
+    const legacy = [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }]
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(legacy)}\n\n`))
+        controller.close()
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    )
+    const updates: unknown[] = []
+    await api.watchFleet(new AbortController().signal, (u) => updates.push(u))
+    expect(updates).toEqual([{ vms: legacy, provisioning: {} }])
+  })
+
+  it('provision GETs /vms/{name}/provision', async () => {
+    const record = {
+      name: 'web',
+      steps: [{ key: 'boot', label: 'Boot guest', status: 'active' }],
+      done: false,
+      error: null,
+    }
+    const f = mockFetch(200, record)
+    const got = await api.provision('web')
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/web/provision`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(got).toEqual(record)
   })
 
   it('listVms GETs /vms', async () => {
