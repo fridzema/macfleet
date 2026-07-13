@@ -95,13 +95,13 @@ describe('fleet store', () => {
     expect(s.error).toContain('boom')
   })
 
-  it('refresh also loads snapshots', async () => {
+  it('refreshSnapshots loads snapshots independently of the hot fleet path', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     vi.spyOn(api, 'listSnapshots').mockResolvedValue([
       { id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 },
     ])
     const s = useFleet()
-    await s.refresh()
+    await s.refreshSnapshots()
     expect(s.snapshots).toEqual([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
   })
 
@@ -117,17 +117,17 @@ describe('fleet store', () => {
     expect(s.error).toBeNull()
   })
 
-  it('refresh keeps the last-known snapshots when a later /snapshots call rejects', async () => {
+  it('refreshSnapshots keeps the last-known snapshots when a later call rejects', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const listSnapshots = vi
       .spyOn(api, 'listSnapshots')
       .mockResolvedValue([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
     const s = useFleet()
-    await s.refresh()
+    await s.refreshSnapshots()
     expect(s.snapshots).toHaveLength(1)
 
     listSnapshots.mockRejectedValueOnce(new Error('500'))
-    await s.refresh()
+    await s.refreshSnapshots()
     expect(s.snapshots).toEqual([{ id: 'web-golden', vm: 'web', label: 'golden', size: 12.5 }])
   })
 
