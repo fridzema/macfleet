@@ -496,6 +496,122 @@ def test_create_resource_failure_removes_partial_clone(tmp_path):
     assert ["tart", "delete", "mf-web"] in calls
 
 
+# --- provisioning steppers ---
+
+
+def _prov_status(rec):
+    return {s["key"]: s["status"] for s in rec["steps"]}
+
+
+def test_create_records_provisioning_steps_for_a_fresh_clone(tmp_path):
+    fleet, *_ = _fleet(tmp_path)
+    fleet.create("web", cpu=4, memory=8192)
+    rec = fleet.provision("web")
+    assert rec is not None and rec["done"] is False and rec["error"] is None
+    assert _prov_status(rec) == {
+        "clone": "done", "configure": "done", "boot": "active", "health": "pending"}
+
+
+def test_create_records_configure_skipped_without_a_preset(tmp_path):
+    fleet, *_ = _fleet(tmp_path)
+    fleet.create("web")
+    assert _prov_status(fleet.provision("web"))["configure"] == "skipped"
+
+
+def test_create_records_clone_and_configure_skipped_for_existing_name(tmp_path):
+    fleet, *_ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    fleet.create("web", cpu=8)
+    status = _prov_status(fleet.provision("web"))
+    assert status["clone"] == "skipped"
+    assert status["configure"] == "skipped"
+    assert status["boot"] == "active"
+
+
+def test_create_clone_failure_records_provisioning_error(tmp_path):
+    def run(argv):
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[:2] == ["tart", "clone"]:
+            raise RuntimeError("clone boom")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+    with pytest.raises(RuntimeError, match="clone boom"):
+        fleet.create("web")
+    rec = fleet.provision("web")
+    assert rec["error"] == "clone boom"
+    assert _prov_status(rec)["clone"] == "error"
+
+
+def test_provision_public_view_strips_internal_bookkeeping(tmp_path):
+    fleet, *_ = _fleet(tmp_path)
+    fleet.create("web")
+    rec = fleet.provision("web")
+    assert set(rec) == {"name", "steps", "done", "error"}
+    assert all(set(s) == {"key", "label", "status"} for s in rec["steps"])
+    assert set(fleet.provisioning()["web"]) == {"name", "steps", "done", "error"}
+
+
+def test_list_vms_advances_completes_then_prunes_provisioning(tmp_path, monkeypatch):
+    listing = []
+    clock = {"t": 0.0}
+
+    def run(argv):
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                [{"Name": v, "State": "running", "Source": "local", "Size": 1} for v in listing]), "")
+        if argv[:2] == ["tart", "get"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {"State": "running", "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: clock["t"]),
+                  clock=lambda: clock["t"])
+    healthy = {"v": False}
+    monkeypatch.setattr(fleet, "status", lambda name: healthy["v"])
+
+    fleet.create("web")
+
+    # Not yet in the fleet list -> boot still active, health pending.
+    fleet.list_vms()
+    status = _prov_status(fleet.provision("web"))
+    assert status["boot"] == "active"
+    assert status["health"] == "pending"
+
+    # Running but not healthy -> boot done, health active.
+    listing.append("mf-web")
+    fleet._invalidate_fleet("mf-web")
+    fleet.list_vms()
+    rec = fleet.provision("web")
+    assert _prov_status(rec)["boot"] == "done"
+    assert _prov_status(rec)["health"] == "active"
+    assert rec["done"] is False
+
+    # Guest answers -> all done.
+    healthy["v"] = True
+    fleet._invalidate_fleet("mf-web")
+    fleet.list_vms()
+    rec = fleet.provision("web")
+    assert _prov_status(rec)["health"] == "done"
+    assert rec["done"] is True
+
+    # Lingers, then is swept once the linger window passes.
+    clock["t"] = 100.0
+    fleet._invalidate_fleet("mf-web")
+    fleet.list_vms()
+    assert fleet.provision("web") is None
+
+
+def test_nuke_drops_provisioning_record(tmp_path):
+    fleet, *_ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    fleet._prov_init("mf-web")
+    assert fleet.provision("web") is not None
+    fleet.nuke("web")
+    assert fleet.provision("web") is None
+
+
 def test_up_delegates_to_create(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path)
     fleet.up("web")

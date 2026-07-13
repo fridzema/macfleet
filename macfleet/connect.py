@@ -142,6 +142,23 @@ class GuestControl:
             self._cmd("press_key", key=keys[0])
 
 
+# Ordered provisioning phases surfaced to the desktop while create() runs. clone/configure are
+# recorded synchronously by create() (the frontend can't observe them); boot/health are advanced
+# from live tart state + the guest health check list_vms() already runs. The desktop renders these
+# as a stepper (VmProvisioning.vue).
+_PROVISION_PHASES: tuple[tuple[str, str], ...] = (
+    ("clone", "Clone image"),
+    ("configure", "Apply resources"),
+    ("boot", "Boot guest"),
+    ("health", "Guest health check"),
+)
+# Lifetimes for the provisioning records above. A completed record lingers one SSE cycle so the
+# desktop sees the done=True frame, then is dropped; an errored or stalled create (VM never
+# materialized) is swept after PROVISION_TTL so the map can't grow unbounded.
+_PROVISION_LINGER = 2.0
+_PROVISION_TTL = 180.0
+
+
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
                  spawn: Callable[[list[str]], Any] = _spawn,
@@ -178,6 +195,12 @@ class Fleet:
         self._fleet_cache: tuple[float, list[dict]] | None = None
         self._health_cache: dict[str, tuple[float, bool]] = {}
         self._cache_lock = threading.Lock()
+        # Provisioning progress per just-created VM (full name -> record), surfaced to the desktop
+        # stepper via list_vms()/the SSE stream and GET /vms/{name}/provision. Created by create(),
+        # advanced by list_vms() as the guest boots + turns healthy, dropped once complete or on
+        # nuke. `_started_at`/`_done_at` are internal bookkeeping, stripped from the public view.
+        self._provision: dict[str, dict] = {}
+        self._provision_lock = threading.Lock()
 
     def _state(self, full: str) -> str:
         return self.tart.get_config(full)["State"]
@@ -230,6 +253,77 @@ class Fleet:
             self._leases.suspend(full)
         return done
 
+    def _prov_init(self, full: str) -> None:
+        steps = [{"key": k, "label": lbl, "status": "pending"} for k, lbl in _PROVISION_PHASES]
+        with self._provision_lock:
+            self._provision[full] = {"name": shortname(full), "steps": steps, "done": False,
+                                     "error": None, "_started_at": self._clock(), "_done_at": None}
+
+    def _prov_set(self, full: str, key: str, status: str) -> None:
+        with self._provision_lock:
+            rec = self._provision.get(full)
+            if rec is None:
+                return
+            for step in rec["steps"]:
+                if step["key"] == key:
+                    step["status"] = status
+                    break
+
+    def _prov_error(self, full: str, msg: str) -> None:
+        with self._provision_lock:
+            rec = self._provision.get(full)
+            if rec is None:
+                return
+            for step in rec["steps"]:
+                if step["status"] == "active":
+                    step["status"] = "error"
+            rec["error"] = msg
+
+    def _advance_provision(self, full: str, running: bool, healthy: bool) -> None:
+        """Move a tracked create's boot/health steps forward from live tart state + guest health
+        (both already computed by list_vms). A terminal (errored) record is left untouched."""
+        with self._provision_lock:
+            rec = self._provision.get(full)
+            if rec is None or rec["error"]:
+                return
+            steps = {s["key"]: s for s in rec["steps"]}
+            if healthy:
+                steps["boot"]["status"] = "done"
+                steps["health"]["status"] = "done"
+                rec["done"] = True
+                if rec["_done_at"] is None:
+                    rec["_done_at"] = self._clock()
+            elif running:
+                steps["boot"]["status"] = "done"
+                steps["health"]["status"] = "active"
+            elif steps["boot"]["status"] == "pending":
+                steps["boot"]["status"] = "active"
+
+    def _prune_provision(self, live_fulls: set[str]) -> None:
+        now = self._clock()
+        with self._provision_lock:
+            drop = [full for full, rec in self._provision.items()
+                    if (rec["_done_at"] is not None and now - rec["_done_at"] >= _PROVISION_LINGER)
+                    or (full not in live_fulls and now - rec["_started_at"] > _PROVISION_TTL)]
+            for full in drop:
+                self._provision.pop(full, None)
+
+    @staticmethod
+    def _public_prov(rec: dict) -> dict:
+        # Strip the internal `_`-prefixed bookkeeping so it never leaks into the API/SSE payload.
+        return {"name": rec["name"], "steps": [dict(s) for s in rec["steps"]],
+                "done": rec["done"], "error": rec["error"]}
+
+    def provisioning(self) -> dict[str, dict]:
+        """Snapshot of every in-flight provisioning record, keyed by short name (SSE payload)."""
+        with self._provision_lock:
+            return {rec["name"]: self._public_prov(rec) for rec in self._provision.values()}
+
+    def provision(self, name: str) -> dict | None:
+        with self._provision_lock:
+            rec = self._provision.get(fullname(name))
+            return self._public_prov(rec) if rec is not None else None
+
     def create(self, name: str, from_snapshot: str | None = None,
                ttl: float | None = None, cpu: int | None = None,
                memory: int | None = None, disk: int | None = None) -> None:
@@ -248,11 +342,15 @@ class Fleet:
                 pass
             self._leases.drop(target)
             existing.discard(target)
+        # Init after the reclaim above (whose nuke would otherwise drop a fresh record).
+        self._prov_init(target)
         cloned = target not in existing
         if cloned:
             src = f"mfsnap-{from_snapshot}" if from_snapshot else "mf-golden"
             try:
+                self._prov_set(target, "clone", "active")
                 self.tart.clone(src, target)
+                self._prov_set(target, "clone", "done")
                 # Resources can only be set on a stopped VM, and only a freshly-cloned one is
                 # stopped here. `tart set --disk-size` is grow-only, so pass it through only
                 # when it grows the clone's disk.
@@ -260,18 +358,27 @@ class Fleet:
                 if disk is not None and disk <= self.tart.get_config(target)["Disk"]:
                     disk_size = None
                 if cpu is not None or memory is not None or disk_size is not None:
+                    self._prov_set(target, "configure", "active")
                     self.tart.set_config(target, cpu=cpu, memory=memory, disk_size=disk_size)
-            except Exception:
+                    self._prov_set(target, "configure", "done")
+                else:
+                    self._prov_set(target, "configure", "skipped")
+            except Exception as exc:
                 # Do not leave a partial stopped clone behind: a retry would otherwise see
                 # it as pre-existing, skip the requested resources, and boot wrong settings.
+                self._prov_error(target, str(exc))
                 try:
                     self.tart.delete(target)
                 except RuntimeError:
                     pass
                 raise
             self._res_cache.pop(target, None)
+        else:
+            self._prov_set(target, "clone", "skipped")
+            self._prov_set(target, "configure", "skipped")
         # background `tart run` so it doesn't block the caller
         self._boot(self._run_argv(target))
+        self._prov_set(target, "boot", "active")
         if ttl is not None:
             self._leases.record(target, ttl)
         self._invalidate_fleet(target)
@@ -360,6 +467,16 @@ class Fleet:
                    "source": v.source, "healthy": health.get(v.name, False),
                    **self._res_cache.get(v.name, {"cpu": None, "memory_mb": None, "disk_gb": None})}
                   for v in vms]
+        # Advance any in-flight create steppers from the state/health just computed, then sweep
+        # completed/stale ones. Cheap: reuses `health`, adds no tart/guest calls.
+        with self._provision_lock:
+            tracked = list(self._provision.keys())
+        if tracked:
+            states = {v.name: v.state for v in vms}
+            for full in tracked:
+                self._advance_provision(full, states.get(full) == "running",
+                                        bool(health.get(full, False)))
+            self._prune_provision(set(states))
         with self._cache_lock:
             self._fleet_cache = (now + 1.0, [dict(vm) for vm in result])
         return result
@@ -396,6 +513,8 @@ class Fleet:
         self._forget_ip(fullname(name))
         self._leases.unsuspend(fullname(name))
         self._shares.drop(fullname(name))
+        with self._provision_lock:
+            self._provision.pop(fullname(name), None)
         self._invalidate_fleet(fullname(name))
 
     def ip(self, name: str) -> str:
