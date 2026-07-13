@@ -41,14 +41,16 @@ def test_bake_steps_have_no_manual_gate():
     assert not any("MANUAL" in s for s in bake_steps())
 
 
-def test_server_pinned_to_logical_display_size():
-    # The launch gateway must pass --width/--height (the display's logical/point size) so
-    # screenshots and click coordinates share one space — otherwise a Retina guest's clicks
-    # land at ~2x the intended spot. See _GATEWAY.
+def test_gateway_rescales_mouse_coords_to_the_click_space():
+    # cua clicks in the display's logical points (CGDisplayBounds), but the desktop maps clicks
+    # against the larger screenshot pixels; on a HiDPI guest these differ and cua does no scaling,
+    # so the gateway rescales mouse coordinates itself. See _GATEWAY.
     s = render_provision_script()
     assert "macfleet_gateway.py" in s
-    assert "pyautogui" in s and "pyautogui.size()" in s
-    assert "--width" in s and "--height" in s
+    assert "CGDisplayBounds" in s
+    assert "scale_mouse_body" in s and "resolve_click_scale" in s
+    assert "left_click" in s  # part of the rescaled mouse-command set
+    assert "pyautogui.size()" not in s  # the old (wrong) logical-pin path is gone
     assert "127.0.0.1" in s and '"8001"' in s
 
 
