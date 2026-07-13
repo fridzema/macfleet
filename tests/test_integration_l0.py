@@ -26,5 +26,6 @@ def test_l0_list_then_up(monkeypatch):
 
     assert len(client.get("/vms").json()) == 1
     assert client.post("/vms/web/up").json() == {"ok": True}
+    fleet._invalidate_fleet()
     names = [v["name"] for v in client.get("/vms").json()]
     assert "mf-web" in names

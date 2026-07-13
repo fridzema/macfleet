@@ -1,4 +1,3 @@
-import base64
 import json
 import subprocess
 import urllib.error
@@ -49,6 +48,18 @@ def test_computer_blocked_without_env(monkeypatch):
         fleet.computer("web")
 
 
+def test_computer_reads_and_caches_guest_token_over_ssh(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
+    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")))
+    calls = []
+    monkeypatch.setattr(fleet, "ssh", lambda name, command: calls.append((name, command)) or "token\n")
+    monkeypatch.setattr(fleet, "ip", lambda name: "192.168.64.4")
+
+    assert fleet.computer("web")._token == "token"
+    assert fleet.computer("web")._token == "token"
+    assert calls == [("web", "cat ~/.macfleet-control-token")]
+
+
 # --- GuestControl: drives the in-guest computer-server over /cmd ---
 
 
@@ -57,7 +68,7 @@ class _FakeResp:
         self._t = text
 
     def read(self):
-        return self._t.encode()
+        return self._t if isinstance(self._t, bytes) else self._t.encode()
 
     def __enter__(self):
         return self
@@ -68,19 +79,18 @@ class _FakeResp:
 
 def _opener(response_text, captured):
     def open_(req, timeout=None):
-        captured.append((req.full_url, json.loads(req.data.decode())))
+        captured.append((req.full_url, json.loads(req.data.decode()) if req.data else None))
         return _FakeResp(response_text)
     return open_
 
 
-def test_guest_screenshot_decodes_image_data():
+def test_guest_screenshot_uses_binary_gateway_endpoint():
     png = b"\x89PNG\r\n\x1a\nDATA"
-    b64 = base64.b64encode(png).decode()
     cap = []
-    gc = GuestControl("http://vm:8000", opener=_opener(f'data: {{"success": true, "image_data": "{b64}"}}', cap))
+    gc = GuestControl("http://vm:8000", opener=_opener(png, cap))
     assert gc.screenshot() == png
-    assert cap[0][0] == "http://vm:8000/cmd"
-    assert cap[0][1] == {"command": "screenshot", "params": {}}
+    assert cap[0][0] == "http://vm:8000/macfleet/screenshot"
+    assert cap[0][1] is None
 
 
 def test_guest_click_sends_left_click_coords():
@@ -88,6 +98,36 @@ def test_guest_click_sends_left_click_coords():
     gc = GuestControl("http://vm:8000", opener=_opener('data: {"success": true}', cap))
     gc.click(12, 34)
     assert cap[0][1] == {"command": "left_click", "params": {"x": 12, "y": 34}}
+
+
+def test_guest_control_sends_gateway_token():
+    captured = []
+
+    def open_(req, timeout=None):
+        captured.append(req)
+        return _FakeResp('data: {"success": true}')
+
+    GuestControl("http://vm:8000", token="secret", opener=open_).click(1, 2)
+    assert captured[0].get_header("X-macfleet-guest-token") == "secret"
+
+
+def test_guest_logs_use_cursor_gateway_endpoint():
+    cap = []
+    gc = GuestControl(
+        "http://vm:8000", opener=_opener('{"lines":"next\\n","cursor":42}', cap)
+    )
+    assert gc.logs(25, 10) == {"lines": "next\n", "cursor": 42}
+    assert cap[0][0] == "http://vm:8000/macfleet/logs?lines=25&cursor=10"
+
+
+def test_guest_metrics_use_cached_gateway_endpoint():
+    cap = []
+    gc = GuestControl(
+        "http://vm:8000",
+        opener=_opener('{"cpu_pct":12.5,"mem_used_mb":1024,"mem_total_mb":4096}', cap),
+    )
+    assert gc.metrics()["cpu_pct"] == 12.5
+    assert cap[0][0] == "http://vm:8000/macfleet/metrics"
 
 
 def test_guest_type_sends_text():
@@ -185,6 +225,17 @@ def test_suspend_all_noop_when_nothing_running(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-idle", "stopped", "")])
     assert fleet.suspend_all() == []
     assert not any(c[:2] == ["tart", "suspend"] for c in calls)
+
+
+def test_list_vms_coalesces_immediate_refreshes(tmp_path, monkeypatch):
+    fleet, calls, _, _ = _fleet(
+        tmp_path, vms=[VmInfo("mf-web", "running", "local")]
+    )
+    monkeypatch.setattr(fleet, "status", lambda name: True)
+    first = fleet.list_vms()
+    second = fleet.list_vms()
+    assert first == second
+    assert sum(call[:2] == ["tart", "list"] for call in calls) == 1
 
 
 def test_create_clones_golden_and_records_ttl(tmp_path):
@@ -427,6 +478,24 @@ def test_create_disk_shrink_is_guarded_grow_only(tmp_path):
     assert ["tart", "set", "mf-web2", "--disk-size", "100"] in events
 
 
+def test_create_resource_failure_removes_partial_clone(tmp_path):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[:2] == ["tart", "set"]:
+            raise RuntimeError("invalid resources")
+        return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
+                  leases=Leases(str(tmp_path / "s.json")))
+    with pytest.raises(RuntimeError, match="invalid resources"):
+        fleet.create("web", cpu=4)
+    assert ["tart", "delete", "mf-web"] in calls
+
+
 def test_up_delegates_to_create(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path)
     fleet.up("web")
@@ -504,6 +573,21 @@ def test_snapshot_falls_back_to_stop_when_suspend_fails(tmp_path):
     assert ["tart", "stop", "mf-web"] in calls  # clean-disk fallback
 
 
+def test_snapshot_clone_failure_still_resumes_source(tmp_path):
+    fleet, calls, spawned, _ = _fleet(tmp_path)
+    original_clone = fleet.tart.clone
+
+    def fail_clone(src, dst):
+        original_clone(src, dst)
+        raise RuntimeError("disk full")
+
+    fleet.tart.clone = fail_clone
+    with pytest.raises(RuntimeError, match="disk full"):
+        fleet.snapshot("web", "clean")
+    assert ["tart", "suspend", "mf-web"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
 def test_snapshot_rejects_duplicate_id(tmp_path):
     fleet, _, _, _ = _fleet(tmp_path, vms=[
         VmInfo("mf-web", "stopped", "local"),
@@ -534,9 +618,14 @@ def test_restore_stops_deletes_clones_runs_when_vm_exists(tmp_path):
         VmInfo("mfsnap-web-clean", "stopped", "local"),
     ])
     fleet.restore("web", "web-clean")
-    assert calls.index(["tart", "stop", "mf-web"]) \
-        < calls.index(["tart", "delete", "mf-web"]) \
-        < calls.index(["tart", "clone", "mfsnap-web-clean", "mf-web"])
+    clone = next(c for c in calls if c[:3] == ["tart", "clone", "mfsnap-web-clean"])
+    staged = clone[3]
+    old_rename = next(c for c in calls if c[:3] == ["tart", "rename", "mf-web"])
+    backup = old_rename[3]
+    assert calls.index(clone) < calls.index(["tart", "stop", "mf-web"])
+    assert ["tart", "rename", staged, "mf-web"] in calls
+    assert ["tart", "delete", backup] in calls
+    assert ["tart", "delete", "mf-web"] not in calls
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
 
 
@@ -545,7 +634,45 @@ def test_restore_recreates_when_vm_absent(tmp_path):
         tmp_path, vms=[VmInfo("mfsnap-web-clean", "stopped", "local")])
     fleet.restore("web", "web-clean")
     assert not any(c[:2] == ["tart", "delete"] for c in calls)
-    assert ["tart", "clone", "mfsnap-web-clean", "mf-web"] in calls
+    clone = next(c for c in calls if c[:3] == ["tart", "clone", "mfsnap-web-clean"])
+    assert ["tart", "rename", clone[3], "mf-web"] in calls
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def test_restore_clone_failure_does_not_touch_current_vm(tmp_path):
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[
+        VmInfo("mf-web", "running", "local"),
+        VmInfo("mfsnap-web-clean", "stopped", "local"),
+    ])
+
+    def fail_clone(_src, _dst):
+        raise RuntimeError("disk full")
+
+    fleet.tart.clone = fail_clone
+    with pytest.raises(RuntimeError, match="disk full"):
+        fleet.restore("web", "web-clean")
+    assert ["tart", "stop", "mf-web"] not in calls
+    assert not any(c[:3] == ["tart", "rename", "mf-web"] for c in calls)
+    assert ["tart", "delete", "mf-web"] not in calls
+
+
+def test_restore_swap_failure_rolls_back_and_resumes_current_vm(tmp_path):
+    fleet, calls, spawned, _ = _fleet(tmp_path, vms=[
+        VmInfo("mf-web", "running", "local"),
+        VmInfo("mfsnap-web-clean", "stopped", "local"),
+    ])
+    original_rename = fleet.tart.rename
+
+    def fail_staged_rename(old, new):
+        if old.startswith("mftmp-"):
+            raise RuntimeError("rename failed")
+        original_rename(old, new)
+
+    fleet.tart.rename = fail_staged_rename
+    with pytest.raises(RuntimeError, match="rename failed"):
+        fleet.restore("web", "web-clean")
+    backup = next(c[3] for c in calls if c[:3] == ["tart", "rename", "mf-web"])
+    assert ["tart", "rename", backup, "mf-web"] in calls
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
 
 
@@ -577,6 +704,23 @@ def test_duplicate_stateful(tmp_path):
     fleet.duplicate("web", "web2")
     assert ["tart", "clone", "mf-web", "mf-web2"] in calls
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+    assert ["tart", "run", "mf-web2", "--no-graphics"] in spawned
+
+
+def test_duplicate_clone_failure_still_resumes_source(tmp_path):
+    fleet, _, spawned, _ = _fleet(tmp_path)
+    fleet.tart.clone = lambda _src, _dst: (_ for _ in ()).throw(RuntimeError("disk full"))
+    with pytest.raises(RuntimeError, match="disk full"):
+        fleet.duplicate("web", "web2")
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+    assert ["tart", "run", "mf-web2", "--no-graphics"] not in spawned
+
+
+def test_duplicate_stopped_source_boots_copy(tmp_path):
+    fleet, _, spawned, _ = _fleet(
+        tmp_path, vms=[VmInfo("mf-web", "stopped", "local")]
+    )
+    fleet.duplicate("web", "web2")
     assert ["tart", "run", "mf-web2", "--no-graphics"] in spawned
 
 
@@ -761,29 +905,24 @@ def test_set_resources_never_shrinks_disk(tmp_path):
     fleet.set_resources("web", disk_size=40)  # would shrink -> must be dropped, no error
 
 
-def test_metrics_parses_top(tmp_path):
-    top = "CPU usage: 1.91% user, 23.56% sys, 74.52% idle\nPhysMem: 8029M used (1027M wired), 147M unused."
-    def nocheck(argv):
-        assert argv[:3] == ["tart", "exec", "mf-web"]
-        return subprocess.CompletedProcess(argv, 0, top, "")
-    def run(argv):  # for mem_total via resources()
-        return subprocess.CompletedProcess(argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+def test_metrics_uses_persistent_guest_gateway(tmp_path, monkeypatch):
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, run_nocheck=nocheck,
+    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")),
                   leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    expected = {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
+    guest = type("Guest", (), {"metrics": lambda self: expected})()
+    monkeypatch.setattr(fleet, "_guest_client", lambda name: guest)
     m = fleet.metrics("web")
-    assert m["cpu_pct"] == 25.5           # 100 - 74.52 = 25.48 -> 25.5
-    assert m["mem_used_mb"] == 8029
-    assert m["mem_total_mb"] == 8192
+    assert m == expected
 
 
-def test_metrics_raises_when_exec_fails(tmp_path):
-    def nocheck(argv):
-        return subprocess.CompletedProcess(argv, 1, "", "vm not running")
+def test_metrics_propagates_guest_error(tmp_path, monkeypatch):
     from macfleet.leases import Leases
-    import pytest
     fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
-                  run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    monkeypatch.setattr(
+        fleet, "_guest_client", lambda name: (_ for _ in ()).throw(RuntimeError("metrics unavailable"))
+    )
     with pytest.raises(RuntimeError, match="metrics unavailable"):
         fleet.metrics("web")
 

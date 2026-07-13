@@ -41,6 +41,37 @@ def test_bake_steps_have_no_manual_gate():
     assert not any("MANUAL" in s for s in bake_steps())
 
 
+def test_server_pinned_to_logical_display_size():
+    # The launch gateway must pass --width/--height (the display's logical/point size) so
+    # screenshots and click coordinates share one space — otherwise a Retina guest's clicks
+    # land at ~2x the intended spot. See _GATEWAY.
+    s = render_provision_script()
+    assert "macfleet_gateway.py" in s
+    assert "pyautogui" in s and "pyautogui.size()" in s
+    assert "--width" in s and "--height" in s
+    assert "127.0.0.1" in s and '"8001"' in s
+
+
+def test_gateway_requires_boot_rotated_token_for_commands():
+    from macfleet.provision import _GATEWAY
+
+    s = render_provision_script()
+    compile(_GATEWAY, "macfleet_gateway.py", "exec")
+    assert "secrets.token_urlsafe" in s
+    assert "X-Macfleet-Guest-Token" in s
+    assert "compare_digest" in s
+    assert 'parsed.path != "/status"' in s
+    assert 'parsed.path == "/macfleet/screenshot"' in s
+    assert 'parsed.path == "/macfleet/logs"' in s
+    assert 'parsed.path == "/macfleet/metrics"' in s
+
+
+def test_guest_dependencies_are_version_pinned():
+    s = render_provision_script()
+    assert "cua-computer-server==0.3.42" in s
+    assert "UV_VERSION=0.11.28" in s
+
+
 def test_plist_writes_log_file():
     from macfleet.provision import render_provision_script, SERVER_LOG
     s = render_provision_script()
