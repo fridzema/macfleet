@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  engine:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev --extra mcp
+      - run: uv run ruff check .
+      - run: uv run --extra mcp pytest -q
+      - run: uv export --format requirements-txt --no-dev --extra mcp --no-emit-project --output-file requirements-audit.txt
+      - run: uvx pip-audit -r requirements-audit.txt
+      - run: uv export --format requirements-txt --extra dev --no-emit-project --output-file build-requirements-audit.txt
+      - run: uvx pip-audit -r build-requirements-audit.txt
+
+  desktop:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: desktop/.bun-version
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - run: bun install --frozen-lockfile
+      - run: bun audit
+      - run: bunx playwright install chromium firefox webkit
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run test:unit:coverage
+      - run: bun run test:e2e
+      - run: bun run build
+      - run: bun run build:engine
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo install cargo-audit --locked
+      # quick-xml 0.39 is only pulled by Linux's wayland-scanner build tool, which parses
+      # trusted protocol XML at compile time; no newer compatible scanner exists yet.
+      - run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
