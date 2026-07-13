@@ -218,40 +218,45 @@ export const useFleet = defineStore('fleet', () => {
   // started keeps a slow/older response from overwriting fresher state (last-writer-wins).
   let refreshSeq = 0
 
+  function applyFleet(rawVms: Vm[]): void {
+    const fleetVms = rawVms.filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
+    vms.value = fleetVms.map(smooth.apply)
+    smooth.prune(new Set(fleetVms.map((v) => v.name)))
+    error.value = null
+    loaded.value = true
+    clearPending(
+      pending.value.filter((n) =>
+        vms.value.some((v) => short(v.name) === n && v.state === 'running'),
+      ),
+    )
+  }
+
   async function refresh(): Promise<void> {
     const seq = ++refreshSeq
     try {
       const rawVms = await api.listVms()
       if (seq !== refreshSeq) return // a newer refresh superseded this one
-      // Only mf- fleet VMs are operable; base/OCI images can't be controlled, and
-      // mf-golden is the read-only clone template, not a work VM.
-      const fleetVms = rawVms.filter((v) => v.name.startsWith('mf-') && v.name !== 'mf-golden')
-      vms.value = fleetVms.map(smooth.apply)
-      smooth.prune(new Set(fleetVms.map((v) => v.name)))
-      error.value = null
-      loaded.value = true
-      clearPending(
-        pending.value.filter((n) =>
-          vms.value.some((v) => short(v.name) === n && v.state === 'running'),
-        ),
-      )
+      applyFleet(rawVms)
     } catch (e) {
       if (seq !== refreshSeq) return
       error.value = String(e)
       return
     }
+  }
 
-    // Snapshots are best-effort: a transient /snapshots failure must not blank the
-    // fleet list that just loaded successfully above (nor set `error`, which the
-    // sidebar reads as an overall connectivity problem). Keep the last-known
-    // snapshots rather than clearing them on a miss.
+  // Snapshots change only after explicit snapshot mutations. Keeping them out of the
+  // two-second fleet path removes a second `tart list` subprocess from every idle refresh.
+  async function refreshSnapshots(): Promise<void> {
     try {
-      const snaps = await api.listSnapshots()
-      if (seq !== refreshSeq) return
-      snapshots.value = snaps
+      snapshots.value = await api.listSnapshots()
     } catch {
-      // ignored — see above
+      // Best effort: preserve the last-known list on a transient failure.
     }
+  }
+
+  function acceptFleetUpdate(rawVms: Vm[]): void {
+    refreshSeq++ // supersede any slower fallback refresh already in flight
+    applyFleet(rawVms)
   }
 
   async function fetchHost(): Promise<void> {
@@ -317,8 +322,15 @@ export const useFleet = defineStore('fleet', () => {
   const resume = (name: string) => run(() => api.resume(name), `Failed to resume ${name}`)
   const rename = (oldName: string, newName: string) =>
     run(() => api.rename(oldName, newName), `Failed to rename ${oldName}`)
-  const deleteSnapshot = (id: string) =>
-    run(() => api.deleteSnapshot(id), 'Failed to delete snapshot')
+  async function deleteSnapshot(id: string): Promise<void> {
+    try {
+      await api.deleteSnapshot(id)
+      await refreshSnapshots()
+    } catch (e) {
+      error.value = String(e)
+      toast('Failed to delete snapshot', '⚠')
+    }
+  }
 
   async function restoreVM(name: string, snapshotId: string): Promise<void> {
     toast(`Restoring ${name}…`, '↺')
@@ -336,7 +348,7 @@ export const useFleet = defineStore('fleet', () => {
     toast(`Freezing state of ${name}…`, '◈')
     try {
       await api.snapshot(name, label)
-      await refresh()
+      await Promise.all([refresh(), refreshSnapshots()])
       toast('Snapshot saved', '✓')
     } catch (e) {
       error.value = String(e)
@@ -455,6 +467,8 @@ export const useFleet = defineStore('fleet', () => {
     terminalHistory,
     execCommand,
     refresh,
+    refreshSnapshots,
+    acceptFleetUpdate,
     fetchHost,
     fetchResources,
     setResources,
