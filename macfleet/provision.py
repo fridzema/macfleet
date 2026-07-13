@@ -5,6 +5,10 @@ NET_SERVICE = "Ethernet"
 SERVER_LOG = "/Users/admin/Library/Logs/macfleet-computerserver.log"
 UV_VERSION = "0.11.28"
 COMPUTER_SERVER_VERSION = "0.3.42"
+# cua-computer-server requires Python >=3.12,<3.14, but the base image's default `python3` is
+# 3.9. Pin the venv's interpreter so `uv venv` fetches a managed 3.12 instead of picking up the
+# system 3.9 (which makes the cua-computer-server install unsatisfiable and the bake fail).
+PYTHON_VERSION = "3.12"
 
 _GATEWAY_PATH = "/Users/admin/cs-venv/macfleet_gateway.py"
 
@@ -255,7 +259,7 @@ sudo killall -HUP mDNSResponder || true
 command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | env UV_VERSION={UV_VERSION} sh
 export PATH="$HOME/.local/bin:$PATH"
 # 3. cua-computer-server venv (idempotent). `uv venv` has no pip; install via `uv pip`.
-test -d "$HOME/cs-venv" || uv venv "$HOME/cs-venv"
+test -d "$HOME/cs-venv" || uv venv --python {PYTHON_VERSION} "$HOME/cs-venv"
 uv pip install --python "$HOME/cs-venv/bin/python" --quiet \
   "cua-computer-server=={COMPUTER_SERVER_VERSION}"
 # 4. authenticated gateway + launchd unit -> :8000 at boot
