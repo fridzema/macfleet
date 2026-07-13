@@ -30,6 +30,16 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('HomePage — empty states', () => {
+  it('shows the engine-booting state (and no create action) until the engine connects', async () => {
+    vi.spyOn(api, 'listVms').mockRejectedValue(new Error('connection refused'))
+    const wrapper = mount(HomePage)
+    await flushPromises()
+    expect(wrapper.find('[data-test="engine-booting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="empty-create"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Starting engine')
+    wrapper.unmount()
+  })
+
   it('shows "No VMs yet" with a create action when the fleet is empty', async () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     const wrapper = mount(HomePage)
@@ -88,6 +98,69 @@ describe('HomePage — selection', () => {
     ui.selectVm('standalone')
     await flushPromises()
     expect(wrapper.find('[data-test="rename-display"]').text()).toBe('standalone')
+    wrapper.unmount()
+  })
+
+  it('shows the provisioning stepper (not the detail pane) for a just-created VM still spinning up', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'provision').mockResolvedValue(null)
+    const wrapper = mount(HomePage)
+    const store = useFleet()
+    const ui = useUi()
+    await flushPromises()
+    store.provisioning = {
+      web: {
+        name: 'web',
+        steps: [{ key: 'boot', label: 'Boot guest', status: 'active' }],
+        done: false,
+        error: null,
+      },
+    }
+    ui.selectVm('web')
+    await flushPromises()
+    expect(wrapper.find('[data-test="provisioning-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="rename-display"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the selection while the new VM is pending even though it is not yet in the fleet list', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'provision').mockResolvedValue(null)
+    const wrapper = mount(HomePage)
+    const store = useFleet()
+    const ui = useUi()
+    await flushPromises()
+    store.pending = ['web']
+    ui.selectVm('web')
+    await flushPromises()
+    // a fleet update lands without the new VM — selection must survive
+    store.vms = [{ name: 'mf-other', state: 'running', source: 'local', healthy: true }]
+    await flushPromises()
+    expect(ui.selectedVm).toBe('web')
+    expect(wrapper.find('[data-test="provisioning-panel"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('swaps from the stepper to VmDetail once provisioning is done and the VM is live', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      { name: 'mf-web', state: 'running', source: 'local', healthy: true },
+    ])
+    const wrapper = mount(HomePage)
+    const store = useFleet()
+    const ui = useUi()
+    await flushPromises()
+    store.provisioning = {
+      web: {
+        name: 'web',
+        steps: [{ key: 'health', label: 'Guest health check', status: 'done' }],
+        done: true,
+        error: null,
+      },
+    }
+    ui.selectVm('web')
+    await flushPromises()
+    expect(wrapper.find('[data-test="provisioning-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="rename-display"]').text()).toBe('web')
     wrapper.unmount()
   })
 

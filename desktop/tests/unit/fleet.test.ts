@@ -1,8 +1,9 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
-import { api } from '../../src/shared/api'
+import { api, type FleetUpdate } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
+import { useUi } from '../../src/stores/ui'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -26,6 +27,34 @@ describe('fleet store', () => {
     await s.refresh()
     expect(s.vms).toHaveLength(1)
     expect(s.error).toBeNull()
+  })
+
+  it('acceptFleetUpdate applies both the vms list and the provisioning map from an SSE frame', async () => {
+    const s = useFleet()
+    s.acceptFleetUpdate({
+      vms: [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }],
+      provisioning: {
+        b: {
+          name: 'b',
+          steps: [{ key: 'boot', label: 'Boot guest', status: 'active' }],
+          done: false,
+          error: null,
+        },
+      },
+    })
+    expect(s.vms.map((v) => v.name)).toEqual(['mf-a'])
+    expect(s.provisioning.b?.steps[0]?.status).toBe('active')
+  })
+
+  it('acceptFleetUpdate does not throw when a frame omits provisioning (defensive default)', async () => {
+    const s = useFleet()
+    // Simulate a malformed/legacy frame missing `provisioning` (cast via unknown, not any).
+    const frame = {
+      vms: [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }],
+    } as unknown as FleetUpdate
+    s.acceptFleetUpdate(frame)
+    expect(s.vms.map((v) => v.name)).toEqual(['mf-a'])
+    expect(s.provisioning).toEqual({})
   })
 
   it('refresh ignores a stale /vms response superseded by a newer refresh', async () => {
@@ -412,6 +441,18 @@ describe('fleet store — lifecycle mutations', () => {
 describe('fleet store — create (options -> api args)', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
+    useFleet().loaded = true // engine connected — the create guard is exercised separately below
+  })
+
+  it('no-ops with a nudge toast when the engine has not connected yet (not loaded)', async () => {
+    const create = vi.spyOn(api, 'create').mockResolvedValue({})
+    const s = useFleet()
+    s.loaded = false
+    s.createOptions.name = 'web'
+    await s.create()
+    expect(create).not.toHaveBeenCalled()
+    expect(s.pending).not.toContain('web')
+    expect(useToasts().toasts.value.some((t) => t.msg.includes('starting'))).toBe(true)
   })
 
   it('maps the light preset from golden with no ttl', async () => {
@@ -543,6 +584,47 @@ describe('fleet store — create (options -> api args)', () => {
     expect(s.error).toContain('409')
   })
 
+  it('auto-selects the new VM (single selection) the instant create is called', async () => {
+    let release = () => {}
+    vi.spyOn(api, 'create').mockImplementation(
+      () =>
+        new Promise((r) => {
+          release = () => r({})
+        }),
+    )
+    const s = useFleet()
+    const ui = useUi()
+    ui.selectOnly('other') // a prior selection that must be replaced
+    s.createOptions.name = 'web'
+    const p = s.create()
+    // selected synchronously, before api.create resolves
+    expect(ui.selectedVm).toBe('web')
+    expect(ui.selectedVms).toEqual(['web'])
+    release()
+    await p
+  })
+
+  it('drops the grabbed selection on failure when the engine recorded no provisioning error', async () => {
+    vi.spyOn(api, 'create').mockRejectedValue(new Error('409'))
+    const s = useFleet()
+    const ui = useUi()
+    s.createOptions.name = 'web'
+    await s.create()
+    expect(ui.selectedVm).toBeNull()
+  })
+
+  it('keeps the selection on failure when a provisioning error is present to show in the panel', async () => {
+    vi.spyOn(api, 'create').mockRejectedValue(new Error('409'))
+    const s = useFleet()
+    const ui = useUi()
+    s.createOptions.name = 'web'
+    s.provisioning = {
+      web: { name: 'web', steps: [], done: false, error: 'clone failed' },
+    }
+    await s.create()
+    expect(ui.selectedVm).toBe('web')
+  })
+
   it('newFromSnapshot sets createOptions.source to the snapshot id while creating, then resets it to golden on success', async () => {
     let release = () => {}
     const create = vi.spyOn(api, 'create').mockImplementation(
@@ -658,6 +740,7 @@ describe('fleet store — pending create timeout', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     vi.spyOn(api, 'create').mockResolvedValue({})
+    useFleet().loaded = true
   })
 
   it('drops a pending create that never lands running, and toasts', async () => {

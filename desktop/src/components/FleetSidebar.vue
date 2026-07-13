@@ -106,8 +106,9 @@ const filteredSnaps = computed(() => {
   )
 })
 
-function isActive(name: string, status: string): boolean {
-  return ui.selectedVm === name && status !== 'creating'
+function isActive(name: string): boolean {
+  // A just-created VM is auto-selected while still "creating", so its row highlights immediately.
+  return ui.selectedVm === name
 }
 
 function orderedNames(): string[] {
@@ -262,7 +263,7 @@ onUnmounted(() => {
         <span class="font-mono text-[11px] text-[var(--text-faint)]">{{ rows.length }}</span>
       </div>
 
-      <p v-if="!store.loaded && store.error" class="px-2 py-2 text-xs text-[var(--text-faint)]">
+      <p v-if="!store.loaded" class="px-2 py-2 text-xs text-[var(--text-faint)]">
         Connecting to engine…
       </p>
       <p v-else-if="!rows.length && store.error" class="px-2 py-2 text-xs text-[var(--red)]">
@@ -289,10 +290,10 @@ onUnmounted(() => {
         :disabled="row.status === 'creating'"
         class="mb-0.5 flex w-full items-center gap-2.5 rounded-[9px] border px-[9px] py-2 text-left transition-colors"
         :class="[
-          isActive(row.name, row.status)
+          isActive(row.name)
             ? 'border-[var(--border-strong)] bg-[var(--bg-elev2)]'
             : 'border-transparent hover:bg-[var(--bg-hover)]',
-          isActive(row.name, row.status) && row.status === 'running'
+          isActive(row.name) && row.status === 'running'
             ? 'animate-[mfglow_2.6s_ease-in-out_infinite]'
             : '',
           ui.isSelected(row.name) ? 'ring-1 ring-[var(--emerald)]' : '',
@@ -373,7 +374,10 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="shrink-0 border-t border-[var(--border)] bg-[var(--bg-elev)] px-3 py-[11px]">
+    <div
+      v-if="store.loaded"
+      class="shrink-0 border-t border-[var(--border)] bg-[var(--bg-elev)] px-3 py-[11px]"
+    >
       <form data-test="up-form" class="flex gap-[7px]" @submit.prevent="store.create()">
         <input
           v-model="store.createOptions.name"

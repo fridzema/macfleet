@@ -112,8 +112,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .join("macfleet-engine");
 
             // Release bundles carry a standalone engine, avoiding Python discovery and uv's
-            // environment check on every launch. Source/dev builds retain the uv fallback.
-            let standalone = bundled_engine.is_file();
+            // environment check on every launch. In dev, always use the live `uv run` engine even
+            // when a bundled binary happens to be staged: the PyInstaller binary can be stale
+            // (shadowing source changes) and its first launch from a fresh build can miss the 30s
+            // readiness probe under macOS Gatekeeper's first-run scan, leaving the app stuck
+            // "Connecting". is_dev() is true only under `tauri dev`, so bundled debug builds
+            // (build-debug) still exercise the standalone path.
+            let standalone = !tauri::is_dev() && bundled_engine.is_file();
             let mut cmd = if standalone {
                 let mut command = Command::new(&bundled_engine);
                 command.args(["--port", &port_arg]);
