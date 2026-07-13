@@ -5,8 +5,8 @@ driven with computer use ([trycua](https://github.com/trycua)'s `cua-computer-se
 Spin up N named VMs cloned from one provisioned golden image, SSH in for scripted
 work, or hand a VM to a computer-use agent to click/type through a GUI. It ships as a
 Python engine (CLI + local API + MCP server) and a Tauri desktop app (fleet view, live
-screen, per-VM terminal/logs/resources) built on the same core. The desktop app is
-currently dev-only — run it with `make dev`; a bundled, signed build is a follow-up.
+screen, per-VM terminal/logs/resources) built on the same core. Run it with `make dev`;
+release bundles include a self-contained engine executable and need only `tart` at runtime.
 
 ## Prerequisites
 
@@ -52,11 +52,9 @@ scripts/bake.sh
 ```
 
 This clones the base image, boots it, copies your SSH key in, and runs the guest
-provisioning (public DNS, `cua-computer-server` installed under a launchd unit on
-`:8000`). It then prints a reminder for the one manual step that can't be scripted:
-connect via VNC and grant **Accessibility + Screen Recording** (TCC) to the
-computer-server helper, once. Every VM cloned from `mf-golden` afterwards inherits
-that grant. Finish with `tart stop mf-golden`.
+provisioning (public DNS, authenticated `cua-computer-server` gateway, launchd, and
+TCC grants). After verification it warm-suspends the golden image automatically, so
+new VMs resume in a few seconds instead of cold-booting macOS.
 
 ## CLI usage
 
@@ -82,8 +80,8 @@ uv run macfleet reap                # delete VMs whose TTL lease has expired
 ```
 
 `up` returns as soon as `tart run` is launched — it does not wait for SSH to come up.
-The guest takes roughly 30s to boot, so an `ssh` run immediately after `up` may need a
-short wait/retry (this is why `scripts/bake.sh` sleeps before `ssh-copy-id`).
+A normally baked, warm-suspended golden image resumes in a few seconds. A cold or
+manually stopped image can still take roughly 30 seconds, so immediate SSH includes retries.
 
 ## Snapshots & fast spin-up
 
@@ -101,8 +99,9 @@ backstop, and `macfleet reap` / `POST /reap` trigger a sweep on demand.
 
 Computer-use control (screenshot/click/type via `Fleet.computer()`) is disabled by
 default. It requires `MACFLEET_ALLOW_CONTROL=1` in the environment, and it only ever
-targets fleet VMs over their guest IP — never the host. Without the flag,
-`Fleet.computer()` raises.
+targets fleet VMs over their guest IP — never the host. The privileged guest `/cmd`
+gateway also requires a boot-rotated token that the engine retrieves over SSH, so direct
+HTTP calls cannot bypass the host-side gate. Without the flag, `Fleet.computer()` raises.
 
 ## MCP server (for AI agents)
 
