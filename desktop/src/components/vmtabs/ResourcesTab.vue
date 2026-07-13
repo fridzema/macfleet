@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDocumentVisibility } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api, type Metrics } from '../../shared/api'
 import { useFleet } from '../../stores/fleet'
@@ -31,6 +32,8 @@ watch(
 // ScreenTab/LogsTab's poll: restart on VM switch, clear on unmount, never fabricate a
 // number when it isn't running or the fetch fails.
 const active = computed(() => vm.value?.state === 'running')
+const visibility = useDocumentVisibility()
+const pollActive = computed(() => active.value && visibility.value === 'visible')
 const metrics = ref<Metrics | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 // Bumped on every restart() so a poll() in flight when the VM is switched (or flips to
@@ -43,7 +46,7 @@ let generation = 0
 let inFlight = false
 
 async function poll(): Promise<void> {
-  if (inFlight) return
+  if (!pollActive.value || inFlight) return
   inFlight = true
   const myGen = generation
   const name = props.name
@@ -63,12 +66,13 @@ function restart(): void {
   if (timer) clearInterval(timer)
   timer = null
   metrics.value = null
-  if (!active.value) return
+  if (!pollActive.value) return
   poll()
   timer = setInterval(poll, 3000)
 }
 watch(() => props.name, restart, { immediate: true })
 watch(active, restart)
+watch(visibility, restart)
 onBeforeUnmount(() => timer && clearInterval(timer))
 
 const cpuBarWidth = computed(() => (metrics.value ? `${metrics.value.cpu_pct}%` : '100%'))
