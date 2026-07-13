@@ -27,6 +27,30 @@ afterEach(() => {
 })
 
 describe('ScreenTab — live view', () => {
+  it('renders binary screenshots with revocable object URLs', async () => {
+    const previousCreate = URL.createObjectURL
+    const previousRevoke = URL.revokeObjectURL
+    const create = vi.fn(() => 'blob:frame-1')
+    const revoke = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: create })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
+    try {
+      const store = useFleet()
+      store.vms = [vm()]
+      vi.spyOn(api, 'screenshot').mockResolvedValue(new Blob(['PNG'], { type: 'image/png' }))
+      const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+      await vi.waitFor(() =>
+        expect(wrapper.find('[data-test="shot"]').attributes('src')).toBe('blob:frame-1'),
+      )
+      wrapper.unmount()
+      expect(create).toHaveBeenCalledOnce()
+      expect(revoke).toHaveBeenCalledWith('blob:frame-1')
+    } finally {
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: previousCreate })
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: previousRevoke })
+    }
+  })
+
   it('renders the polled screenshot as a data URI', async () => {
     const store = useFleet()
     store.vms = [vm()]
@@ -111,6 +135,35 @@ describe('ScreenTab — click & type control', () => {
     expect(click).toHaveBeenCalledWith('web', 20, 40)
     expect(useToasts().toasts.value.map((t) => t.msg)).toContain('click → 20, 40')
     wrapper.unmount()
+  })
+
+  it('maps a click against the letterboxed image box, not the element box', async () => {
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'screenshot').mockResolvedValue({ png_b64: 'QUJD' })
+    const click = vi.spyOn(api, 'click').mockResolvedValue({})
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await vi.waitFor(() => expect(wrapper.find('[data-test="shot"]').exists()).toBe(true))
+
+    const img = wrapper.find('[data-test="shot"]')
+    const el = img.element as HTMLImageElement
+    // 16:10 element (160x100) showing a square 200x200 guest screenshot: object-contain scales
+    // it to a 100x100 box centered horizontally, leaving 30px letterbox bars left and right.
+    Object.defineProperty(el, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 160, height: 100 }),
+    })
+    Object.defineProperty(el, 'naturalWidth', { value: 200 })
+    Object.defineProperty(el, 'naturalHeight', { value: 200 })
+
+    // The visual left edge of the image is at element-x 30; it must map to pixel 0, not ~38
+    // (the old element-box math). Center-y 0 maps to pixel 0.
+    await img.trigger('click', { clientX: 30, clientY: 0 })
+    expect(click).toHaveBeenCalledWith('web', 0, 0)
+
+    // A click inside the left letterbox bar (element-x 10) is outside the image — ignored.
+    click.mockClear()
+    await img.trigger('click', { clientX: 10, clientY: 0 })
+    expect(click).not.toHaveBeenCalled()
   })
 
   it('toasts a failure instead of rejecting when api.click fails', async () => {

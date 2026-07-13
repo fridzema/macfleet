@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDocumentVisibility } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useToasts } from '../../composables/useToasts'
 import { api } from '../../shared/api'
@@ -36,10 +37,18 @@ watch(
 )
 
 const active = computed(() => rawState.value === 'running' && everHealthy.value)
+const visibility = useDocumentVisibility()
+const streamActive = computed(() => active.value && visibility.value === 'visible')
 // A running-but-never-yet-healthy VM surfaces as `booting` so OVERLAY.booting renders.
 const displayState = computed(() =>
   rawState.value === 'running' && !everHealthy.value ? 'booting' : rawState.value,
 )
+
+// PNG frames are commonly 2–3MB. They now travel as binary blobs; keep a one-fps idle rate to
+// bound capture cost, then temporarily boost after interaction for responsive visual feedback.
+const SCREEN_POLL_MS = 1000
+const INTERACTIVE_POLL_MS = 250
+const INTERACTIVE_WINDOW_MS = 4000
 
 const shot = ref<string | null>(null)
 const paused = ref(false)
@@ -58,35 +67,55 @@ let generation = 0
 // requests, starving the guest's /status healthcheck (which flaps the VM to "booting")
 // and compounding load. Skip a tick while one is still in flight.
 let inFlight = false
+let boostUntil = 0
+
+function revokeShot(): void {
+  if (shot.value?.startsWith('blob:')) URL.revokeObjectURL(shot.value)
+  shot.value = null
+}
+
+function schedule(): void {
+  if (timer) clearTimeout(timer)
+  timer = null
+  if (!streamActive.value || paused.value) return
+  const delay = Date.now() < boostUntil ? INTERACTIVE_POLL_MS : SCREEN_POLL_MS
+  timer = setTimeout(poll, delay)
+}
 
 async function poll() {
-  if (paused.value || !active.value || inFlight) return
+  if (paused.value || !streamActive.value || inFlight) return
   inFlight = true
   const myGen = generation
   const name = props.name
   try {
-    const { png_b64 } = await api.screenshot(name)
-    if (myGen !== generation || !active.value || props.name !== name) return
-    shot.value = `data:image/png;base64,${png_b64}`
+    const png = await api.screenshot(name)
+    if (myGen !== generation || !streamActive.value || props.name !== name) return
+    // The object branch is a rolling-upgrade fallback for an older engine that still returns
+    // base64 JSON; current engines always take the zero-copy Blob path.
+    const legacy = png as Blob & { png_b64?: string }
+    const next = legacy.png_b64
+      ? `data:image/png;base64,${legacy.png_b64}`
+      : URL.createObjectURL(png)
+    if (shot.value?.startsWith('blob:')) URL.revokeObjectURL(shot.value)
+    shot.value = next
   } catch {
     // Transient failure (guest still settling, screenshot busy, etc.) — keep the last
     // good frame rather than blanking the screen on every miss.
   } finally {
     inFlight = false
+    schedule()
   }
 }
 
 function restart() {
   generation++
-  if (timer) clearInterval(timer)
+  if (timer) clearTimeout(timer)
   timer = null
-  if (!active.value) {
-    shot.value = null
+  if (!streamActive.value) {
+    if (!active.value) revokeShot()
     return
   }
   poll()
-  // 1s balances a live feel against the ~2-3MB PNG per frame. Gated on state + pause.
-  timer = setInterval(poll, 1000)
 }
 
 // Fresh VM selected: drop the old frame immediately. State toggles (stable) just
@@ -97,24 +126,41 @@ watch(
     // Re-arm the booting gate for the newly-selected VM (a switch to a still-booting
     // VM must not inherit the previous VM's ever-healthy state).
     everHealthy.value = vm.value?.healthy === true
-    shot.value = null
+    revokeShot()
     restart()
   },
   { immediate: true },
 )
 watch(active, restart)
+watch(visibility, restart)
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
+  if (timer) clearTimeout(timer)
   if (typedTimer) clearTimeout(typedTimer)
+  revokeShot()
 })
 
 async function onImgClick(ev: MouseEvent) {
   const el = ev.currentTarget as HTMLImageElement
   const rect = el.getBoundingClientRect()
-  const x = Math.round(((ev.clientX - rect.left) * el.naturalWidth) / rect.width)
-  const y = Math.round(((ev.clientY - rect.top) * el.naturalHeight) / rect.height)
+  const nW = el.naturalWidth
+  const nH = el.naturalHeight
+  if (!nW || !nH) return
+  // The frame is a fixed 16:10 box, but the screenshot renders with `object-contain`: when the
+  // guest's aspect ratio differs it is scaled to fit and letterboxed (bars) inside the element.
+  // Map the click against the ACTUAL rendered-image box, not the element box — otherwise every
+  // click lands off by the letterbox offset (the old bug). The guest's click space IS the
+  // screenshot's pixel space (see the engine's agent.py display_width/height_px), so the mapped
+  // coordinate is exactly a screenshot pixel.
+  const scale = Math.min(rect.width / nW, rect.height / nH)
+  const originX = rect.left + (rect.width - nW * scale) / 2
+  const originY = rect.top + (rect.height - nH * scale) / 2
+  const x = Math.round((ev.clientX - originX) / scale)
+  const y = Math.round((ev.clientY - originY) / scale)
+  if (x < 0 || y < 0 || x >= nW || y >= nH) return // click on a letterbox bar — ignore
   try {
+    boostUntil = Date.now() + INTERACTIVE_WINDOW_MS
     await api.click(props.name, x, y)
+    schedule()
     toast(`click → ${x}, ${y}`, '☉')
   } catch {
     toast('Click failed', '⚠')
@@ -125,7 +171,9 @@ async function sendType() {
   const text = typed.value.trim()
   if (!active.value || !text) return
   try {
+    boostUntil = Date.now() + INTERACTIVE_WINDOW_MS
     await api.typeText(props.name, text)
+    schedule()
     typed.value = ''
     lastTyped.value = text
     showTyped.value = true
@@ -141,6 +189,8 @@ async function sendType() {
 
 function togglePause(): void {
   paused.value = !paused.value
+  if (!paused.value) poll()
+  else if (timer) clearTimeout(timer)
 }
 
 const frameEl = ref<HTMLElement | null>(null)
