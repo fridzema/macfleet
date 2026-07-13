@@ -1,5 +1,3 @@
-import base64
-
 from fastapi.testclient import TestClient
 
 from macfleet.api import build_app
@@ -168,11 +166,12 @@ def test_status_endpoint():
     assert TestClient(build_app(fake)).get("/vms/web/status").json() == {"healthy": True}
 
 
-def test_screenshot_success_returns_b64():
+def test_screenshot_success_returns_binary_png():
     fake = FakeFleet(computer_obj=FakeComputer())
     r = TestClient(build_app(fake)).post("/vms/web/screenshot")
     assert r.status_code == 200
-    assert base64.b64decode(r.json()["png_b64"]) == b"PNGBYTES"
+    assert r.content == b"PNGBYTES"
+    assert r.headers["content-type"] == "image/png"
 
 
 def test_screenshot_disabled_returns_409():
@@ -186,6 +185,13 @@ def test_create_from_snapshot_with_ttl():
     r = TestClient(build_app(fake)).post("/vms", json={"name": "web", "from_snapshot": "base", "ttl": 60})
     assert r.status_code == 200
     assert ("create", "web", "base", 60, None, None, None) in fake.calls
+
+
+def test_create_rejects_invalid_ttl_and_resource_bounds():
+    client = TestClient(build_app(FakeFleet()))
+    assert client.post("/vms", json={"name": "web", "ttl": -1}).status_code == 422
+    assert client.post("/vms", json={"name": "web", "cpu": 0}).status_code == 422
+    assert client.post("/vms", json={"name": "web", "memory": 128}).status_code == 422
 
 
 def test_create_with_resource_preset_forwards_to_fleet():
