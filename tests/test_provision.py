@@ -70,6 +70,9 @@ def test_guest_dependencies_are_version_pinned():
     s = render_provision_script()
     assert "cua-computer-server==0.3.42" in s
     assert "UV_VERSION=0.11.28" in s
+    # The cs-venv must pin a compatible interpreter (>=3.12) so `uv venv` doesn't pick the base
+    # image's default python3 (3.9), which makes the cua-computer-server install unsatisfiable.
+    assert "uv venv --python 3.12" in s
 
 
 def test_plist_writes_log_file():
