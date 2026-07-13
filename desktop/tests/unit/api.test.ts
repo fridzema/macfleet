@@ -13,6 +13,41 @@ function mockFetch(status: number, body: unknown) {
 }
 
 describe('api', () => {
+  it('returns screenshots as binary blobs', async () => {
+    const payload = new Uint8Array([137, 80, 78, 71])
+    const f = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(payload, { status: 200, headers: { 'content-type': 'image/png' } }),
+      )
+    const shot = await api.screenshot('web')
+    expect(shot.type).toBe('image/png')
+    expect(shot.size).toBe(4)
+    expect(f).toHaveBeenCalledWith(
+      `${API_BASE}/vms/web/screenshot`,
+      expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('parses changed fleet snapshots from the authenticated event stream', async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: [{"name":"mf-a","state":"running","source":"local","healthy":true}]\n\n',
+          ),
+        )
+        controller.close()
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    )
+    const updates: unknown[] = []
+    await api.watchFleet(new AbortController().signal, (vms) => updates.push(vms))
+    expect(updates).toEqual([[{ name: 'mf-a', state: 'running', source: 'local', healthy: true }]])
+  })
+
   it('listVms GETs /vms', async () => {
     const f = mockFetch(200, [{ name: 'mf-a', state: 'running', source: 'local', healthy: true }])
     const vms = await api.listVms()
@@ -34,7 +69,7 @@ describe('api', () => {
 
   it('throws on non-ok', async () => {
     mockFetch(409, { detail: 'disabled' })
-    await expect(api.screenshot('web')).rejects.toThrow('409')
+    await expect(api.screenshot('web')).rejects.toThrow('409: disabled')
   })
 
   it('defaults the method in the error message to GET when init was not supplied', async () => {
