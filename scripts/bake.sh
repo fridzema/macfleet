@@ -5,7 +5,9 @@
 # Requires: tart, uv, a host SSH key (~/.ssh/id_*.pub).
 set -euo pipefail
 
-BASE="ghcr.io/cirruslabs/macos-tahoe-base:latest"
+# Digest-pinned so a rebuild cannot silently pick up a different privileged base image.
+# Override deliberately when upgrading, and review the new image before committing it.
+BASE="${MACFLEET_BASE_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-base@sha256:a8e1c8305758643f513fdccdd829c2243687c60791083dea42f73f0b7aeb435c}"
 PUBKEY="$(ls "$HOME"/.ssh/id_*.pub 2>/dev/null | head -1 || true)"
 [ -n "$PUBKEY" ] || { echo "no SSH public key in ~/.ssh — run ssh-keygen first"; exit 1; }
 KEY="${PUBKEY%.pub}"
@@ -39,10 +41,12 @@ uv run python -c "from macfleet.provision import render_provision_script as r; p
 "${SSH[@]}" "admin@$IP" 'curl -s -m 5 http://127.0.0.1:8000/status' | grep -q '"status":"ok"' \
   && echo ">> computer-server healthy on :8000"
 "${SSH[@]}" "admin@$IP" \
-  'curl -s -m 15 -X POST http://127.0.0.1:8000/cmd -H "content-type: application/json" -d "{\"command\":\"screenshot\",\"params\":{}}" | head -c 200' \
+  'TOKEN="$(cat ~/.macfleet-control-token)"; curl -s -m 15 -X POST http://127.0.0.1:8000/cmd -H "content-type: application/json" -H "X-Macfleet-Guest-Token: $TOKEN" -d "{\"command\":\"screenshot\",\"params\":{}}" | head -c 200' \
   | grep -q '"success": true' \
   && echo ">> screenshot OK — TCC granted" \
   || echo ">> WARN: screenshot check failed — TCC may not be seeded (is SIP disabled?)"
 
-tart stop mf-golden
-echo ">> mf-golden baked and stopped — clone it with: uv run macfleet up <name>"
+# Preserve the fully booted state. Clones now resume in a few seconds instead of cold-booting
+# macOS for 30–60 seconds; no separate `macfleet warm` step is required after a normal bake.
+tart suspend mf-golden
+echo ">> mf-golden baked and warm-suspended — clone it with: uv run macfleet up <name>"
