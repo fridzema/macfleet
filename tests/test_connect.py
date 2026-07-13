@@ -199,6 +199,64 @@ def test_suspend_resume(tmp_path):
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
 
 
+class _Child:
+    """Stand-in for a backgrounded `tart run` Popen. alive=False simulates a process that exited
+    (a VZ restore failure); alive=True simulates a boot that keeps running."""
+
+    def __init__(self, alive: bool, code: int = 0):
+        self._alive = alive
+        self.returncode = code
+
+    def poll(self):
+        return None if self._alive else self.returncode
+
+
+def _resume_fleet(tmp_path, child):
+    calls, spawns = [], []
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def spawn(argv):
+        spawns.append(argv)
+        return child
+
+    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawn,
+                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+                  clock=lambda: 0.0, sleep=lambda _s: None)
+    return fleet, calls, spawns
+
+
+def test_resume_spawns_the_run_and_watches_in_background(tmp_path):
+    # resume() is non-blocking: it spawns `tart run` (and starts the restore watcher) without
+    # waiting. With the test spawn returning None there's no child to watch.
+    fleet, _, spawned, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "suspended", "local")])
+    fleet.resume("web")
+    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def test_watcher_cold_boots_when_the_vz_restore_fails(tmp_path):
+    # `tart run` exited non-zero (VZ "failed to restore … invalid argument"): drop the saved state
+    # and cold-boot instead of silently leaving the VM suspended.
+    fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=False))
+    argv = ["tart", "run", "mf-web", "--no-graphics"]
+    fleet._coldboot_if_restore_failed("mf-web", argv, _Child(alive=False, code=1))
+    assert argv in spawns  # cold boot
+    assert ["tart", "stop", "mf-web"] in calls  # un-restorable suspend discarded
+
+
+def test_watcher_leaves_a_successful_restore_alone(tmp_path):
+    # `tart run` still running (restore OK): never stop, never re-boot.
+    fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=True))
+    fleet._coldboot_if_restore_failed("mf-web", ["tart", "run", "mf-web", "--no-graphics"],
+                                      _Child(alive=True))
+    assert spawns == []
+    assert not any(c[:2] == ["tart", "stop"] for c in calls)
+
+
 def test_suspend_all_freezes_running_non_golden_only(tmp_path):
     vms = [
         VmInfo("mf-web", "running", ""),

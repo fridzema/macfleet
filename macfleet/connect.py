@@ -158,6 +158,14 @@ _PROVISION_PHASES: tuple[tuple[str, str], ...] = (
 _PROVISION_LINGER = 2.0
 _PROVISION_TTL = 180.0
 
+# A VZ restore failure ("failed to restore … invalid argument") exits `tart run` in ~2-3s, whereas
+# a successful boot runs for the VM's lifetime. A resume watches its child for this long (in the
+# background, so resume() stays non-blocking); if the child already died, the saved suspend state
+# is un-restorable (common after a host macOS update, or when the framework simply refuses the
+# state) — discard it and cold-boot so the VM comes up instead of silently staying suspended. The
+# margin is generous over the observed ~2-3s so a slow failure isn't missed.
+_RESTORE_PROBE_SECONDS = 5.0
+
 
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
@@ -166,7 +174,8 @@ class Fleet:
                  leases: Leases | None = None,
                  clock: Callable[[], float] = time.time,
                  activity: Activity | None = None,
-                 shares: Shares | None = None) -> None:
+                 shares: Shares | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
@@ -174,6 +183,7 @@ class Fleet:
         self._leases = leases or Leases(default_state_path())
         self._shares = shares or Shares(default_shares_path())
         self._clock = clock
+        self._sleep = sleep
         self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
         # Handles for backgrounded `tart run` children, kept so their zombies are reaped once
@@ -220,11 +230,35 @@ class Fleet:
         self._invalidate_fleet(fullname(name))
 
     def resume(self, name: str) -> None:
+        full = fullname(name)
         ensure_mutable(name)
-        self._forget_ip(fullname(name))
-        self._boot(self._run_argv(fullname(name)))
-        self._leases.unsuspend(fullname(name))
-        self._invalidate_fleet(fullname(name))
+        self._forget_ip(full)
+        self._resume_or_coldboot(full)
+        self._leases.unsuspend(full)
+        self._invalidate_fleet(full)
+
+    def _resume_or_coldboot(self, full: str) -> None:
+        """Boot `full`, restoring its suspend state. If the restore fails, a background watcher
+        discards the un-restorable state and cold-boots so the VM still comes up rather than
+        silently staying suspended. Non-blocking: resume() returns as soon as `tart run` is spawned."""
+        argv = self._run_argv(full)
+        self._spawned = [p for p in self._spawned if p.poll() is None]
+        child = self._spawn(argv)
+        if child is None:  # injected test spawn — nothing to watch
+            return
+        self._spawned.append(child)
+        threading.Thread(
+            target=self._coldboot_if_restore_failed, args=(full, argv, child), daemon=True
+        ).start()
+
+    def _coldboot_if_restore_failed(self, full: str, argv: list[str], child: Any) -> None:
+        self._sleep(_RESTORE_PROBE_SECONDS)
+        if child.poll() is not None and (child.returncode or 0) != 0:
+            try:
+                self.tart.stop(full)  # drop the un-restorable saved state
+            except RuntimeError:
+                pass
+            self._boot(argv)  # cold boot
 
     def suspend_all(self) -> list[str]:
         """Suspend every running fleet VM (mf-* except golden) — used by the desktop app on
