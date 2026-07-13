@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import base64
+import json
 import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 from macfleet.connect import Fleet
 
@@ -18,25 +18,25 @@ logger = logging.getLogger(__name__)
 
 
 class ClickRequest(BaseModel):
-    x: int
-    y: int
+    x: int = Field(ge=0, le=32768)
+    y: int = Field(ge=0, le=32768)
 
 
 class TypeRequest(BaseModel):
-    text: str
+    text: str = Field(max_length=100_000)
 
 
 class KeyRequest(BaseModel):
-    combo: str
+    combo: str = Field(min_length=1, max_length=256)
 
 
 class CreateRequest(BaseModel):
     name: str
     from_snapshot: str | None = None
-    ttl: float | None = None
-    cpu: int | None = None
-    memory: int | None = None
-    disk: int | None = None
+    ttl: float | None = Field(default=None, gt=0, le=31_536_000, allow_inf_nan=False)
+    cpu: int | None = Field(default=None, ge=1, le=64)
+    memory: int | None = Field(default=None, ge=512, le=1_048_576)
+    disk: int | None = Field(default=None, ge=1, le=16_384)
 
 
 class LabelRequest(BaseModel):
@@ -62,14 +62,14 @@ class RenameRequest(BaseModel):
 
 
 class ResourcesRequest(BaseModel):
-    cpu: int | None = None
-    memory: int | None = None
-    disk_size: int | None = None
-    display: str | None = None
+    cpu: int | None = Field(default=None, ge=1, le=64)
+    memory: int | None = Field(default=None, ge=512, le=1_048_576)
+    disk_size: int | None = Field(default=None, ge=1, le=16_384)
+    display: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ExecRequest(BaseModel):
-    command: str
+    command: str = Field(max_length=1_000_000)
 
 
 def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
@@ -131,6 +131,29 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     @api.get("/vms")
     def list_vms() -> list[dict]:
         return fleet.list_vms()
+
+    @api.get("/fleet/events")
+    async def fleet_events(request: Request) -> StreamingResponse:
+        """Push changed fleet snapshots. One stream replaces the desktop's tight polling;
+        a slow fallback refresh remains client-side for recovery."""
+        async def events() -> AsyncIterator[str]:
+            previous = ""
+            while not await request.is_disconnected():
+                try:
+                    current = json.dumps(
+                        await asyncio.to_thread(fleet.list_vms), separators=(",", ":")
+                    )
+                    if current != previous:
+                        previous = current
+                        yield f"data: {current}\n\n"
+                except Exception as exc:
+                    yield f"event: error\ndata: {json.dumps(str(exc))}\n\n"
+                await asyncio.sleep(2)
+
+        return StreamingResponse(
+            events(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @api.post("/reap")
     def reap() -> dict:
@@ -236,7 +259,7 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
         return {"healthy": fleet.status(name)}
 
     @api.get("/agents/activity")
-    def agents_activity(limit: int = 20) -> list[dict]:
+    def agents_activity(limit: int = Query(default=20, ge=1, le=200)) -> list[dict]:
         return fleet.activity_recent(limit)
 
     @api.get("/vms/{name}/metrics")
@@ -244,16 +267,17 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
         return fleet.metrics(name)
 
     @api.get("/vms/{name}/logs")
-    def logs(name: str, lines: int = 100) -> dict:
-        return {"lines": fleet.logs(name, lines)}
+    def logs(name: str, lines: int = Query(default=100, ge=1, le=5_000),
+             cursor: int | None = Query(default=None, ge=0)) -> dict:
+        return fleet.logs(name, lines, cursor)
 
     @api.post("/vms/{name}/screenshot")
-    def screenshot(name: str) -> dict:
+    def screenshot(name: str) -> Response:
         try:
             png = fleet.computer(name).screenshot()
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"png_b64": base64.b64encode(png).decode()}
+        return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @api.post("/vms/{name}/click")
     def click(name: str, body: ClickRequest) -> dict:
