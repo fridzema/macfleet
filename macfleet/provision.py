@@ -15,8 +15,10 @@ _GATEWAY_PATH = "/Users/admin/cs-venv/macfleet_gateway.py"
 # Authenticated gateway: the privileged computer server is loopback-only on :8001. The
 # gateway exposes /status for health checks but requires a boot-rotated secret for /cmd.
 # The host retrieves that 0600 token over SSH; callers cannot bypass MACFLEET_ALLOW_CONTROL
-# by posting directly to the guest IP. It also pins the server to the display's logical
-# dimensions so screenshots and click coordinates use the same coordinate space.
+# by posting directly to the guest IP. It also rescales incoming mouse coordinates from the
+# screenshot's pixel space (what the desktop clicks against) to the display's logical points
+# (what CGWarpMouseCursorPosition — cua's cursor backend — actually uses), which differ on a
+# HiDPI guest and which cua does not reconcile itself.
 _GATEWAY = r'''from __future__ import annotations
 
 import base64
@@ -26,6 +28,7 @@ import os
 import re
 import secrets
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -41,14 +44,69 @@ with open(TOKEN_PATH, "w") as fh:
     fh.write(TOKEN + "\n")
 os.chmod(TOKEN_PATH, 0o600)
 
-argv = [sys.executable, "-m", "computer_server", "--host", "127.0.0.1", "--port", "8001"]
-try:
-    import pyautogui
-    size = pyautogui.size()
-    argv += ["--width", str(size.width), "--height", str(size.height)]
-except Exception:
-    pass
-backend = subprocess.Popen(argv)
+backend = subprocess.Popen(
+    [sys.executable, "-m", "computer_server", "--host", "127.0.0.1", "--port", "8001"]
+)
+
+# cua moves the cursor with CGWarpMouseCursorPosition, which takes points in the display's logical
+# bounds (CGDisplayBounds), while the desktop maps clicks against the larger screenshot pixels; cua
+# applies no scaling and ignores --width/--height. Rescale mouse coordinates from screenshot space
+# to the click space. The ratio is resolved lazily on first use (once cua can screenshot) and
+# cached — screenshot and display dimensions are stable for a boot.
+_MOUSE_COMMANDS = {"left_click", "right_click", "middle_click", "double_click",
+                   "move_cursor", "mouse_down", "mouse_up", "drag_to"}
+_scale_lock = threading.Lock()
+_click_scale = None  # (sx, sy) once resolved
+
+
+def backend_cmd(command, params=None):
+    body = json.dumps({"command": command, "params": params or {}}).encode()
+    req = urllib.request.Request("http://127.0.0.1:8001/cmd", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as response:
+        raw = response.read().decode()
+    result = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if line.startswith("{"):
+            result = json.loads(line)
+    if not result.get("success", True):
+        raise RuntimeError(result.get("error", command + " failed"))
+    return result
+
+
+def resolve_click_scale():
+    global _click_scale
+    with _scale_lock:
+        if _click_scale is None:
+            import Quartz
+            bounds = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
+            png = base64.b64decode(backend_cmd("screenshot")["image_data"])
+            shot_w, shot_h = struct.unpack(">II", png[16:24])  # PNG IHDR width/height
+            _click_scale = (float(bounds.size.width) / shot_w,
+                            float(bounds.size.height) / shot_h)
+        return _click_scale
+
+
+def scale_mouse_body(body):
+    try:
+        payload = json.loads(body)
+        params = payload.get("params") or {}
+        if payload.get("command") in _MOUSE_COMMANDS and \
+                isinstance(params.get("x"), (int, float)) and \
+                isinstance(params.get("y"), (int, float)):
+            sx, sy = resolve_click_scale()
+            params["x"] = round(params["x"] * sx)
+            params["y"] = round(params["y"] * sy)
+            payload["params"] = params
+            return json.dumps(payload).encode()
+    except Exception:
+        pass  # forward unchanged if the body isn't a scalable mouse command
+    return body
+
+
 metrics_lock = threading.Lock()
 metrics_cached_at = 0.0
 metrics_cache = {"cpu_pct": 0.0, "mem_used_mb": 0, "mem_total_mb": 0}
@@ -74,23 +132,7 @@ class Gateway(http.server.BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _backend_command(self, command: str) -> dict:
-        body = json.dumps({"command": command, "params": {}}).encode()
-        req = urllib.request.Request(
-            "http://127.0.0.1:8001/cmd", data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=60) as response:
-            raw = response.read().decode()
-        result = {}
-        for line in raw.splitlines():
-            line = line.strip()
-            if line.startswith("data:"):
-                line = line[5:].strip()
-            if line.startswith("{"):
-                result = json.loads(line)
-        if not result.get("success", True):
-            raise RuntimeError(result.get("error", f"{command} failed"))
-        return result
+        return backend_cmd(command)
 
     def _screenshot(self) -> None:
         if not self._authorized():
@@ -191,6 +233,8 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else None
+        if parsed.path == "/cmd" and body:
+            body = scale_mouse_body(body)
         req = urllib.request.Request(
             "http://127.0.0.1:8001" + self.path,
             data=body,
