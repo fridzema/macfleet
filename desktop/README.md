@@ -8,7 +8,7 @@ tray menu to show the window again or quit.
 
 ## Prerequisites
 
-- The engine set up per the [root README](../README.md): `tart`, `uv`, and a
+- The engine set up per the [root README](../README.md): `tart`, `uv` for development, and a
   baked `mf-golden` image.
 - [`bun`](https://bun.sh/).
 - [Tauri v2 system dependencies](https://v2.tauri.app/start/prerequisites/) (Rust
@@ -26,7 +26,7 @@ bun install
 bun run tauri dev
 ```
 
-This spawns the engine (`uv run macfleet serve --port 8765`) as a managed
+This spawns the engine (`uv run --frozen macfleet serve`) as a managed
 sidecar process automatically — no separate `macfleet serve` needed.
 
 ## Computer-use control
@@ -44,7 +44,8 @@ bun run test:unit   # Vitest
 bun run test:e2e    # Playwright, against a mocked API — no engine/VM needed
 ```
 
-## Status
+## Bundles
 
-Dev-run only for now (`bun run tauri dev`). A bundled `.app` with the engine
-packaged as a PyInstaller sidecar is a later follow-up.
+`bun run tauri build` first creates an unpacked standalone engine with pinned
+PyInstaller 6.21.0, then bundles it under the app's resources. The target Mac needs
+`tart`, but not Python or `uv`. Source and development runs keep the `uv` fallback.
