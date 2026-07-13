@@ -58,6 +58,38 @@ describe('LogsTab — tailing', () => {
     wrapper.unmount()
   })
 
+  it('requests and appends only bytes after the guest log cursor', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm()]
+    const logs = vi
+      .spyOn(api, 'logs')
+      .mockResolvedValueOnce({ lines: 'line one\n', cursor: 10 })
+      .mockResolvedValueOnce({ lines: 'line two\n', cursor: 19 })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(logs).toHaveBeenLastCalledWith('web', 100, 10)
+    expect(wrapper.find('[data-test="logscroll"]').text()).toContain('line one')
+    expect(wrapper.find('[data-test="logscroll"]').text()).toContain('line two')
+    wrapper.unmount()
+  })
+
+  it('replaces stale text when the guest reports log rotation', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm()]
+    vi.spyOn(api, 'logs')
+      .mockResolvedValueOnce({ lines: 'old file\n', cursor: 10 })
+      .mockResolvedValueOnce({ lines: 'new file\n', cursor: 9, reset: true })
+    const wrapper = mount(LogsTab, { props: { name: 'web' } })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.find('[data-test="logscroll"]').text()).not.toContain('old file')
+    expect(wrapper.find('[data-test="logscroll"]').text()).toContain('new file')
+    wrapper.unmount()
+  })
+
   it('shows "VM not running" and does not poll when the VM is stopped', async () => {
     const store = useFleet()
     store.vms = [vm({ state: 'stopped', healthy: false })]
