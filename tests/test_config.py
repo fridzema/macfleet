@@ -66,26 +66,36 @@ def test_presets_have_cpu_and_memory_only():
         assert set(p) == {"cpu", "memory_gb"}
 
 
-def test_concurrent_writes_always_leave_a_parseable_file(tmp_path):
-    # Config has one key and one mutator, so there is no lost-update to test — any
-    # interleaving yields some writer's value. What IS at stake is atomicity: _save writes
-    # to a temp file and os.replace()s it, so a reader never sees a half-written file. An
-    # in-place write would let _load hit a JSONDecodeError and silently report "standard" —
-    # a value no thread ever wrote.
+def test_unlocked_reads_never_observe_a_half_written_file(tmp_path):
+    # default_preset() takes no lock (like leases.py's reads); it relies on _save's
+    # temp-file + os.replace to make each write land atomically. Writers serialize on
+    # state_lock, so the race only shows up when a reader runs *during* the storm rather
+    # than after it. If _save wrote in place, the reader would catch a truncated file,
+    # _load would swallow the JSONDecodeError, and default_preset() would report
+    # "standard" — a value no thread here ever writes.
     path = tmp_path / "config.json"
     c = Config(str(path))
-    start = threading.Barrier(8)
-    written = ["light", "heavy"] * 4
+    c.set_default_preset("light")
+    stop = threading.Event()
+    seen = set()
 
-    def worker(value):
-        start.wait()  # maximize overlap on the read-modify-write
-        c.set_default_preset(value)
+    def reader():
+        while not stop.is_set():
+            seen.add(c.default_preset())
 
-    threads = [threading.Thread(target=worker, args=(v,)) for v in written]
-    for t in threads:
+    def writer(value):
+        for _ in range(50):
+            c.set_default_preset(value)
+
+    r = threading.Thread(target=reader)
+    r.start()
+    writers = [threading.Thread(target=writer, args=(v,)) for v in ("light", "heavy", "light", "heavy")]
+    for t in writers:
         t.start()
-    for t in threads:
+    for t in writers:
         t.join()
+    stop.set()
+    r.join()
 
-    assert c.default_preset() in ("light", "heavy")
-    assert json.loads(path.read_text())["default_preset"] in ("light", "heavy")
+    assert seen, "reader never ran"
+    assert seen <= {"light", "heavy"}, f"reader saw a value nobody wrote: {seen}"
