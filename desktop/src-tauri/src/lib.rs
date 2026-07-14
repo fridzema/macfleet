@@ -2,7 +2,7 @@ mod handlers;
 mod state;
 
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -44,6 +44,31 @@ fn augmented_path() -> String {
         }
     }
     path
+}
+
+/// Redirect targets for the engine sidecar's stdout/stderr.
+///
+/// The sidecar inherits our stdio by default, which sends the engine's output nowhere. That
+/// output is the only record of *why* the engine failed to start — the readiness probe below
+/// reports the symptom ("did not become ready in 30s"), never the cause. Rotate one
+/// generation per launch: bounds the file without a reader thread or size accounting, and
+/// keeps the previous run around for a crash-and-relaunch.
+///
+/// Deliberately in ~/.macfleet rather than the Tauri log dir: the Settings page reads it
+/// through the fs plugin, so it must sit under a path the capability can scope to, next to
+/// the engine's other state.
+fn engine_log_at(dir: &std::path::Path) -> std::io::Result<(Stdio, Stdio)> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("engine.log");
+    let _ = std::fs::rename(&path, dir.join("engine.log.1"));
+    let file = std::fs::File::create(&path)?;
+    let err = file.try_clone()?;
+    Ok((Stdio::from(file), Stdio::from(err)))
+}
+
+fn engine_log() -> std::io::Result<(Stdio, Stdio)> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    engine_log_at(&std::path::PathBuf::from(home).join(".macfleet"))
 }
 
 fn engine_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -132,6 +157,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // the process exits. Scoped to the desktop sidecar so a standalone
                 // `macfleet serve` (CLI) never suspends VMs on Ctrl-C.
                 .env("MACFLEET_SUSPEND_VMS_ON_EXIT", "1");
+            // Never fail the launch over logging: a read-only HOME must not stop the engine.
+            match engine_log() {
+                Ok((out, err)) => {
+                    cmd.stdout(out).stderr(err);
+                }
+                Err(e) => log::warn!("engine log capture disabled: {e}"),
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -245,12 +277,36 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::augmented_path;
+    use super::*;
 
     #[test]
     fn augmented_path_contains_common_app_launch_locations() {
         let path = augmented_path();
         assert!(path.split(':').any(|entry| entry == "/opt/homebrew/bin"));
         assert!(path.split(':').any(|entry| entry == "/usr/local/bin"));
+    }
+
+    #[test]
+    fn engine_log_rotates_previous_run() {
+        let dir = std::env::temp_dir().join(format!("mf-log-{}", uuid::Uuid::new_v4()));
+        engine_log_at(&dir).expect("first run");
+        std::fs::write(dir.join("engine.log"), b"first run output").unwrap();
+
+        engine_log_at(&dir).expect("second run");
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("engine.log.1")).unwrap(),
+            "first run output"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("engine.log")).unwrap(), "");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn engine_log_creates_missing_dir() {
+        let dir = std::env::temp_dir().join(format!("mf-log-{}", uuid::Uuid::new_v4()));
+        engine_log_at(&dir).expect("creates dir");
+        assert!(dir.join("engine.log").is_file());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
