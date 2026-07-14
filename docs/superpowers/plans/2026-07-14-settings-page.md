@@ -629,12 +629,16 @@ Expected: FAIL — create still uses the hardcoded table, so `createOptions.pres
 Delete the `PRESETS` const and its comment block entirely. In `create()`, replace `const preset = PRESETS[opts.preset]` with:
 
 ```ts
+    // Capture the picked size BEFORE any await. `opts` is the live createOptions object, and
+    // settings.load() writes the configured default straight into it — so reading opts.preset
+    // after the await would hand back the default and silently ignore what the user chose.
+    const chosenPreset = opts.preset
     // Presets are engine-owned (macfleet/config.py) so the CLI and this app cannot disagree
     // about what "standard" means. load() is idempotent, so this costs one request per app
     // run, not one per create.
     const settings = useSettings()
     await settings.load()
-    const preset = settings.presets?.[opts.preset]
+    const preset = settings.presets?.[chosenPreset]
     if (!preset) {
       toast('Could not read VM sizes from the engine', '⚠')
       return
@@ -655,13 +659,33 @@ Import `useSettings` lazily inside the function body if a module cycle appears �
 The `createOptions` ref (~line 127) keeps `preset: 'standard'` as its initial literal — a value is needed before config arrives. Apply the engine's default once it loads. In `settings.ts`'s `load()`, after `defaultPreset.value = cfg.default_preset`, add:
 
 ```ts
-        // Point the create form at the configured default. Safe to overwrite: load() runs on
-        // app mount, before the user can have touched the picker, and after an explicit
-        // setDefaultPreset the overwrite is exactly what the user just asked for.
+        // Point the create form at the configured default. AppHeader calls load() on mount
+        // (Step 4b), so this lands before the user can touch the picker; after an explicit
+        // setDefaultPreset the overwrite is exactly what the user just asked for. create()
+        // captures its preset before awaiting load(), so this can never change a create
+        // already in flight.
         useFleet().createOptions.preset = cfg.default_preset
 ```
 
 and the same line at the end of `setDefaultPreset`'s success path. Import `useFleet` **inside the function bodies**, not at module scope — `fleet.ts` imports `settings.ts`, so a module-scope import here is a cycle.
+
+- [ ] **Step 4b: Load settings at app mount**
+
+The comment above is only true if something loads settings before the user can interact.
+`SettingsPage` calls `load()` on mount, but a user who never opens Settings would otherwise
+first trigger it from inside `create()`. In `desktop/src/components/AppHeader.vue`, extend the
+existing `onMounted` (which already calls `fleet.fetchHost()`):
+
+```ts
+onMounted(() => {
+  fleet.fetchHost()
+  // The create form's default size comes from the engine; fetch it before the user can pick.
+  useSettings().load()
+})
+```
+
+Add the `useSettings` import. Task 9 revisits this file for the gear button — that is fine, this
+line is about correctness and belongs with the store rewiring.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -670,8 +694,13 @@ Expected: PASS. Existing create tests that asserted `cpu: 4, memory: 8192` from 
 
 - [ ] **Step 6: Verify the table is really gone**
 
-Run: `cd desktop && grep -rn "memoryGb\|PRESETS" src/`
+Run: `cd desktop && grep -rn "PRESETS" src/`
 Expected: **no output.** Any hit means a second copy of the table survived and the CLI/desktop split is still there.
+
+Then run: `cd desktop && grep -rn "memoryGb" src/`
+Expected: hits **only** in `components/vmtabs/ResourcesTab.vue`. That is a per-VM resize form field
+(`memoryGb` is the unit the user edits in that form) and has nothing to do with presets — leave it
+alone. Any hit in `stores/` is a surviving preset copy and must go.
 
 - [ ] **Step 7: Typecheck, lint, coverage**
 
