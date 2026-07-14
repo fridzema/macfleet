@@ -110,6 +110,41 @@ export interface HostInfo {
   name: string
 }
 
+export type PresetName = 'light' | 'standard' | 'heavy'
+
+/** cpu + RAM only — never disk. `tart set --disk-size` is grow-only and mf-golden ships an
+ * ~80GB base disk, so a preset disk size would ask tart to shrink it and fail the clone.
+ * Engine-owned (macfleet/config.py); this app no longer keeps its own copy. */
+export interface Preset {
+  cpu: number
+  memory_gb: number
+}
+
+export interface ConfigResponse {
+  default_preset: PresetName
+  presets: Record<PresetName, Preset>
+}
+
+export type CheckStatus = 'ok' | 'warn' | 'fail' | 'skip'
+
+/** One doctor row (macfleet/doctor.py). `fix` is a human-readable hint, not an action —
+ * doctor diagnoses, it never repairs. */
+export interface DoctorCheck {
+  id: string
+  label: string
+  status: CheckStatus
+  detail: string
+  fix: string | null
+}
+
+export interface ResetResult {
+  deleted: string[]
+  failed: { name: string; error: string }[]
+  removed_paths: string[]
+}
+
+export type ResetScope = 'fleet' | 'all'
+
 export interface AgentActivity {
   who: string
   action: string
@@ -298,6 +333,12 @@ export const api = {
   connection: (n: string) => j<ConnectionInfo>(`/vms/${enc(n)}/connection`),
   exec: (n: string, command: string) => postJson<ExecResult>(`/vms/${enc(n)}/exec`, { command }),
   host: () => j<HostInfo>('/host'),
+  config: () => j<ConfigResponse>('/config'),
+  setConfig: (defaultPreset: PresetName) =>
+    putJson<ConfigResponse>('/config', { default_preset: defaultPreset }),
+  // Unwrap the {checks:[...]} envelope here so no caller has to know about it.
+  doctor: () => j<{ checks: DoctorCheck[] }>('/doctor').then((r) => r.checks),
+  resetData: (scope: ResetScope) => postJson<ResetResult>('/data/reset', { scope }),
   agentsActivity: (limit?: number) =>
     j<AgentActivity[]>(`/agents/activity${limit !== undefined ? `?limit=${limit}` : ''}`),
   metrics: (n: string) => j<Metrics>(`/vms/${enc(n)}/metrics`, undefined, POLL_TIMEOUT_MS),
