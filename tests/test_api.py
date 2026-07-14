@@ -432,3 +432,14 @@ def test_put_config_unknown_preset_is_409():
     r = client.put("/config", json={"default_preset": "gigantic"})
     assert r.status_code == 409
     assert "unknown preset" in r.json()["detail"]
+
+
+def test_doctor_returns_checks(monkeypatch):
+    import macfleet.api as api_mod
+    monkeypatch.setattr(api_mod, "run_checks", lambda _fleet: [
+        {"id": "arch", "label": "Apple silicon", "status": "ok", "detail": "arm64", "fix": None},
+    ])
+    client = TestClient(build_app(FakeFleet()))
+    body = client.get("/doctor").json()
+    assert body == {"checks": [{"id": "arch", "label": "Apple silicon",
+                                "status": "ok", "detail": "arm64", "fix": None}]}

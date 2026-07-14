@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from macfleet.connect import Fleet
+from macfleet.doctor import run_checks
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,11 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
         # An unknown preset raises RuntimeError -> 409 via the handler above.
         fleet.config.set_default_preset(req.default_preset)
         return fleet.config.read()
+
+    @api.get("/doctor")
+    def doctor() -> dict:
+        # Shells out to tart, so keep it off the event loop.
+        return {"checks": run_checks(fleet)}
 
     @api.get("/fleet/events")
     async def fleet_events(request: Request) -> StreamingResponse:
