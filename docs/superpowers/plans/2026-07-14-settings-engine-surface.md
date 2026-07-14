@@ -958,12 +958,21 @@ git commit -m "feat(api): expose GET /doctor"
 ### Task 6: Data reset (`Fleet.reset_data`)
 
 **Files:**
-- Modify: `macfleet/connect.py` (module constants; new methods near `nuke` ~line 708)
+- Modify: `macfleet/connect.py` (module constants; refactor `_nuke_unlocked` ~line 712; new methods near `nuke` ~line 708)
 - Test: `tests/test_connect.py`
 
 **Interfaces:**
 - Consumes: `Fleet.config` (Task 2), `Fleet._locked_vms`, `Fleet._leases`, `Fleet._shares`
-- Produces: `Fleet.reset_data(scope: str = "fleet") -> dict` returning `{"deleted": list[str], "failed": list[dict], "removed_paths": list[str]}`
+- Produces:
+  - `Fleet.reset_data(scope: str = "fleet") -> dict` returning `{"deleted": list[str], "failed": list[dict], "removed_paths": list[str]}`
+  - `Fleet._delete_unlocked(full: str) -> None` — the existing `_nuke_unlocked` body, minus the golden guard, keyed by full name
+
+**Note on the refactor:** reset needs the exact teardown `_nuke_unlocked` already
+does (stop, delete, drop caches/IP/lease/shares/provisioning, invalidate) but must
+be able to target `mf-golden`, which `_nuke_unlocked` rejects via `ensure_mutable`.
+Copying the body would duplicate a nine-line teardown that must stay in sync — so
+extract it instead. `_nuke_unlocked` keeps its signature and behaviour; the guard
+simply moves up one level.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1110,7 +1119,40 @@ _RESET_PREFIXES = ("mf-", "mfsnap-", "mfbackup-", "mftmp-")
 _RESET_STATE_FILES = ("state.json", "shares.json", "activity.jsonl")
 ```
 
-- [ ] **Step 4: Write the implementation**
+- [ ] **Step 4: Extract the teardown from `_nuke_unlocked`**
+
+Reset must run the same teardown but be able to target golden. Split the guard from
+the body — do **not** copy the body. Replace `_nuke_unlocked` (`macfleet/connect.py`,
+currently ~line 712) with:
+
+```python
+    def _nuke_unlocked(self, name: str) -> None:
+        self._delete_unlocked(ensure_mutable(name))
+
+    def _delete_unlocked(self, full: str) -> None:
+        """Tear down one VM by its FULL name, with no golden guard. Every caller except
+        reset_data(scope="all") must come via _nuke_unlocked, which applies ensure_mutable —
+        golden is the clone source for every future create."""
+        try:
+            self.tart.stop(full)
+        except RuntimeError:
+            pass
+        self.tart.delete(full)
+        self._res_cache.pop(full, None)
+        self._res_cache_at.pop(full, None)
+        self._forget_ip(full)
+        self._leases.unsuspend(full)
+        self._leases.drop(full)
+        self._shares.drop(full)
+        with self._provision_lock:
+            self._provision.pop(full, None)
+        self._invalidate_fleet(full)
+```
+
+Everything after the first line is the existing body, moved verbatim. `_nuke_unlocked`'s
+signature and behaviour are unchanged, so its callers need no edits.
+
+- [ ] **Step 5: Write the implementation**
 
 In `macfleet/connect.py`, after `nuke`/`_nuke_unlocked`:
 
@@ -1132,31 +1174,13 @@ In `macfleet/connect.py`, after `nuke`/`_nuke_unlocked`:
             if v.name == GOLDEN and scope != "all":
                 continue
             try:
-                self._reset_delete(v.name)
+                with self._locked_vms(v.name):
+                    self._delete_unlocked(v.name)
                 deleted.append(v.name)
             except RuntimeError as exc:
                 failed.append({"name": v.name, "error": str(exc)})
         return {"deleted": deleted, "failed": failed,
                 "removed_paths": self._reset_state_files(scope)}
-
-    def _reset_delete(self, full: str) -> None:
-        """Delete one VM by its FULL name, bypassing ensure_mutable so `scope="all"` can
-        take golden. Every other caller must go through nuke()."""
-        with self._locked_vms(full):
-            try:
-                self.tart.stop(full)
-            except RuntimeError:
-                pass  # already stopped
-            self.tart.delete(full)
-            self._res_cache.pop(full, None)
-            self._res_cache_at.pop(full, None)
-            self._forget_ip(full)
-            self._leases.unsuspend(full)
-            self._leases.drop(full)
-            self._shares.drop(full)
-            with self._provision_lock:
-                self._provision.pop(full, None)
-            self._invalidate_fleet(full)
 
     def _reset_state_files(self, scope: str) -> list[str]:
         removed = []
@@ -1176,17 +1200,21 @@ In `macfleet/connect.py`, after `nuke`/`_nuke_unlocked`:
         return removed
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_connect.py -q -k reset`
 Expected: PASS (8 passed)
 
-- [ ] **Step 6: Run the full engine suite**
+- [ ] **Step 7: Run the full engine suite**
+
+The `_nuke_unlocked` refactor touches an existing code path, so the whole suite is the
+check that the extraction was behaviour-preserving.
 
 Run: `make test-engine`
-Expected: PASS
+Expected: PASS, with the pre-existing nuke tests passing **unmodified**. If a nuke test
+needs changing, the extraction changed behaviour — revisit Step 4.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add macfleet/connect.py tests/test_connect.py
