@@ -21,6 +21,11 @@ class Leases:
         self._path = path
         self._clock = clock
 
+    @property
+    def storage_dir(self) -> str:
+        """Directory shared by macfleet's persistent state and operation locks."""
+        return os.path.dirname(self._path) or "."
+
     def _load_doc(self) -> dict:
         try:
             with open(self._path) as fh:
@@ -59,6 +64,21 @@ class Leases:
             expires_at = lease.get("expires_at")
             if expires_at is not None and expires_at < now:
                 result.append(n)
+        return result
+
+    def is_expired(self, name: str, now: float) -> bool:
+        """Return whether one named lease still exists and is expired at ``now``."""
+        lease = self._load_doc()["leases"].get(name, {})
+        expires_at = lease.get("expires_at")
+        return isinstance(expires_at, (int, float)) and expires_at < now
+
+    def expiries(self) -> dict[str, float]:
+        """Return valid absolute expiry timestamps keyed by full VM name."""
+        result: dict[str, float] = {}
+        for name, lease in self._load_doc()["leases"].items():
+            expires_at = lease.get("expires_at")
+            if isinstance(expires_at, (int, float)):
+                result[name] = float(expires_at)
         return result
 
     def drop(self, name: str) -> None:
