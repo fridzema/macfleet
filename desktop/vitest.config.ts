@@ -6,6 +6,9 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
+      // Node 26 exposes an experimental global localStorage getter that warns when no
+      // persistence file is configured. Tests use jsdom's browser-scoped storage instead.
+      execArgv: ['--no-experimental-webstorage'],
       include: ['tests/unit/**/*.test.ts'],
       coverage: {
         provider: 'istanbul',

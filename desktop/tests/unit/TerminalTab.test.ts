@@ -84,6 +84,21 @@ describe('TerminalTab', () => {
     wrapper.unmount()
   })
 
+  it('renders stderr returned by the guest command', async () => {
+    vi.spyOn(api, 'exec').mockResolvedValue({
+      stdout: 'partial output',
+      stderr: 'command failed',
+      exit_code: 2,
+    })
+    const wrapper = mount(TerminalTab, { props: { name: 'web' } })
+    await wrapper.find('[data-test="term-input"]').setValue('broken-command')
+    await wrapper.find('[data-test="run-btn"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('[data-test="term-entry"]').exists()).toBe(true))
+    expect(wrapper.find('[data-test="term-entry"]').text()).toContain('partial output')
+    expect(wrapper.find('[data-test="term-entry"]').text()).toContain('command failed')
+    wrapper.unmount()
+  })
+
   it('an exec network failure toasts and appends a distinct error entry, not a fake exit code', async () => {
     vi.spyOn(api, 'exec').mockRejectedValue(new Error('POST /vms/web/exec -> 500'))
     const wrapper = mount(TerminalTab, { props: { name: 'web' } })

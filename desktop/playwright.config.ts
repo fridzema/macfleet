@@ -1,5 +1,9 @@
 import { defineConfig } from '@playwright/test'
 
+// Playwright forces colored child-process output. Do not pass the shell's contradictory
+// NO_COLOR flag to its workers/dev server, which makes Node warn once per process.
+delete process.env.NO_COLOR
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,

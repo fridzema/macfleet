@@ -79,6 +79,22 @@ const emptySub = computed(() =>
         <div class="max-w-[280px] text-center text-[12.5px]">
           Booting the macfleet engine — this only takes a couple of seconds.
         </div>
+        <div
+          v-if="store.error"
+          data-test="engine-startup-error"
+          class="max-w-[420px] rounded-lg border border-[var(--red)]/40 bg-[var(--red)]/10 px-3 py-2 text-center font-mono text-[11px] text-[var(--red)]"
+        >
+          {{ store.error }}
+        </div>
+        <button
+          v-if="store.error"
+          type="button"
+          data-test="engine-retry"
+          class="h-[30px] rounded-lg border border-[var(--border)] bg-[var(--bg-elev2)] px-3 text-xs text-[var(--text-dim)]"
+          @click="store.refresh()"
+        >
+          Retry connection
+        </button>
       </div>
       <template v-else>
       <BulkPanel v-if="ui.selectionCount >= 2" />

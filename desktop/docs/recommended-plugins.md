@@ -43,7 +43,7 @@ bun add @tauri-apps/plugin-updater
 1. Generate a signing keypair:
 
    ```bash
-   bun tauri signer generate -w ~/.tauri/oxidedock.key
+   bun tauri signer generate -w ~/.tauri/macfleet.key
    ```
 
 2. Add the private key to your CI secrets as `TAURI_SIGNING_PRIVATE_KEY`.

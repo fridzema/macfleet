@@ -1,4 +1,4 @@
-# Contributing to OxideDock
+# Contributing to macfleet
 
 Thank you for your interest in contributing! This guide will help you get started.
 
@@ -11,8 +11,8 @@ Thank you for your interest in contributing! This guide will help you get starte
 ## Setup
 
 ```bash
-git clone https://github.com/fridzema/oxide-dock.git
-cd oxide-dock
+git clone https://github.com/fridzema/macfleet.git
+cd macfleet/desktop
 make setup
 ```
 

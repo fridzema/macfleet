@@ -79,6 +79,27 @@ describe('ScreenTab — live view', () => {
     wrapper.unmount()
   })
 
+  it('does not reschedule when an in-flight screenshot settles after unmount', async () => {
+    vi.useFakeTimers()
+    const store = useFleet()
+    store.vms = [vm()]
+    let resolveShot!: (value: { png_b64: string }) => void
+    const pending = new Promise<{ png_b64: string }>((resolve) => {
+      resolveShot = resolve
+    })
+    const shot = vi.spyOn(api, 'screenshot').mockReturnValue(pending)
+    const wrapper = mount(ScreenTab, { props: { name: 'web' } })
+    await flushPromises()
+    expect(shot).toHaveBeenCalledOnce()
+
+    wrapper.unmount()
+    resolveShot({ png_b64: 'QUJD' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(shot).toHaveBeenCalledOnce()
+  })
+
   it('does not poll while the VM is stopped', async () => {
     const store = useFleet()
     store.vms = [vm({ state: 'stopped', healthy: false })]
@@ -164,6 +185,7 @@ describe('ScreenTab — click & type control', () => {
     click.mockClear()
     await img.trigger('click', { clientX: 10, clientY: 0 })
     expect(click).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('toasts a failure instead of rejecting when api.click fails', async () => {

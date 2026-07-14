@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    if let Err(e) = oxidedock_lib::run() {
+    if let Err(e) = macfleet_desktop_lib::run() {
         eprintln!("Application error: {e}");
         std::process::exit(1);
     }

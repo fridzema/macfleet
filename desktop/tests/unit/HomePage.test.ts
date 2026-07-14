@@ -37,6 +37,24 @@ describe('HomePage — empty states', () => {
     expect(wrapper.find('[data-test="engine-booting"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="empty-create"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Starting engine')
+    expect(wrapper.find('[data-test="engine-startup-error"]').text()).toContain(
+      'connection refused',
+    )
+    wrapper.unmount()
+  })
+
+  it('lets the user retry after an engine startup failure', async () => {
+    const list = vi
+      .spyOn(api, 'listVms')
+      .mockRejectedValueOnce(new Error('connection refused'))
+      .mockResolvedValueOnce([])
+    const wrapper = mount(HomePage)
+    await flushPromises()
+    await wrapper.find('[data-test="engine-retry"]').trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="engine-booting"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No VMs yet')
     wrapper.unmount()
   })
 
