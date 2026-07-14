@@ -41,6 +41,27 @@ def nuke(name: str) -> None:
 
 
 @app.command()
+def reset(everything: bool = typer.Option(
+        False, "--all", help="also delete mf-golden and reset settings to defaults")) -> None:
+    """Delete every fleet VM, snapshot, and macfleet state file."""
+    scope = "all" if everything else "fleet"
+    what = ("every fleet VM, snapshot, macfleet state file, mf-golden itself, and your "
+            "settings — golden needs a full re-bake afterwards"
+            if everything else
+            "every fleet VM, snapshot, and macfleet state file (mf-golden is kept)")
+    typer.confirm(f"This permanently deletes {what}. Continue?", abort=True)
+    result = _fleet().reset_data(scope)
+    for name in result["deleted"]:
+        typer.echo(f"deleted {name}")
+    for path in result["removed_paths"]:
+        typer.echo(f"removed {path}")
+    for failure in result["failed"]:
+        typer.echo(f"FAILED {failure['name']}: {failure['error']}", err=True)
+    if result["failed"]:
+        raise typer.Exit(1)
+
+
+@app.command()
 def reap() -> None:
     """Delete VMs whose TTL lease has expired."""
     for name in _fleet().reap():
