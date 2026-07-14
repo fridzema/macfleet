@@ -385,3 +385,50 @@ def test_lifespan_leaves_vms_alone_by_default():
     with TestClient(build_app(fake)):
         pass
     assert ("suspend_all",) not in fake.calls
+
+
+class FakeConfig:
+    def __init__(self, preset="standard"):
+        self.preset = preset
+
+    def default_preset(self):
+        return self.preset
+
+    def set_default_preset(self, name):
+        if name not in ("light", "standard", "heavy"):
+            raise RuntimeError(f"unknown preset {name!r}: choose one of light, standard, heavy")
+        self.preset = name
+
+    def read(self):
+        return {"default_preset": self.preset,
+                "presets": {"light": {"cpu": 2, "memory_gb": 4},
+                            "standard": {"cpu": 4, "memory_gb": 8},
+                            "heavy": {"cpu": 8, "memory_gb": 16}}}
+
+
+def test_get_config_returns_default_and_presets():
+    fake = FakeFleet()
+    fake.config = FakeConfig()
+    client = TestClient(build_app(fake))
+    body = client.get("/config").json()
+    assert body["default_preset"] == "standard"
+    assert body["presets"]["heavy"] == {"cpu": 8, "memory_gb": 16}
+
+
+def test_put_config_sets_default_preset():
+    fake = FakeFleet()
+    fake.config = FakeConfig()
+    client = TestClient(build_app(fake))
+    body = client.put("/config", json={"default_preset": "heavy"}).json()
+    assert body["default_preset"] == "heavy"
+    assert fake.config.preset == "heavy"
+
+
+def test_put_config_unknown_preset_is_409():
+    # RuntimeError -> 409 via the registered handler, so CORS headers survive.
+    fake = FakeFleet()
+    fake.config = FakeConfig()
+    client = TestClient(build_app(fake))
+    r = client.put("/config", json={"default_preset": "gigantic"})
+    assert r.status_code == 409
+    assert "unknown preset" in r.json()["detail"]
