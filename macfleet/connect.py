@@ -19,6 +19,7 @@ from typing import Any
 
 from macfleet._lock import state_lock
 from macfleet.activity import Activity, default_activity_path
+from macfleet.config import PRESETS, Config, default_config_path, validate_preset
 from macfleet.leases import Leases, default_state_path
 from macfleet.shares import Shares, default_shares_path
 from macfleet.vm import (
@@ -196,6 +197,7 @@ class Fleet:
                  leases: Leases | None = None,
                  clock: Callable[[], float] = time.time,
                  activity: Activity | None = None,
+                 config: Config | None = None,
                  shares: Shares | None = None,
                  sleep: Callable[[float], None] = time.sleep,
                  monotonic: Callable[[], float] = time.monotonic,
@@ -211,6 +213,7 @@ class Fleet:
         self._monotonic = monotonic
         self._operation_lock_dir = Path(operation_lock_dir or self._leases.storage_dir) / "operations"
         self.activity = activity or Activity(default_activity_path())
+        self.config = config or Config(default_config_path())
         self._res_cache: dict[str, dict] = {}
         self._res_cache_at: dict[str, float] = {}
         # Handles for backgrounded `tart run` children, kept so their zombies are reaped once
@@ -590,8 +593,16 @@ class Fleet:
         name = self._run(["hostname"]).stdout.strip()
         return {"total_mem_gb": round(int(memsize) / 1024**3), "cpu_count": int(cpu_count), "name": name}
 
-    def up(self, name: str) -> None:
-        self.create(name)
+    def preset_resources(self, preset: str | None = None) -> dict:
+        """Resolve a preset name (or the configured default) to create() kwargs. The table
+        stores RAM in GB for humans; create() takes MB — convert here, once, so no caller
+        has to know."""
+        name = validate_preset(preset) if preset else self.config.default_preset()
+        p = PRESETS[name]
+        return {"cpu": p["cpu"], "memory": p["memory_gb"] * 1024}
+
+    def up(self, name: str, preset: str | None = None) -> None:
+        self.create(name, **self.preset_resources(preset))
 
     def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
         now = self._clock()

@@ -6,6 +6,7 @@ import time
 import urllib.error
 from contextlib import contextmanager
 import pytest
+from macfleet.config import Config
 from macfleet.connect import ssh_cmd, scp_push_cmd, Fleet, GuestControl, SSH_OPTS
 from macfleet.leases import Leases
 from macfleet.shares import Shares
@@ -1472,3 +1473,44 @@ def test_restart_stops_then_boots_with_shares(tmp_path):
     fleet.restart("web")
     assert ["tart", "stop", "mf-web"] in calls
     assert ["tart", "run", "mf-web", "--no-graphics", "--dir=src:/h:ro"] in spawned
+
+
+def _preset_fleet(tmp_path, default):
+    cfg = Config(str(tmp_path / "config.json"))
+    cfg.set_default_preset(default)
+    return Fleet(tart=object(), config=cfg)
+
+
+def test_preset_resources_uses_configured_default(tmp_path):
+    assert _preset_fleet(tmp_path, "heavy").preset_resources() == {"cpu": 8, "memory": 16384}
+
+
+def test_preset_resources_explicit_overrides_default(tmp_path):
+    fleet = _preset_fleet(tmp_path, "heavy")
+    assert fleet.preset_resources("light") == {"cpu": 2, "memory": 4096}
+
+
+def test_preset_resources_converts_gb_to_mb(tmp_path):
+    # The table stores GB for humans; create() takes MB. Convert once, at this boundary.
+    assert _preset_fleet(tmp_path, "standard").preset_resources()["memory"] == 8192
+
+
+def test_preset_resources_rejects_unknown(tmp_path):
+    with pytest.raises(RuntimeError, match="unknown preset"):
+        _preset_fleet(tmp_path, "standard").preset_resources("gigantic")
+
+
+def test_up_applies_configured_preset(tmp_path, monkeypatch):
+    fleet = _preset_fleet(tmp_path, "light")
+    calls = []
+    monkeypatch.setattr(fleet, "create", lambda name, **kw: calls.append((name, kw)))
+    fleet.up("web")
+    assert calls == [("web", {"cpu": 2, "memory": 4096})]
+
+
+def test_up_explicit_preset_wins(tmp_path, monkeypatch):
+    fleet = _preset_fleet(tmp_path, "light")
+    calls = []
+    monkeypatch.setattr(fleet, "create", lambda name, **kw: calls.append((name, kw)))
+    fleet.up("web", preset="heavy")
+    assert calls == [("web", {"cpu": 8, "memory": 16384})]
