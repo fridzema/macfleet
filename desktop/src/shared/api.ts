@@ -42,6 +42,7 @@ export interface Vm {
   cpu?: number | null
   memory_mb?: number | null
   disk_gb?: number | null
+  lease_expires_at?: number | null
 }
 
 export type VmStatus = 'running' | 'booting' | 'stopped'
@@ -99,6 +100,7 @@ export interface ConnectionInfo {
 
 export interface ExecResult {
   stdout: string
+  stderr?: string
   exit_code: number
 }
 

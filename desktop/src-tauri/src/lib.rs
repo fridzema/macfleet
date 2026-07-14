@@ -1,5 +1,3 @@
-mod commands;
-mod error;
 mod handlers;
 mod state;
 
@@ -88,13 +86,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
-        .manage(state::AppState::default())
-        .invoke_handler(tauri::generate_handler![
-            handlers::greet,
-            handlers::greet_checked,
-            handlers::get_app_info,
-            handlers::get_api_config
-        ])
+        .invoke_handler(tauri::generate_handler![handlers::get_api_config])
         .setup(|app| {
             // Per-run port + secret. The port is ephemeral (never a fixed :8765 a stale
             // server could already own) and the token authenticates every API call — the
@@ -249,4 +241,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::augmented_path;
+
+    #[test]
+    fn augmented_path_contains_common_app_launch_locations() {
+        let path = augmented_path();
+        assert!(path.split(':').any(|entry| entry == "/opt/homebrew/bin"));
+        assert!(path.split(':').any(|entry| entry == "/usr/local/bin"));
+    }
 }

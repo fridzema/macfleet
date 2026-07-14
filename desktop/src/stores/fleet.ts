@@ -132,6 +132,11 @@ export const useFleet = defineStore('fleet', () => {
   // by short name. The server is the one that actually reaps expired leases (see
   // `Fleet.reap`) — this just reflects/announces that locally between polls.
   const leases = ref<Record<string, number>>({})
+  // Keep the authoritative expiry identity separately from the display countdown. An expired
+  // lease can remain in server frames while reap retries a transient Tart deletion failure; the
+  // timestamp lets us announce that failure once without losing the visible zero-second state.
+  let leaseExpiries: Record<string, number> = {}
+  const announcedLeaseExpiries = new Map<string, number>()
 
   // Per-VM resources (vCPU/RAM/disk), keyed by short name. Fetched on demand — by the
   // detail header when a VM is selected, and reused by the Resources tab — rather than
@@ -149,8 +154,9 @@ export const useFleet = defineStore('fleet', () => {
   async function execCommand(name: string, cmd: string): Promise<void> {
     let entry: ExecEntry
     try {
-      const { stdout, exit_code } = await api.exec(name, cmd)
-      entry = { cmd, out: stdout, code: exit_code }
+      const { stdout, stderr = '', exit_code } = await api.exec(name, cmd)
+      const separator = stdout && stderr && !stdout.endsWith('\n') ? '\n' : ''
+      entry = { cmd, out: `${stdout}${separator}${stderr}`, code: exit_code }
     } catch (e) {
       entry = { cmd, out: String(e), code: null }
       toast(`Failed to run command on ${name}`, '⚠')
@@ -231,6 +237,33 @@ export const useFleet = defineStore('fleet', () => {
     smooth.prune(new Set(fleetVms.map((v) => v.name)))
     error.value = null
     loaded.value = true
+    // Rebuild the display countdown from the engine's persisted absolute expiry on every fleet
+    // frame. This survives desktop restarts and corrects timer drift after sleep/backgrounding.
+    // Preserve only optimistic leases for creates that have not appeared in Tart yet.
+    const nextLeases: Record<string, number> = {}
+    const nextExpiries: Record<string, number> = {}
+    for (const name of pending.value) {
+      if (!fleetVms.some((v) => short(v.name) === name) && leases.value[name] !== undefined) {
+        nextLeases[name] = leases.value[name]
+        if (leaseExpiries[name] !== undefined) nextExpiries[name] = leaseExpiries[name]
+      }
+    }
+    const now = Date.now() / 1000
+    for (const vm of fleetVms) {
+      if (vm.lease_expires_at != null) {
+        const name = short(vm.name)
+        nextLeases[name] = Math.max(0, Math.ceil(vm.lease_expires_at - now))
+        nextExpiries[name] = vm.lease_expires_at
+        if (announcedLeaseExpiries.get(name) !== vm.lease_expires_at) {
+          announcedLeaseExpiries.delete(name)
+        }
+      }
+    }
+    for (const name of announcedLeaseExpiries.keys()) {
+      if (nextExpiries[name] === undefined) announcedLeaseExpiries.delete(name)
+    }
+    leases.value = nextLeases
+    leaseExpiries = nextExpiries
     clearPending(
       pending.value.filter((n) =>
         vms.value.some((v) => short(v.name) === n && v.state === 'running'),
@@ -408,7 +441,10 @@ export const useFleet = defineStore('fleet', () => {
     // collapses any prior multi-selection to just this VM. Cross-store call (ui imports fleet);
     // resolved lazily at call time so the module cycle never breaks.
     useUi().selectOnly(name)
-    if (opts.ttl) leases.value = { ...leases.value, [name]: LEASE_TTL_SECONDS }
+    if (opts.ttl) {
+      leases.value = { ...leases.value, [name]: LEASE_TTL_SECONDS }
+      leaseExpiries = { ...leaseExpiries, [name]: Date.now() / 1000 + LEASE_TTL_SECONDS }
+    }
     toast(snap ? `Cloning from ${snap.label}…` : `Creating ${name}…`, '⚡')
 
     try {
@@ -431,6 +467,10 @@ export const useFleet = defineStore('fleet', () => {
         const nextLeases = { ...leases.value }
         delete nextLeases[name]
         leases.value = nextLeases
+        const nextExpiries = { ...leaseExpiries }
+        delete nextExpiries[name]
+        leaseExpiries = nextExpiries
+        announcedLeaseExpiries.delete(name)
       }
       toast(`Failed to create ${name}`, '⚠')
     }
@@ -461,7 +501,13 @@ export const useFleet = defineStore('fleet', () => {
     // computeds (they read `store.leases`) and re-rendering the whole fleet list each second.
     if (Object.keys(leases.value).length > 0) leases.value = next
     if (expired.length) {
-      for (const name of expired) toast(`Lease expired — ${name}`, '⏱')
+      for (const name of expired) {
+        const expiry = leaseExpiries[name]
+        if (expiry === undefined || announcedLeaseExpiries.get(name) !== expiry) {
+          toast(`Lease expired — ${name}`, '⏱')
+          if (expiry !== undefined) announcedLeaseExpiries.set(name, expiry)
+        }
+      }
       await refresh()
     }
 

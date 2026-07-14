@@ -1,6 +1,6 @@
 .PHONY: help dev dev-frontend build build-debug lint lint-fix format format-check \
 	test test-unit test-e2e test-watch rust-lint rust-format rust-audit rust-test \
-	rust-coverage coverage ci check setup bootstrap clean release-status
+	rust-coverage coverage ci check setup clean release-status
 
 # Help (default target)
 help:
@@ -34,10 +34,9 @@ help:
 	@echo "Release:"
 	@echo "  release-status Check for open Release PRs"
 	@echo ""
-	@echo "Setup & Bootstrap:"
+	@echo "Setup:"
 	@echo "  check          Verify prerequisites are installed"
 	@echo "  setup          Install dependencies (runs check first)"
-	@echo "  bootstrap      Rename project via scripts/bootstrap.sh"
 	@echo ""
 	@echo "CI & Cleanup:"
 	@echo "  ci             Run full CI pipeline"
@@ -145,10 +144,6 @@ setup: check
 	@echo ""
 	@echo "Optional: cargo install cargo-audit    (for make rust-audit)"
 	@echo "Optional: cargo install cargo-llvm-cov (for make rust-coverage)"
-
-bootstrap:
-	@test -f scripts/bootstrap.sh || { echo "scripts/bootstrap.sh not found"; exit 1; }
-	bash scripts/bootstrap.sh
 
 clean:
 	rm -rf node_modules dist src-tauri/binaries

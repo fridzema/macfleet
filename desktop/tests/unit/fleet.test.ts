@@ -29,6 +29,23 @@ describe('fleet store', () => {
     expect(s.error).toBeNull()
   })
 
+  it('reconstructs lease countdowns from server expiry after a desktop restart', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      {
+        name: 'mf-a',
+        state: 'running',
+        source: 'local',
+        healthy: true,
+        lease_expires_at: Date.now() / 1000 + 120,
+      },
+    ])
+    const s = useFleet()
+    expect(s.leases).toEqual({})
+    await s.refresh()
+    expect(s.leases.a).toBeGreaterThanOrEqual(119)
+    expect(s.leases.a).toBeLessThanOrEqual(120)
+  })
+
   it('acceptFleetUpdate applies both the vms list and the provisioning map from an SSE frame', async () => {
     const s = useFleet()
     s.acceptFleetUpdate({
@@ -726,7 +743,48 @@ describe('fleet store — TTL countdown', () => {
     expect(useToasts().toasts.value.some((t) => t.msg === 'Lease expired — web')).toBe(true)
   })
 
+  it('announces an unreaped expiry once and re-arms only for a new expiry', async () => {
+    const firstExpiry = Date.now() / 1000 - 10
+    const listVms = vi.spyOn(api, 'listVms').mockResolvedValue([
+      {
+        name: 'mf-web',
+        state: 'running',
+        source: 'local',
+        healthy: true,
+        lease_expires_at: firstExpiry,
+      },
+    ])
+    const s = useFleet()
+    await s.refresh()
+
+    await s.tickTtl() // refresh re-adds the same failed-reap lease at zero
+    await s.tickTtl()
+    expect(useToasts().toasts.value.filter((t) => t.msg === 'Lease expired — web')).toHaveLength(1)
+
+    listVms.mockResolvedValue([
+      {
+        name: 'mf-web',
+        state: 'running',
+        source: 'local',
+        healthy: true,
+        lease_expires_at: firstExpiry + 1,
+      },
+    ])
+    await s.refresh()
+    await s.tickTtl()
+    expect(useToasts().toasts.value.filter((t) => t.msg === 'Lease expired — web')).toHaveLength(2)
+  })
+
   it('leaves unrelated leases untouched when one expires', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([
+      {
+        name: 'mf-db',
+        state: 'running',
+        source: 'local',
+        healthy: true,
+        lease_expires_at: Date.now() / 1000 + 4,
+      },
+    ])
     const s = useFleet()
     s.leases.web = 1
     s.leases.db = 5

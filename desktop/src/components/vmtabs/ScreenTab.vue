@@ -62,6 +62,7 @@ let typedTimer: ReturnType<typeof setTimeout> | null = null
 // otherwise a late screenshot for the OLD vm could paint over the newly-selected one, and
 // a click on that stale frame would be sent to the current (different) VM.
 let generation = 0
+let disposed = false
 // A screenshot is a 2-3MB PNG the guest serves serially; on a loaded guest one can take
 // longer than the 1s poll. Without this guard the interval would stack overlapping
 // requests, starving the guest's /status healthcheck (which flaps the VM to "booting")
@@ -77,13 +78,13 @@ function revokeShot(): void {
 function schedule(): void {
   if (timer) clearTimeout(timer)
   timer = null
-  if (!streamActive.value || paused.value) return
+  if (disposed || !streamActive.value || paused.value) return
   const delay = Date.now() < boostUntil ? INTERACTIVE_POLL_MS : SCREEN_POLL_MS
   timer = setTimeout(poll, delay)
 }
 
 async function poll() {
-  if (paused.value || !streamActive.value || inFlight) return
+  if (disposed || paused.value || !streamActive.value || inFlight) return
   inFlight = true
   const myGen = generation
   const name = props.name
@@ -134,6 +135,9 @@ watch(
 watch(active, restart)
 watch(visibility, restart)
 onBeforeUnmount(() => {
+  // An in-flight screenshot can settle after Vue has unmounted this component. Its `finally`
+  // block must not recreate the polling timer and leak work into a later screen/test.
+  disposed = true
   if (timer) clearTimeout(timer)
   if (typedTimer) clearTimeout(typedTimer)
   revokeShot()
