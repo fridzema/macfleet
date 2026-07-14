@@ -5,6 +5,10 @@ import { setToastScheduler } from '../../src/composables/useToasts'
 import SettingsPage from '../../src/pages/SettingsPage.vue'
 import { api } from '../../src/shared/api'
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({ confirm: vi.fn() }))
+
+import { confirm } from '@tauri-apps/plugin-dialog'
+
 // Deliberately distinct from macfleet/config.py's real defaults (2/4, 4/8, 8/16) so a
 // regression to a hardcoded template table — the exact bug this page removes — fails here
 // instead of accidentally matching these mock numbers.
@@ -61,5 +65,67 @@ describe('SettingsPage — General', () => {
     await flushPromises()
     await w.get('[data-test="preset-standard"]').trigger('click')
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsPage — Data', () => {
+  it('does not reset when the confirm is declined', async () => {
+    vi.mocked(confirm).mockResolvedValue(false)
+    const spy = vi.spyOn(api, 'resetData')
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="reset-fleet"]').trigger('click')
+    await flushPromises()
+    // A stray click must never delete a fleet.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('resets with scope fleet when confirmed', async () => {
+    vi.mocked(confirm).mockResolvedValue(true)
+    const spy = vi
+      .spyOn(api, 'resetData')
+      .mockResolvedValue({ deleted: ['mf-a'], failed: [], removed_paths: [] })
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="reset-fleet"]').trigger('click')
+    await flushPromises()
+    expect(spy).toHaveBeenCalledWith('fleet')
+  })
+
+  it('resets with scope all from the full-reset button', async () => {
+    vi.mocked(confirm).mockResolvedValue(true)
+    const spy = vi
+      .spyOn(api, 'resetData')
+      .mockResolvedValue({ deleted: [], failed: [], removed_paths: [] })
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="reset-all"]').trigger('click')
+    await flushPromises()
+    expect(spy).toHaveBeenCalledWith('all')
+  })
+
+  it('warns that golden needs a re-bake in the full-reset confirmation', async () => {
+    vi.mocked(confirm).mockResolvedValue(false)
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="reset-all"]').trigger('click')
+    const message = String(vi.mocked(confirm).mock.calls.at(-1)?.[0])
+    expect(message.toLowerCase()).toContain('re-bake')
+  })
+
+  it('refreshes the fleet after a reset so the sidebar drops dead VMs', async () => {
+    vi.mocked(confirm).mockResolvedValue(true)
+    vi.spyOn(api, 'resetData').mockResolvedValue({
+      deleted: ['mf-a'],
+      failed: [],
+      removed_paths: [],
+    })
+    const listSpy = vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="reset-fleet"]').trigger('click')
+    await flushPromises()
+    expect(listSpy).toHaveBeenCalled()
   })
 })
