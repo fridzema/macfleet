@@ -172,7 +172,10 @@ describe('SettingsPage — Doctor', () => {
     const w = mount(SettingsPage)
     await flushPromises()
     expect(w.get('[data-test="check-golden_warm"]').text()).toContain('macfleet warm')
-    expect(w.get('[data-test="check-arch"]').text()).not.toContain('macfleet')
+    // Not `not.toContain('macfleet')`: with the v-if dropped, `fix: null` renders as the
+    // bare label "fix: " — which still wouldn't contain 'macfleet'. Assert the label is
+    // absent so the guard itself is what's under test.
+    expect(w.get('[data-test="check-arch"]').text()).not.toContain('fix:')
   })
 
   it('re-runs the checks on demand', async () => {
