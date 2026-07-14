@@ -25,6 +25,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   setToastScheduler(() => {})
   vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
+  vi.spyOn(api, 'doctor').mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -127,5 +128,66 @@ describe('SettingsPage — Data', () => {
     await w.get('[data-test="reset-fleet"]').trigger('click')
     await flushPromises()
     expect(listSpy).toHaveBeenCalled()
+  })
+})
+
+const CHECKS = [
+  { id: 'arch', label: 'Apple silicon', status: 'ok' as const, detail: 'arm64', fix: null },
+  {
+    id: 'golden_warm',
+    label: 'Golden image warm',
+    status: 'warn' as const,
+    detail: "state is 'stopped'",
+    fix: 'macfleet warm',
+  },
+  {
+    id: 'tcc_screenshot',
+    label: 'Screen recording permission',
+    status: 'skip' as const,
+    detail: 'computer-use disabled',
+    fix: null,
+  },
+]
+
+describe('SettingsPage — Doctor', () => {
+  it('runs the checks on mount', async () => {
+    const spy = vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
+    mount(SettingsPage)
+    await flushPromises()
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('renders a row per check with its label and detail', async () => {
+    vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
+    const w = mount(SettingsPage)
+    await flushPromises()
+    expect(w.findAll('[data-test^="check-"]')).toHaveLength(3)
+    const warm = w.get('[data-test="check-golden_warm"]')
+    expect(warm.text()).toContain('Golden image warm')
+    expect(warm.text()).toContain("state is 'stopped'")
+  })
+
+  it('shows the fix hint when the engine gives one', async () => {
+    vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
+    const w = mount(SettingsPage)
+    await flushPromises()
+    expect(w.get('[data-test="check-golden_warm"]').text()).toContain('macfleet warm')
+    expect(w.get('[data-test="check-arch"]').text()).not.toContain('macfleet')
+  })
+
+  it('re-runs the checks on demand', async () => {
+    const spy = vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="doctor-run"]').trigger('click')
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports an unreachable engine instead of showing an empty check list', async () => {
+    vi.spyOn(api, 'doctor').mockRejectedValue(new Error('connection refused'))
+    const w = mount(SettingsPage)
+    await flushPromises()
+    // Engine down is when a user opens Doctor — silence would be the worst answer.
+    expect(w.get('[data-test="doctor-error"]').text()).toContain('connection refused')
   })
 })
