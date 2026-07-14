@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { computed, onMounted } from 'vue'
-import type { PresetName } from '../shared/api'
+import type { CheckStatus, PresetName } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 import { useSettings } from '../stores/settings'
 
 const settings = useSettings()
 const fleet = useFleet()
+
+const STATUS_COLOR: Record<CheckStatus, string> = {
+  ok: 'var(--emerald)',
+  warn: 'var(--amber)',
+  fail: 'var(--red)',
+  skip: 'var(--idle)',
+}
 
 const presetList = computed(() =>
   settings.presets
@@ -33,6 +40,7 @@ async function reset(scope: 'fleet' | 'all'): Promise<void> {
 
 onMounted(() => {
   settings.load()
+  settings.runDoctor()
 })
 </script>
 
@@ -107,6 +115,55 @@ onMounted(() => {
           <span class="text-[12.5px] text-[var(--red)]">Full reset</span>
           <span class="text-[11px] text-[var(--text-faint)]">golden image needs a re-bake</span>
         </button>
+      </div>
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <div class="flex items-end justify-between">
+        <div>
+          <h2 class="text-[13px] font-semibold text-[var(--text)]">Doctor</h2>
+          <p class="mt-0.5 text-[11.5px] text-[var(--text-faint)]">
+            Checks this machine's setup. Reports problems; never changes anything.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-test="doctor-run"
+          :disabled="settings.doctorRunning"
+          class="h-8 rounded-lg border border-[var(--border)] px-3 text-xs text-[var(--text-dim)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          @click="settings.runDoctor()"
+        >
+          {{ settings.doctorRunning ? 'Checking…' : 'Run checks' }}
+        </button>
+      </div>
+
+      <p
+        v-if="settings.doctorError"
+        data-test="doctor-error"
+        class="rounded-[7px] border border-[var(--red)] bg-[var(--bg-elev)] px-3 py-2 text-[11.5px] text-[var(--red)]"
+      >
+        Could not reach the engine: {{ settings.doctorError }}
+      </p>
+
+      <div v-else class="flex flex-col gap-px overflow-hidden rounded-[7px] border border-[var(--border)]">
+        <div
+          v-for="c in settings.checks"
+          :key="c.id"
+          :data-test="`check-${c.id}`"
+          class="flex items-start gap-2.5 bg-[var(--bg-elev)] px-3 py-2.5"
+        >
+          <span
+            class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+            :style="{ background: STATUS_COLOR[c.status] }"
+          />
+          <div class="flex min-w-0 flex-col">
+            <span class="text-[12.5px] text-[var(--text)]">{{ c.label }}</span>
+            <span class="font-mono text-[11px] break-words text-[var(--text-dim)]">{{ c.detail }}</span>
+            <span v-if="c.fix" class="mt-0.5 font-mono text-[11px] text-[var(--amber)]">
+              fix: {{ c.fix }}
+            </span>
+          </div>
+        </div>
       </div>
     </section>
   </div>
