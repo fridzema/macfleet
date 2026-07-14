@@ -32,6 +32,7 @@ One, deliberate, flagged for the record rather than dropped silently:
 - Pinia stores are setup-style: `defineStore('name', () => { ... return {...} })`.
 - Cross-store calls resolve the other store **lazily at call time** (`useUi()` inside a function body, not at module scope) — `fleet.ts` does this already and its comment explains why: "resolved lazily at call time so the module cycle never breaks".
 - Tests: Vitest + `@vue/test-utils`, `setActivePinia(createPinia())` in `beforeEach`, `vi.spyOn(api, '...')` to stub the client. Fakes over mocks. See `tests/unit/fleet.test.ts`.
+- **Await pending work with `flushPromises()` from `@vue/test-utils`** — the house idiom, used in 10 existing test files. Never `await new Promise(r => setTimeout(r, 0))`: it appears nowhere in this repo, and one macrotask tick does not reliably drain a chained promise the way `flushPromises` does.
 - Commands (from `desktop/`): `bun run test:unit`, `bun run test:e2e`, `make lint-desktop`, `make ci`. Coverage is currently **100%** — keep it there.
 - Conventional Commits. No `Co-authored-by`.
 
@@ -778,7 +779,7 @@ git commit -m "feat(desktop): add /settings route"
 Create `desktop/tests/unit/SettingsPage.test.ts`. Read `tests/unit/ResourcesTab.test.ts` first for the mounting style, then:
 
 ```ts
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setToastScheduler } from '../../src/composables/useToasts'
@@ -803,7 +804,7 @@ beforeEach(() => {
 describe('SettingsPage — General', () => {
   it('renders a card per engine preset with its real cpu/RAM', async () => {
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     const cards = w.findAll('[data-test^="preset-"]')
     expect(cards).toHaveLength(3)
     // Values come from the engine, not a local table.
@@ -813,7 +814,7 @@ describe('SettingsPage — General', () => {
 
   it('marks the configured default as selected', async () => {
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(w.get('[data-test="preset-standard"]').attributes('aria-checked')).toBe('true')
     expect(w.get('[data-test="preset-light"]').attributes('aria-checked')).toBe('false')
   })
@@ -823,7 +824,7 @@ describe('SettingsPage — General', () => {
       .spyOn(api, 'setConfig')
       .mockResolvedValue({ ...CONFIG, default_preset: 'heavy' as const })
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="preset-heavy"]').trigger('click')
     expect(spy).toHaveBeenCalledWith('heavy')
   })
@@ -831,7 +832,7 @@ describe('SettingsPage — General', () => {
   it('does not re-write the default that is already set', async () => {
     const spy = vi.spyOn(api, 'setConfig')
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="preset-standard"]').trigger('click')
     expect(spy).not.toHaveBeenCalled()
   })
@@ -957,9 +958,9 @@ describe('SettingsPage — Data', () => {
     vi.mocked(confirm).mockResolvedValue(false)
     const spy = vi.spyOn(api, 'resetData')
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="reset-fleet"]').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     // A stray click must never delete a fleet.
     expect(spy).not.toHaveBeenCalled()
   })
@@ -970,9 +971,9 @@ describe('SettingsPage — Data', () => {
       .spyOn(api, 'resetData')
       .mockResolvedValue({ deleted: ['mf-a'], failed: [], removed_paths: [] })
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="reset-fleet"]').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(spy).toHaveBeenCalledWith('fleet')
   })
 
@@ -982,16 +983,16 @@ describe('SettingsPage — Data', () => {
       .spyOn(api, 'resetData')
       .mockResolvedValue({ deleted: [], failed: [], removed_paths: [] })
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="reset-all"]').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(spy).toHaveBeenCalledWith('all')
   })
 
   it("warns that golden needs a re-bake in the full-reset confirmation", async () => {
     vi.mocked(confirm).mockResolvedValue(false)
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="reset-all"]').trigger('click')
     const message = String(vi.mocked(confirm).mock.calls.at(-1)?.[0])
     expect(message.toLowerCase()).toContain('re-bake')
@@ -1007,9 +1008,9 @@ describe('SettingsPage — Data', () => {
     const listSpy = vi.spyOn(api, 'listVms').mockResolvedValue([])
     vi.spyOn(api, 'listSnapshots').mockResolvedValue([])
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="reset-fleet"]').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(listSpy).toHaveBeenCalled()
   })
 })
@@ -1145,14 +1146,14 @@ describe('SettingsPage — Doctor', () => {
   it('runs the checks on mount', async () => {
     const spy = vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
     mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(spy).toHaveBeenCalled()
   })
 
   it('renders a row per check with its label and detail', async () => {
     vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(w.findAll('[data-test^="check-"]')).toHaveLength(3)
     const warm = w.get('[data-test="check-golden_warm"]')
     expect(warm.text()).toContain('Golden image warm')
@@ -1162,7 +1163,7 @@ describe('SettingsPage — Doctor', () => {
   it('shows the fix hint when the engine gives one', async () => {
     vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     expect(w.get('[data-test="check-golden_warm"]').text()).toContain('macfleet warm')
     expect(w.get('[data-test="check-arch"]').text()).not.toContain('macfleet')
   })
@@ -1170,7 +1171,7 @@ describe('SettingsPage — Doctor', () => {
   it('re-runs the checks on demand', async () => {
     const spy = vi.spyOn(api, 'doctor').mockResolvedValue(CHECKS)
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     await w.get('[data-test="doctor-run"]').trigger('click')
     expect(spy).toHaveBeenCalledTimes(2)
   })
@@ -1178,7 +1179,7 @@ describe('SettingsPage — Doctor', () => {
   it('reports an unreachable engine instead of showing an empty check list', async () => {
     vi.spyOn(api, 'doctor').mockRejectedValue(new Error('connection refused'))
     const w = mount(SettingsPage)
-    await new Promise((r) => setTimeout(r, 0))
+    await flushPromises()
     // Engine down is when a user opens Doctor — silence would be the worst answer.
     expect(w.get('[data-test="doctor-error"]').text()).toContain('connection refused')
   })
