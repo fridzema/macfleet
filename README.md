@@ -60,10 +60,13 @@ new VMs resume in a few seconds instead of cold-booting macOS.
 
 ```bash
 uv run macfleet up web              # clone mf-golden -> mf-web and boot it
+uv run macfleet up web --preset heavy # 8cpu/16GB instead of the configured default
 uv run macfleet ssh web "uname -a"  # run a command on mf-web over SSH
 uv run macfleet ls                  # list fleet VMs and their state
 uv run macfleet down web            # stop mf-web
 uv run macfleet nuke web            # stop + delete mf-web
+uv run macfleet reset               # delete every fleet VM, snapshot, and state file (keeps mf-golden)
+uv run macfleet reset --all         # also delete mf-golden and reset settings — forces a re-bake
 uv run macfleet bake                # print the golden-image bake checklist
 uv run macfleet serve               # start the local API (for the future desktop app)
 
@@ -94,6 +97,34 @@ resumed one). `macfleet up`/`create` also accept a TTL lease so short-lived VMs 
 reaped automatically instead of accumulating. Reaping is lazy (`list_vms()` sweeps on
 every call) with `macfleet serve` additionally running it on a 60s interval as a
 backstop, and `macfleet reap` / `POST /reap` trigger a sweep on demand.
+
+## Config, doctor & reset
+
+`macfleet up`'s VM size (cpu + RAM only) comes from one of three engine-owned
+presets stored in `~/.macfleet/config.json`: `light` (2cpu/4GB), `standard`
+(4cpu/8GB, the default), `heavy` (8cpu/16GB). `--preset` overrides the configured
+default for one VM. Disk is deliberately not a preset field — `tart set --disk-size`
+is grow-only and `mf-golden` already ships an ~80GB disk. `macfleet reset [--all]`
+deletes every fleet VM, snapshot, and state file after a confirmation prompt, and
+exits non-zero if any VM fails to delete; plain `reset` keeps `mf-golden`, `--all`
+also deletes it and resets settings, so golden needs a full re-bake afterwards.
+
+The API additionally serves `GET`/`PUT /config`, `GET /doctor` (eight on-demand
+checks — architecture, `tart` installed, golden image present/warm, screen recording
+permission, leaked temporary VMs, stale leases, disk space — diagnosis only, it
+repairs nothing), and `POST /data/reset` (same semantics as `macfleet reset`).
+
+## Files
+
+macfleet keeps its state under `~/.macfleet/`:
+
+- `config.json` — settings (`default_preset`)
+- `state.json` — TTL leases + suspended set
+- `shares.json` — per-VM shared folders
+- `activity.jsonl` — agent activity ring buffer
+- `engine.log`, `engine.log.1` — the desktop app's engine sidecar output, current
+  and previous run (rotated on each launch)
+- `operations/` — per-VM flock files
 
 ## Computer-use safety gate
 
