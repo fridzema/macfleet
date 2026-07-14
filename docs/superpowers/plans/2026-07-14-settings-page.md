@@ -33,7 +33,8 @@ One, deliberate, flagged for the record rather than dropped silently:
 - Cross-store calls resolve the other store **lazily at call time** (`useUi()` inside a function body, not at module scope) — `fleet.ts` does this already and its comment explains why: "resolved lazily at call time so the module cycle never breaks".
 - Tests: Vitest + `@vue/test-utils`, `setActivePinia(createPinia())` in `beforeEach`, `vi.spyOn(api, '...')` to stub the client. Fakes over mocks. See `tests/unit/fleet.test.ts`.
 - **Await pending work with `flushPromises()` from `@vue/test-utils`** — the house idiom, used in 10 existing test files. Never `await new Promise(r => setTimeout(r, 0))`: it appears nowhere in this repo, and one macrotask tick does not reliably drain a chained promise the way `flushPromises` does.
-- Commands (from `desktop/`): `bun run test:unit`, `bun run test:e2e`, `make lint-desktop`, `make ci`. Coverage is currently **100%** — keep it there.
+- Commands (from `desktop/`): `bun run test:unit`, `bun run test:e2e`, `make lint-desktop`, `make ci`.
+- Coverage gates are **lines 95 / branches 90 / functions 85 / statements 92** (`desktop/vitest.config.ts`), not 100. Its comment says why: "A blanket 100% requirement made the coverage command permanently red despite >95% line coverage." Do not chase 100%; do not let your additions drop the suite below the configured gates.
 - Conventional Commits. No `Co-authored-by`.
 
 ---
@@ -675,7 +676,7 @@ Expected: **no output.** Any hit means a second copy of the table survived and t
 - [ ] **Step 7: Typecheck, lint, coverage**
 
 Run: `cd desktop && bun run build && make lint-desktop && bun run test:unit -- --coverage`
-Expected: clean; coverage stays at 100%
+Expected: clean; coverage stays above the configured gates (95/90/85/92)
 
 - [ ] **Step 8: Commit**
 
@@ -1733,7 +1734,7 @@ Expected: PASS, including the pre-existing specs (the fleet store now fetches `/
 - [ ] **Step 4: Full CI gate**
 
 Run: `cd desktop && make ci`
-Expected: everything green, unit coverage still 100%
+Expected: everything green, unit coverage still above the configured gates
 
 - [ ] **Step 5: Commit**
 
