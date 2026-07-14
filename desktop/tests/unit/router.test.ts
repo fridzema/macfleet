@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import router from '../../src/router'
 
 describe('router', () => {
-  it('defines 3 routes', () => {
+  it('defines 4 routes', () => {
     const routes = router.options.routes
-    expect(routes).toHaveLength(3)
+    expect(routes).toHaveLength(4)
   })
 
   it('has home route at /', () => {
@@ -21,8 +21,15 @@ describe('router', () => {
     expect(typeof about.component).toBe('function')
   })
 
+  it('has settings route at /settings', () => {
+    const settings = router.options.routes[2]
+    expect(settings.path).toBe('/settings')
+    expect(settings.name).toBe('settings')
+    expect(typeof settings.component).toBe('function')
+  })
+
   it('has catch-all not-found route', () => {
-    const notFound = router.options.routes[2]
+    const notFound = router.options.routes[3]
     expect(notFound.path).toBe('/:pathMatch(.*)*')
     expect(notFound.name).toBe('not-found')
     expect(typeof notFound.component).toBe('function')
