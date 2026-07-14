@@ -6,6 +6,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,6 +86,12 @@ class ConfigRequest(BaseModel):
     default_preset: str = Field(min_length=1, max_length=64)
 
 
+class ResetRequest(BaseModel):
+    # Literal, not str: an unknown scope is rejected by pydantic (422) before any VM is
+    # touched, rather than after the sweep has started.
+    scope: Literal["fleet", "all"] = "fleet"
+
+
 def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
               token: str | None = None, suspend_vms_on_exit: bool = False) -> FastAPI:
     fleet = fleet or Fleet()
@@ -159,6 +166,10 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     def doctor() -> dict:
         # Shells out to tart, so keep it off the event loop.
         return {"checks": run_checks(fleet)}
+
+    @api.post("/data/reset")
+    def reset_data(req: ResetRequest) -> dict:
+        return fleet.reset_data(req.scope)
 
     @api.get("/fleet/events")
     async def fleet_events(request: Request) -> StreamingResponse:

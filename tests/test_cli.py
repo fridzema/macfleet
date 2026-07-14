@@ -11,6 +11,10 @@ class FakeFleet:
     def up(self, name, preset=None): self.calls.append(("up", name, preset))
     def nuke(self, name): self.calls.append(("nuke", name))
 
+    def reset_data(self, scope):
+        self.calls.append(("reset_data", scope))
+        return {"deleted": ["mf-a"], "failed": [], "removed_paths": ["/x/state.json"]}
+
 
 def test_up_invokes_fleet(monkeypatch):
     fake = FakeFleet()
@@ -116,3 +120,37 @@ def test_restart_command(monkeypatch):
     result = runner.invoke(cli.app, ["restart", "web"])
     assert result.exit_code == 0
     assert calls["restart"] == "web"
+
+
+def test_reset_aborts_without_confirmation(monkeypatch):
+    fake = FakeFleet()
+    monkeypatch.setattr(cli, "_fleet", lambda: fake)
+    result = runner.invoke(cli.app, ["reset"], input="n\n")
+    assert result.exit_code != 0
+    assert fake.calls == []
+
+
+def test_reset_fleet_scope_on_confirm(monkeypatch):
+    fake = FakeFleet()
+    monkeypatch.setattr(cli, "_fleet", lambda: fake)
+    result = runner.invoke(cli.app, ["reset"], input="y\n")
+    assert result.exit_code == 0
+    assert ("reset_data", "fleet") in fake.calls
+    assert "deleted mf-a" in result.output
+
+
+def test_reset_all_scope(monkeypatch):
+    fake = FakeFleet()
+    monkeypatch.setattr(cli, "_fleet", lambda: fake)
+    result = runner.invoke(cli.app, ["reset", "--all"], input="y\n")
+    assert result.exit_code == 0
+    assert ("reset_data", "all") in fake.calls
+
+
+def test_reset_exits_nonzero_when_a_vm_fails(monkeypatch):
+    fake = FakeFleet()
+    fake.reset_data = lambda scope: {
+        "deleted": [], "failed": [{"name": "mf-a", "error": "busy"}], "removed_paths": []}
+    monkeypatch.setattr(cli, "_fleet", lambda: fake)
+    result = runner.invoke(cli.app, ["reset"], input="y\n")
+    assert result.exit_code == 1

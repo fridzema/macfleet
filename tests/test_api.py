@@ -443,3 +443,30 @@ def test_doctor_returns_checks(monkeypatch):
     body = client.get("/doctor").json()
     assert body == {"checks": [{"id": "arch", "label": "Apple silicon",
                                 "status": "ok", "detail": "arm64", "fix": None}]}
+
+
+def test_reset_defaults_to_fleet_scope():
+    fake = FakeFleet()
+    seen = []
+    fake.reset_data = lambda scope: seen.append(scope) or {
+        "deleted": ["mf-a"], "failed": [], "removed_paths": []}
+    client = TestClient(build_app(fake))
+    body = client.post("/data/reset", json={}).json()
+    assert seen == ["fleet"]
+    assert body["deleted"] == ["mf-a"]
+
+
+def test_reset_accepts_all_scope():
+    fake = FakeFleet()
+    seen = []
+    fake.reset_data = lambda scope: seen.append(scope) or {
+        "deleted": [], "failed": [], "removed_paths": []}
+    client = TestClient(build_app(fake))
+    client.post("/data/reset", json={"scope": "all"})
+    assert seen == ["all"]
+
+
+def test_reset_rejects_unknown_scope_as_422():
+    # Literal typing means pydantic rejects it before the engine is ever called.
+    client = TestClient(build_app(FakeFleet()))
+    assert client.post("/data/reset", json={"scope": "everything"}).status_code == 422
