@@ -13,9 +13,11 @@ def _fleet() -> Fleet:
 
 
 @app.command()
-def up(name: str) -> None:
+def up(name: str,
+       preset: str | None = typer.Option(
+           None, "--preset", help="light | standard | heavy (default: configured)")) -> None:
     """Clone mf-golden -> mf-<name> and boot it."""
-    _fleet().up(name)
+    _fleet().up(name, preset=preset)
     typer.echo(f"up: mf-{name}")
 
 

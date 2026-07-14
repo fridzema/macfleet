@@ -8,7 +8,7 @@ class FakeFleet:
     def __init__(self):
         self.calls = []
 
-    def up(self, name): self.calls.append(("up", name))
+    def up(self, name, preset=None): self.calls.append(("up", name, preset))
     def nuke(self, name): self.calls.append(("nuke", name))
 
 
@@ -17,7 +17,15 @@ def test_up_invokes_fleet(monkeypatch):
     monkeypatch.setattr(cli, "_fleet", lambda: fake)
     result = runner.invoke(cli.app, ["up", "web"])
     assert result.exit_code == 0
-    assert ("up", "web") in fake.calls
+    assert ("up", "web", None) in fake.calls
+
+
+def test_up_passes_preset_flag(monkeypatch):
+    fake = FakeFleet()
+    monkeypatch.setattr(cli, "_fleet", lambda: fake)
+    result = runner.invoke(cli.app, ["up", "web", "--preset", "heavy"])
+    assert result.exit_code == 0
+    assert ("up", "web", "heavy") in fake.calls
 
 
 def test_bake_prints_checklist():
