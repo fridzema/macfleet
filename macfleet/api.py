@@ -80,6 +80,10 @@ class ExecRequest(BaseModel):
     command: str = Field(max_length=1_000_000)
 
 
+class ConfigRequest(BaseModel):
+    default_preset: str = Field(min_length=1, max_length=64)
+
+
 def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
               token: str | None = None, suspend_vms_on_exit: bool = False) -> FastAPI:
     fleet = fleet or Fleet()
@@ -139,6 +143,16 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     @api.get("/vms")
     def list_vms() -> list[dict]:
         return fleet.list_vms()
+
+    @api.get("/config")
+    def get_config() -> dict:
+        return fleet.config.read()
+
+    @api.put("/config")
+    def put_config(req: ConfigRequest) -> dict:
+        # An unknown preset raises RuntimeError -> 409 via the handler above.
+        fleet.config.set_default_preset(req.default_preset)
+        return fleet.config.read()
 
     @api.get("/fleet/events")
     async def fleet_events(request: Request) -> StreamingResponse:
