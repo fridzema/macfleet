@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -11,8 +13,11 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from typing import Any
 
+from macfleet._lock import state_lock
 from macfleet.activity import Activity, default_activity_path
 from macfleet.leases import Leases, default_state_path
 from macfleet.shares import Shares, default_shares_path
@@ -56,6 +61,20 @@ def _spawn(argv: list[str]) -> "subprocess.Popen[bytes]":
     # returned so Fleet can reap it once the VM stops (see Fleet._boot).
     return subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)
+
+
+def _spawn_restore(argv: list[str]) -> "subprocess.Popen[bytes]":
+    """Spawn a resume attempt with diagnostics retained in an anonymous temporary file.
+
+    The restore probe must distinguish the one known un-restorable VZ failure from unrelated
+    launch failures before it discards saved state. A file avoids an unread PIPE blocking a
+    long-lived successful `tart run`.
+    """
+    diagnostic = tempfile.TemporaryFile()
+    child = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=diagnostic,
+                             start_new_session=True)
+    child._macfleet_diagnostic = diagnostic  # type: ignore[attr-defined]
+    return child
 
 
 def ssh_cmd(ip: str, remote_cmd: str) -> list[str]:
@@ -158,13 +177,16 @@ _PROVISION_PHASES: tuple[tuple[str, str], ...] = (
 _PROVISION_LINGER = 2.0
 _PROVISION_TTL = 180.0
 
-# A VZ restore failure ("failed to restore … invalid argument") exits `tart run` in ~2-3s, whereas
-# a successful boot runs for the VM's lifetime. A resume watches its child for this long (in the
-# background, so resume() stays non-blocking); if the child already died, the saved suspend state
-# is un-restorable (common after a host macOS update, or when the framework simply refuses the
-# state) — discard it and cold-boot so the VM comes up instead of silently staying suspended. The
-# margin is generous over the observed ~2-3s so a slow failure isn't missed.
-_RESTORE_PROBE_SECONDS = 5.0
+# VZ restore failures are not consistently prompt: real hardware has produced the diagnostic
+# more than five seconds after `tart run` started. A successful boot runs for the VM's lifetime,
+# so retain the child briefly and inspect it after a conservative bounded window. If it died with
+# the exact known signature, discard only the unusable saved state and cold-boot; any other launch
+# failure preserves that state. This is synchronous so a short-lived CLI worker cannot disappear
+# before recovery executes.
+_RESTORE_PROBE_SECONDS = 15.0
+_IP_CACHE_TTL = 15.0
+_RESOURCE_CACHE_TTL = 30.0
+_RESTORE_FAILURE_MARKERS = ("failed to restore", "invalid argument")
 
 
 class Fleet:
@@ -175,7 +197,9 @@ class Fleet:
                  clock: Callable[[], float] = time.time,
                  activity: Activity | None = None,
                  shares: Shares | None = None,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] = time.sleep,
+                 monotonic: Callable[[], float] = time.monotonic,
+                 operation_lock_dir: str | None = None) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
@@ -184,8 +208,11 @@ class Fleet:
         self._shares = shares or Shares(default_shares_path())
         self._clock = clock
         self._sleep = sleep
+        self._monotonic = monotonic
+        self._operation_lock_dir = Path(operation_lock_dir or self._leases.storage_dir) / "operations"
         self.activity = activity or Activity(default_activity_path())
         self._res_cache: dict[str, dict] = {}
+        self._res_cache_at: dict[str, float] = {}
         # Handles for backgrounded `tart run` children, kept so their zombies are reaped once
         # the VM stops (a detached `tart run` stays a direct child of the engine, so nothing
         # reaps its defunct entry otherwise). Swept on every boot; see _boot.
@@ -195,10 +222,11 @@ class Fleet:
         # every /vms poll, and screenshot/exec/ssh hit it too. Cache it and drop the entry
         # on any op that stops or renames the VM (invalidated in down/nuke/suspend/resume/
         # rename), so the next call re-resolves against the fresh boot.
-        self._ip_cache: dict[str, str] = {}
+        self._ip_cache: dict[str, tuple[float, str]] = {}
         # The guest gateway rotates its command token on every boot. Cache it for the
         # lifetime of that boot and invalidate it alongside the IP on every lifecycle op.
         self._control_tokens: dict[str, str] = {}
+        self._control_token_ips: dict[str, str] = {}
         # Coalesce bursts from the event stream, mutation-triggered refreshes, and fallback
         # polling. Tart state is refreshed at most once per second; guest health has its own
         # adaptive TTL so a stable fleet does not probe every VM on every UI update.
@@ -211,6 +239,24 @@ class Fleet:
         # nuke. `_started_at`/`_done_at` are internal bookkeeping, stripped from the public view.
         self._provision: dict[str, dict] = {}
         self._provision_lock = threading.Lock()
+        # The file locks coordinate CLI, MCP, and API processes. The in-process locks make the
+        # critical sections re-entrant-safe and avoid relying on platform-specific flock behavior
+        # between threads in one process.
+        self._operation_locks = [threading.RLock() for _ in range(64)]
+
+    @contextmanager
+    def _locked_vms(self, *full_names: str):
+        names = sorted(set(full_names))
+        with ExitStack() as stack:
+            digests = {name: hashlib.sha256(name.encode()).hexdigest() for name in names}
+            # Acquire striped thread locks by stripe number, independent of VM-name ordering,
+            # so hash collisions cannot invert lock order between multi-VM operations.
+            for stripe in sorted({int(digest[:8], 16) % 64 for digest in digests.values()}):
+                stack.enter_context(self._operation_locks[stripe])
+            for name in names:
+                digest = digests[name]
+                stack.enter_context(state_lock(str(self._operation_lock_dir / digest)))
+            yield
 
     def _state(self, full: str) -> str:
         return self.tart.get_config(full)["State"]
@@ -223,42 +269,119 @@ class Fleet:
         return {"cpu": c.get("CPU"), "memory_mb": c.get("Memory"), "disk_gb": c.get("Disk")}
 
     def suspend(self, name: str) -> None:
-        ensure_mutable(name)
-        self.tart.suspend(fullname(name))
-        self._forget_ip(fullname(name))
-        self._leases.suspend(fullname(name))
-        self._invalidate_fleet(fullname(name))
+        full = ensure_mutable(name)
+        with self._locked_vms(full):
+            self.tart.suspend(full)
+            self._forget_ip(full)
+            self._leases.suspend(full)
+            self._invalidate_fleet(full)
 
     def resume(self, name: str) -> None:
         full = fullname(name)
         ensure_mutable(name)
-        self._forget_ip(full)
-        self._resume_or_coldboot(full)
-        self._leases.unsuspend(full)
-        self._invalidate_fleet(full)
+        with self._locked_vms(full):
+            self._forget_ip(full)
+            # Clear the intentional-suspend marker before probing the launch. A generic
+            # launch failure puts it back; doing this afterwards would erase that diagnosis.
+            self._leases.unsuspend(full)
+            self._resume_or_coldboot(full, preserve_suspend_on_failure=True)
+            self._invalidate_fleet(full)
 
-    def _resume_or_coldboot(self, full: str) -> None:
-        """Boot `full`, restoring its suspend state. If the restore fails, a background watcher
-        discards the un-restorable state and cold-boots so the VM still comes up rather than
-        silently staying suspended. Non-blocking: resume() returns as soon as `tart run` is spawned."""
+    def _resume_or_coldboot(self, full: str, *, preserve_suspend_on_failure: bool) -> None:
+        """Boot `full`, restoring its suspend state when possible.
+
+        Probe the child synchronously so short-lived CLI/API workers cannot exit before restore
+        recovery runs. Only Tart's known un-restorable VZ error triggers a cold boot; unrelated
+        launch failures preserve the saved state for a later retry.
+        """
         argv = self._run_argv(full)
         self._spawned = [p for p in self._spawned if p.poll() is None]
-        child = self._spawn(argv)
+        child = _spawn_restore(argv) if self._spawn is _spawn else self._spawn(argv)
         if child is None:  # injected test spawn — nothing to watch
             return
         self._spawned.append(child)
-        threading.Thread(
-            target=self._coldboot_if_restore_failed, args=(full, argv, child), daemon=True
-        ).start()
+        self._coldboot_if_restore_failed(
+            full, argv, child, preserve_suspend_on_failure=preserve_suspend_on_failure
+        )
 
-    def _coldboot_if_restore_failed(self, full: str, argv: list[str], child: Any) -> None:
-        self._sleep(_RESTORE_PROBE_SECONDS)
-        if child.poll() is not None and (child.returncode or 0) != 0:
+    def _restore_ready(self, full: str, timeout: float) -> bool:
+        """Probe guest readiness without using the normal IP cache or two-second status timeout."""
+        try:
+            deadline = self._monotonic() + timeout
+            ip = self.tart.ip(full, timeout=timeout)
+            if not ip:
+                return False
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                return False
+            with urllib.request.urlopen(
+                f"http://{ip}:{SERVER_PORT}/status", timeout=remaining
+            ) as resp:
+                return b"ok" in resp.read()
+        except Exception:
+            return False
+
+    def _coldboot_if_restore_failed(
+        self, full: str, argv: list[str], child: Any, *, preserve_suspend_on_failure: bool = True
+    ) -> None:
+        diagnostic = getattr(child, "_macfleet_diagnostic", None)
+
+        def close_diagnostic() -> None:
+            if diagnostic is not None:
+                diagnostic.close()
+                child._macfleet_diagnostic = None
+
+        # Warm restores normally expose their guest status in a couple of seconds, so do not
+        # impose the full slow-failure safety window on the common path. A failed status probe
+        # drops the IP cache because DHCP may still replace a stale address from saved state.
+        interval = 0.25
+        health_interval = 1.0
+        deadline = self._monotonic() + _RESTORE_PROBE_SECONDS
+        next_health = self._monotonic() + health_interval
+        while self._monotonic() < deadline:
+            if child.poll() is not None:
+                break
+            now = self._monotonic()
+            if now >= next_health:
+                remaining = deadline - now
+                if remaining <= 0:
+                    break
+                if self._restore_ready(full, min(interval, remaining)):
+                    close_diagnostic()
+                    return
+                next_health = self._monotonic() + health_interval
+            remaining = deadline - self._monotonic()
+            if remaining > 0:
+                self._sleep(min(interval, remaining))
+
+        if child.poll() is None:
+            close_diagnostic()
+            return
+
+        if (child.returncode or 0) == 0:
+            close_diagnostic()
+            return
+        message = ""
+        if diagnostic is not None:
+            try:
+                diagnostic.seek(0)
+                message = diagnostic.read(64 * 1024).decode(errors="replace").lower()
+            finally:
+                diagnostic.close()
+        # Never destroy saved state for a generic early launch failure. Only Tart's known VZ
+        # restore signature proves that the state itself is unusable.
+        if all(marker in message for marker in _RESTORE_FAILURE_MARKERS):
             try:
                 self.tart.stop(full)  # drop the un-restorable saved state
             except RuntimeError:
                 pass
             self._boot(argv)  # cold boot
+        elif preserve_suspend_on_failure:
+            # resume() optimistically cleared this marker when it launched Tart. Restore it when
+            # the launch failed without consuming the saved state, so the UI remains truthful and
+            # a later resume can retry.
+            self._leases.suspend(full)
+            self._invalidate_fleet(full)
 
     def suspend_all(self) -> list[str]:
         """Suspend every running fleet VM (mf-* except golden) — used by the desktop app on
@@ -272,7 +395,11 @@ class Fleet:
 
         def _suspend(full: str) -> str | None:
             try:
-                self.tart.suspend(full)
+                with self._locked_vms(full):
+                    self.tart.suspend(full)
+                    self._forget_ip(full)
+                    self._leases.suspend(full)
+                    self._invalidate_fleet(full)
                 return full
             except RuntimeError:
                 return None
@@ -280,11 +407,6 @@ class Fleet:
         # `tart suspend` is the slow part (writes VM memory to disk) — run it concurrently.
         with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
             done = [full for full in pool.map(_suspend, targets) if full]
-        # Lease writes are a read-modify-write of state.json, so do them serially after the
-        # pool to avoid clobbering the file.
-        for full in done:
-            self._forget_ip(full)
-            self._leases.suspend(full)
         return done
 
     def _prov_init(self, full: str) -> None:
@@ -363,19 +485,32 @@ class Fleet:
                memory: int | None = None, disk: int | None = None) -> None:
         target = ensure_mutable(name)
         validate_name(name)
+        # Lock the destination only: clones from the same golden/snapshot source are safe to run
+        # concurrently and fleet spin-up should not serialize on a shared read-only source.
+        with self._locked_vms(target):
+            self._create_unlocked(name, from_snapshot=from_snapshot, ttl=ttl, cpu=cpu,
+                                  memory=memory, disk=disk)
+
+    def _create_unlocked(self, name: str, from_snapshot: str | None = None,
+                         ttl: float | None = None, cpu: int | None = None,
+                         memory: int | None = None, disk: int | None = None) -> None:
+        target = ensure_mutable(name)
         # One `tart list`, reused for both the reclaim check and the existence check.
         # Deliberately NOT a full self.reap(): reaping every expired lease here would make
         # an unrelated expired VM's (slow) graceful stop block this create. The API's
         # background reap loop and list_vms() sweep those; create only needs to reclaim the
         # ONE name it's about to take if a lease on it already expired.
-        existing = {v.name for v in self.tart.list()}
+        inventory = {v.name: v for v in self.tart.list()}
+        existing = set(inventory)
         if target in existing and target in set(self._leases.expired(self._clock())):
             try:
-                self.nuke(shortname(target))
+                self._nuke_unlocked(shortname(target))
             except RuntimeError:
-                pass
-            self._leases.drop(target)
+                # Preserve the lease so the background reaper retries. Do not pretend the name
+                # is free: clone cleanup must never delete a target we failed to reclaim.
+                raise RuntimeError(f"expired VM {shortname(target)} could not be reclaimed") from None
             existing.discard(target)
+            inventory.pop(target, None)
         # Init after the reclaim above (whose nuke would otherwise drop a fresh record).
         self._prov_init(target)
         cloned = target not in existing
@@ -410,8 +545,20 @@ class Fleet:
         else:
             self._prov_set(target, "clone", "skipped")
             self._prov_set(target, "configure", "skipped")
-        # background `tart run` so it doesn't block the caller
-        self._boot(self._run_argv(target))
+        existing_vm = inventory.get(target)
+        if existing_vm is None or existing_vm.state != "running":
+            # A clone inherits its source's saved-state shape. Existing stopped VMs still use the
+            # guarded probe, but generic failures only restore a suspend marker for actual saved
+            # state rather than for an ordinary cold launch.
+            source_name = f"mfsnap-{from_snapshot}" if from_snapshot else GOLDEN
+            source = inventory.get(source_name)
+            restoring_saved_state = (
+                existing_vm.state == "suspended" if existing_vm is not None
+                else source is not None and source.state == "suspended"
+            )
+            self._resume_or_coldboot(
+                target, preserve_suspend_on_failure=restoring_saved_state
+            )
         self._prov_set(target, "boot", "active")
         if ttl is not None:
             self._leases.record(target, ttl)
@@ -448,16 +595,24 @@ class Fleet:
 
     def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
         now = self._clock()
-        names = {v.name for v in (existing if existing is not None else self.tart.list())}
         reaped = []
         for full in self._leases.expired(now):
-            if full in names:
-                try:
-                    self.nuke(shortname(full))
-                except RuntimeError:
-                    pass
-            self._leases.drop(full)
-            reaped.append(full)
+            with self._locked_vms(full):
+                # Candidate discovery happened before this potentially-contended lock. Renewals
+                # and name reuse must win over the stale candidate rather than losing a fresh VM.
+                if not self._leases.is_expired(full, now):
+                    continue
+                live_names = {v.name for v in self.tart.list()}
+                if full in live_names:
+                    try:
+                        self._nuke_unlocked(shortname(full))
+                    except RuntimeError:
+                        # A transient stop/delete error must not turn a leased VM into a permanent
+                        # orphan. Keep the lease so the next sweep retries it.
+                        continue
+                else:
+                    self._leases.drop(full)
+                reaped.append(full)
         return reaped
 
     def list_vms(self) -> list[dict]:
@@ -468,6 +623,14 @@ class Fleet:
         vms = self.tart.list()
         reaped = set(self.reap(existing=vms))
         vms = [v for v in vms if v.name not in reaped]
+        live_names = {v.name for v in vms}
+        # The desktop API is long-lived while CLI/MCP clients can mutate Tart in separate
+        # processes. Drop entries for names that disappeared so an externally recreated VM
+        # cannot inherit stale IP, token, health, or resource data.
+        for cache in (self._res_cache, self._res_cache_at, self._ip_cache,
+                      self._control_tokens, self._control_token_ips, self._health_cache):
+            for stale in set(cache) - live_names:
+                cache.pop(stale, None)
         # Health-check running VMs concurrently — each check is a network round-trip to
         # the guest, so doing them sequentially made /vms scale with fleet size and stall
         # under screenshot load. Parallel keeps the list responsive.
@@ -480,7 +643,8 @@ class Fleet:
                 health[vm.name] = cached[1]
             else:
                 to_probe.append(vm)
-        uncached = [v for v in vms if v.name not in self._res_cache]
+        uncached = [v for v in vms if v.name not in self._res_cache
+                    or now - self._res_cache_at.get(v.name, 0.0) >= _RESOURCE_CACHE_TTL]
         if to_probe or uncached:
             with ThreadPoolExecutor(max_workers=min(8, len(vms))) as pool:
                 if to_probe:
@@ -495,10 +659,13 @@ class Fleet:
                 for name, res in pool.map(lambda v: (v.name, self._fetch_config(v.name)), uncached):
                     if res is not None:
                         self._res_cache[name] = res
+                        self._res_cache_at[name] = now
         suspended = self._leases.suspended()
+        expiries = self._leases.expiries()
         result = [{"name": v.name,
                    "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
                    "source": v.source, "healthy": health.get(v.name, False),
+                   **({"lease_expires_at": expiries[v.name]} if v.name in expiries else {}),
                    **self._res_cache.get(v.name, {"cpu": None, "memory_mb": None, "disk_gb": None})}
                   for v in vms]
         # Advance any in-flight create steppers from the state/health just computed, then sweep
@@ -516,58 +683,69 @@ class Fleet:
         return result
 
     def down(self, name: str) -> None:
-        ensure_mutable(name)
-        self.tart.stop(fullname(name))
-        self._forget_ip(fullname(name))
-        self._leases.unsuspend(fullname(name))
-        self._invalidate_fleet(fullname(name))
+        full = ensure_mutable(name)
+        with self._locked_vms(full):
+            self.tart.stop(full)
+            self._forget_ip(full)
+            self._leases.unsuspend(full)
+            self._invalidate_fleet(full)
 
     def restart(self, name: str) -> None:
         """Stop mf-<name> and boot it again — the way to apply a shared-folder change to a
         running VM (shares only take effect on `tart run`)."""
         ensure_mutable(name)
         full = fullname(name)
+        with self._locked_vms(full):
+            try:
+                self.tart.stop(full)
+            except RuntimeError:
+                pass
+            self._forget_ip(full)
+            self._leases.unsuspend(full)
+            self._boot(self._run_argv(full))
+            self._invalidate_fleet(full)
+
+    def nuke(self, name: str) -> None:
+        full = ensure_mutable(name)
+        with self._locked_vms(full):
+            self._nuke_unlocked(name)
+
+    def _nuke_unlocked(self, name: str) -> None:
+        full = ensure_mutable(name)
         try:
             self.tart.stop(full)
         except RuntimeError:
             pass
+        self.tart.delete(full)
+        self._res_cache.pop(full, None)
+        self._res_cache_at.pop(full, None)
         self._forget_ip(full)
         self._leases.unsuspend(full)
-        self._boot(self._run_argv(full))
-        self._invalidate_fleet(full)
-
-    def nuke(self, name: str) -> None:
-        ensure_mutable(name)
-        try:
-            self.tart.stop(fullname(name))
-        except RuntimeError:
-            pass
-        self.tart.delete(fullname(name))
-        self._res_cache.pop(fullname(name), None)
-        self._forget_ip(fullname(name))
-        self._leases.unsuspend(fullname(name))
-        self._shares.drop(fullname(name))
+        self._leases.drop(full)
+        self._shares.drop(full)
         with self._provision_lock:
-            self._provision.pop(fullname(name), None)
-        self._invalidate_fleet(fullname(name))
+            self._provision.pop(full, None)
+        self._invalidate_fleet(full)
 
     def ip(self, name: str) -> str:
         full = fullname(name)
         cached = self._ip_cache.get(full)
-        if cached:
-            return cached
+        now = time.monotonic()
+        if cached and now < cached[0]:
+            return cached[1]
         ip = self.tart.ip(full)
         if not ip:
             # `tart ip` exits 0 with empty output while the guest network is still coming up.
             # Returning "" would silently build `admin@` / `http://:8000` URLs that fail with
             # a baffling error; raise a clear one instead so callers (and the API 409) say why.
             raise RuntimeError(f"{shortname(full)} has no IP yet — is it running?")
-        self._ip_cache[full] = ip
+        self._ip_cache[full] = (now + _IP_CACHE_TTL, ip)
         return ip
 
     def _forget_ip(self, full: str) -> None:
         self._ip_cache.pop(full, None)
         self._control_tokens.pop(full, None)
+        self._control_token_ips.pop(full, None)
 
     def _invalidate_fleet(self, full: str | None = None) -> None:
         with self._cache_lock:
@@ -619,7 +797,9 @@ class Fleet:
                 raise RuntimeError(f"shared folder not found: {host_path}")
             normalized.append({"tag": tag, "host_path": host_path,
                                "read_only": bool(s.get("read_only", True))})
-        self._shares.set(fullname(name), normalized)
+        full = fullname(name)
+        with self._locked_vms(full):
+            self._shares.set(full, normalized)
 
     def ssh(self, name: str, remote_cmd: str, retries: int = 3, backoff: float = 2.0,
             sleep: Callable[[float], None] = time.sleep) -> str:
@@ -660,21 +840,30 @@ class Fleet:
         src = ensure_mutable(name)
         validate_label(label)
         sid = f"mfsnap-{shortname(name)}-{label}"
-        if sid in {v.name for v in self.tart.list()}:
-            raise RuntimeError(f"snapshot {shortname(name)}-{label} already exists")
-        was_running = self._state(src) == "running"
-        if was_running:
-            try:
-                self.tart.suspend(src)
-            except RuntimeError:
-                self.tart.stop(src)  # clean-disk fallback if the image can't suspend
-        try:
-            self.tart.clone(src, sid)
-        finally:
-            # A failed clone must not turn a snapshot attempt into an outage.
+        with self._locked_vms(src, sid):
+            listed = self.tart.list()
+            if sid in {v.name for v in listed}:
+                raise RuntimeError(f"snapshot {shortname(name)}-{label} already exists")
+            source = next((v for v in listed if v.name == src), None)
+            source_state = source.state if source is not None else self._state(src)
+            was_suspended = src in self._leases.suspended() or source_state == "suspended"
+            was_running = source_state == "running" and not was_suspended
+            source_has_saved_state = was_suspended
             if was_running:
-                self._boot(self._run_argv(src))  # resume original
-                self._leases.unsuspend(src)
+                try:
+                    self.tart.suspend(src)
+                    source_has_saved_state = True
+                except RuntimeError:
+                    self.tart.stop(src)  # clean-disk fallback if the image can't suspend
+            try:
+                self.tart.clone(src, sid)
+            finally:
+                # A failed clone must not turn a snapshot attempt into an outage.
+                if was_running:
+                    self._leases.unsuspend(src)
+                    self._resume_or_coldboot(
+                        src, preserve_suspend_on_failure=source_has_saved_state
+                    )  # resume original
         return f"{shortname(name)}-{label}"
 
     def snapshots(self) -> list[dict]:
@@ -689,7 +878,9 @@ class Fleet:
         return out
 
     def delete_snapshot(self, snapshot_id: str) -> None:
-        self.tart.delete(f"mfsnap-{snapshot_id}")
+        full = f"mfsnap-{snapshot_id}"
+        with self._locked_vms(full):
+            self.tart.delete(full)
 
     def computer(self, name: str) -> GuestControl:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
@@ -700,50 +891,65 @@ class Fleet:
 
     def _guest_client(self, name: str) -> GuestControl:
         full = ensure_mutable(name)
+        ip = self.ip(name)
         token = self._control_tokens.get(full)
-        if token is None:
+        if token is None or self._control_token_ips.get(full) != ip:
             token = self.ssh(name, "cat ~/.macfleet-control-token").strip()
             if not token:
                 raise RuntimeError(
                     "guest control token unavailable — re-bake the golden image"
                 )
             self._control_tokens[full] = token
-        return GuestControl(f"http://{self.ip(name)}:{SERVER_PORT}", token=token)
+            self._control_token_ips[full] = ip
+        return GuestControl(f"http://{ip}:{SERVER_PORT}", token=token)
 
     def rename(self, old: str, new: str) -> None:
-        ensure_mutable(old)
-        ensure_mutable(new)
+        old_full = ensure_mutable(old)
+        new_full = ensure_mutable(new)
         validate_name(new)
-        self.tart.rename(fullname(old), fullname(new))
-        self._res_cache.pop(fullname(old), None)
-        self._forget_ip(fullname(old))
-        self._leases.rename(fullname(old), fullname(new))
-        self._shares.rename(fullname(old), fullname(new))
-        self._invalidate_fleet(fullname(old))
+        with self._locked_vms(old_full, new_full):
+            self.tart.rename(old_full, new_full)
+            self._res_cache.pop(old_full, None)
+            self._res_cache_at.pop(old_full, None)
+            self._forget_ip(old_full)
+            self._leases.rename(old_full, new_full)
+            self._shares.rename(old_full, new_full)
+            self._invalidate_fleet(old_full)
 
     def duplicate(self, name: str, new: str) -> None:
         src = ensure_mutable(name)
-        ensure_mutable(new)
+        dst = ensure_mutable(new)
         validate_name(new)
-        was_running = self._state(src) == "running"
-        if was_running:
-            try:
-                self.tart.suspend(src)
-            except RuntimeError:
-                self.tart.stop(src)
-        try:
-            self.tart.clone(src, fullname(new))
-        finally:
-            # Always restore a source that this operation suspended/stopped, including
-            # when cloning fails.
+        with self._locked_vms(src, dst):
+            listed = self.tart.list()
+            source = next((v for v in listed if v.name == src), None)
+            source_state = source.state if source is not None else self._state(src)
+            was_suspended = src in self._leases.suspended() or source_state == "suspended"
+            was_running = source_state == "running" and not was_suspended
+            source_has_saved_state = was_suspended
             if was_running:
-                self._boot(self._run_argv(src))
-                self._leases.unsuspend(src)
-        # Desktop duplicate semantics are "create and boot a copy" for both running and
-        # stopped sources; otherwise the optimistic row waits forever for a stopped clone.
-        self._boot(self._run_argv(fullname(new)))
-        self._invalidate_fleet(src)
-        self._invalidate_fleet(fullname(new))
+                try:
+                    self.tart.suspend(src)
+                    source_has_saved_state = True
+                except RuntimeError:
+                    self.tart.stop(src)
+            try:
+                self.tart.clone(src, dst)
+            finally:
+                # Always restore a source that this operation suspended/stopped, including
+                # when cloning fails.
+                if was_running:
+                    self._leases.unsuspend(src)
+                    self._resume_or_coldboot(
+                        src, preserve_suspend_on_failure=source_has_saved_state
+                    )
+            # Desktop duplicate semantics are "create and boot a copy" for both running and
+            # stopped sources; otherwise the optimistic row waits forever for a stopped clone.
+            self._resume_or_coldboot(
+                dst, preserve_suspend_on_failure=source_has_saved_state
+            )
+            self._invalidate_fleet(src)
+            self._invalidate_fleet(dst)
 
     def restore(self, name: str, snapshot_id: str) -> None:
         """Restore mf-<name> to a snapshot using a staged clone and rollback-safe name swap.
@@ -751,6 +957,12 @@ class Fleet:
         installed, then removed. Works when the VM no longer exists (recreate)."""
         target = ensure_mutable(name)
         validate_name(name)
+        snap = f"mfsnap-{snapshot_id}"
+        with self._locked_vms(target, snap):
+            self._restore_unlocked(name, snapshot_id)
+
+    def _restore_unlocked(self, name: str, snapshot_id: str) -> None:
+        target = ensure_mutable(name)
         snap = f"mfsnap-{snapshot_id}"
         vms = self.tart.list()
         names = {v.name for v in vms}
@@ -802,9 +1014,13 @@ class Fleet:
                 # The restore succeeded; a stale backup is safer than deleting user data.
                 pass
         self._res_cache.pop(target, None)
+        self._res_cache_at.pop(target, None)
         self._forget_ip(target)
         self._leases.unsuspend(target)
-        self._boot(self._run_argv(target))
+        snapshot = next(v for v in vms if v.name == snap)
+        self._resume_or_coldboot(
+            target, preserve_suspend_on_failure=snapshot.state == "suspended"
+        )
         self._invalidate_fleet(target)
 
     def resources(self, name: str) -> dict:
@@ -821,16 +1037,18 @@ class Fleet:
 
     def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
                       disk_size: int | None = None, display: str | None = None) -> None:
-        ensure_mutable(name)
-        current = self.resources(name)
-        if current["state"] == "running":
-            raise RuntimeError("stop the VM before changing resources")
-        if disk_size is not None and disk_size <= current["disk_gb"]:
-            disk_size = None  # tart set --disk-size is grow-only
-        self.tart.set_config(fullname(name), cpu=cpu, memory=memory,
-                             disk_size=disk_size, display=display)
-        self._res_cache.pop(fullname(name), None)
-        self._invalidate_fleet(fullname(name))
+        full = ensure_mutable(name)
+        with self._locked_vms(full):
+            current = self.resources(name)
+            if current["state"] == "running":
+                raise RuntimeError("stop the VM before changing resources")
+            if disk_size is not None and disk_size <= current["disk_gb"]:
+                disk_size = None  # tart set --disk-size is grow-only
+            self.tart.set_config(full, cpu=cpu, memory=memory,
+                                 disk_size=disk_size, display=display)
+            self._res_cache.pop(full, None)
+            self._res_cache_at.pop(full, None)
+            self._invalidate_fleet(full)
 
     def connection_info(self, name: str) -> dict:
         ip = self.ip(name)
@@ -841,7 +1059,7 @@ class Fleet:
     def exec(self, name: str, command: str) -> dict:
         ensure_mutable(name)
         proc = self._run_nocheck(["tart", "exec", fullname(name), "/bin/sh", "-lc", command])
-        return {"stdout": proc.stdout, "exit_code": proc.returncode}
+        return {"stdout": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode}
 
     def metrics(self, name: str) -> dict:
         return self._guest_client(name).metrics()

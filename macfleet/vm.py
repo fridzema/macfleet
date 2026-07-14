@@ -60,13 +60,18 @@ def _run_nocheck(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT,
                     open_fds.discard(fd)
                     continue
                 buf = bufs[fd]
-                if buf is out and len(out) >= max_bytes:
-                    # stdout ceiling hit — stop and kill rather than drain (and so wait out) a
-                    # firehose like `yes`. The captured prefix is returned; exit is the kill.
+                remaining_capacity = max_bytes - len(out) - len(err)
+                if remaining_capacity <= 0:
+                    # Combined output ceiling hit — stop and kill rather than drain (and so wait
+                    # out) a stdout/stderr firehose. The captured prefix is returned.
                     proc.kill()
                     open_fds.clear()
                     break
-                buf.extend(chunk)
+                buf.extend(chunk[:remaining_capacity])
+                if len(chunk) > remaining_capacity:
+                    proc.kill()
+                    open_fds.clear()
+                    break
         proc.wait()
     except subprocess.TimeoutExpired as exc:
         proc.wait()
@@ -152,8 +157,17 @@ class Tart:
         # `tart run` blocks; callers background it (see connect.start_vm).
         self._run(["tart", "run", name, "--no-graphics"])
 
-    def ip(self, name: str) -> str:
-        return self._run(["tart", "ip", name]).stdout.strip()
+    def ip(self, name: str, timeout: float | None = None) -> str:
+        argv = ["tart", "ip", name]
+        # Production uses the module runner directly, allowing restore-readiness probes to keep
+        # Tart IP discovery inside their wall-clock budget. Injected test runners retain the
+        # simple one-argument protocol.
+        proc = (
+            _run(argv, timeout=timeout)
+            if timeout is not None and self._run is _run
+            else self._run(argv)
+        )
+        return proc.stdout.strip()
 
     def stop(self, name: str) -> None:
         self._run(["tart", "stop", name])

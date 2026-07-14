@@ -1,6 +1,10 @@
 import json
+import io
 import subprocess
+import threading
+import time
 import urllib.error
+from contextlib import contextmanager
 import pytest
 from macfleet.connect import ssh_cmd, scp_push_cmd, Fleet, GuestControl, SSH_OPTS
 from macfleet.leases import Leases
@@ -203,9 +207,11 @@ class _Child:
     """Stand-in for a backgrounded `tart run` Popen. alive=False simulates a process that exited
     (a VZ restore failure); alive=True simulates a boot that keeps running."""
 
-    def __init__(self, alive: bool, code: int = 0):
+    def __init__(self, alive: bool, code: int = 0, diagnostic: str | None = None):
         self._alive = alive
         self.returncode = code
+        if diagnostic is not None:
+            self._macfleet_diagnostic = io.BytesIO(diagnostic.encode())
 
     def poll(self):
         return None if self._alive else self.returncode
@@ -213,6 +219,7 @@ class _Child:
 
 def _resume_fleet(tmp_path, child):
     calls, spawns = [], []
+    tick = {"now": 0.0}
 
     def run(argv):
         calls.append(argv)
@@ -226,13 +233,13 @@ def _resume_fleet(tmp_path, child):
 
     fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawn,
                   leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
-                  clock=lambda: 0.0, sleep=lambda _s: None)
+                  clock=lambda: 0.0, monotonic=lambda: tick["now"],
+                  sleep=lambda seconds: tick.__setitem__("now", tick["now"] + seconds))
     return fleet, calls, spawns
 
 
-def test_resume_spawns_the_run_and_watches_in_background(tmp_path):
-    # resume() is non-blocking: it spawns `tart run` (and starts the restore watcher) without
-    # waiting. With the test spawn returning None there's no child to watch.
+def test_resume_spawns_the_run_and_probes_restore_in_process(tmp_path):
+    # With the test spawn returning None there is no child to probe.
     fleet, _, spawned, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "suspended", "local")])
     fleet.resume("web")
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
@@ -241,11 +248,39 @@ def test_resume_spawns_the_run_and_watches_in_background(tmp_path):
 def test_watcher_cold_boots_when_the_vz_restore_fails(tmp_path):
     # `tart run` exited non-zero (VZ "failed to restore … invalid argument"): drop the saved state
     # and cold-boot instead of silently leaving the VM suspended.
-    fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=False))
+    diagnostic = "Virtualization.Framework failed to restore VM: invalid argument"
+    fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=False, diagnostic=diagnostic))
     argv = ["tart", "run", "mf-web", "--no-graphics"]
-    fleet._coldboot_if_restore_failed("mf-web", argv, _Child(alive=False, code=1))
+    child = _Child(alive=False, code=1, diagnostic=diagnostic)
+    fleet._coldboot_if_restore_failed("mf-web", argv, child)
     assert argv in spawns  # cold boot
     assert ["tart", "stop", "mf-web"] in calls  # un-restorable suspend discarded
+
+
+def test_resume_completes_restore_recovery_before_returning(tmp_path):
+    diagnostic = "Virtualization.Framework failed to restore VM: invalid argument"
+    fleet, calls, spawns = _resume_fleet(
+        tmp_path, _Child(alive=False, code=1, diagnostic=diagnostic)
+    )
+
+    fleet.resume("web")
+
+    argv = ["tart", "run", "mf-web", "--no-graphics"]
+    assert spawns == [argv, argv]  # failed restore, then cold boot
+    assert ["tart", "stop", "mf-web"] in calls
+    assert fleet._leases.suspended() == set()
+
+
+def test_resume_restores_suspend_marker_after_generic_failure(tmp_path):
+    fleet, calls, spawns = _resume_fleet(
+        tmp_path, _Child(alive=False, code=1, diagnostic="shared directory is unavailable")
+    )
+
+    fleet.resume("web")
+
+    assert len(spawns) == 1
+    assert not any(c[:2] == ["tart", "stop"] for c in calls)
+    assert fleet._leases.suspended() == {"mf-web"}
 
 
 def test_watcher_leaves_a_successful_restore_alone(tmp_path):
@@ -255,6 +290,39 @@ def test_watcher_leaves_a_successful_restore_alone(tmp_path):
                                       _Child(alive=True))
     assert spawns == []
     assert not any(c[:2] == ["tart", "stop"] for c in calls)
+
+
+def test_watcher_preserves_suspend_state_for_unrelated_launch_failure(tmp_path):
+    fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=False))
+    child = _Child(alive=False, code=1, diagnostic="shared directory is unavailable")
+    fleet._coldboot_if_restore_failed(
+        "mf-web", ["tart", "run", "mf-web", "--no-graphics"], child
+    )
+    assert spawns == []
+    assert not any(c[:2] == ["tart", "stop"] for c in calls)
+    assert fleet._leases.suspended() == {"mf-web"}
+
+
+def test_restore_probe_health_checks_stay_inside_wall_clock_deadline(tmp_path, monkeypatch):
+    tick = {"now": 0.0}
+    fleet, _, _, _ = _fleet(tmp_path)
+    fleet._monotonic = lambda: tick["now"]
+    fleet._sleep = lambda seconds: tick.__setitem__("now", tick["now"] + seconds)
+    timeouts = []
+
+    def slow_unhealthy(_full, timeout):
+        timeouts.append(timeout)
+        tick["now"] += timeout
+        return False
+
+    monkeypatch.setattr(fleet, "_restore_ready", slow_unhealthy)
+    fleet._coldboot_if_restore_failed(
+        "mf-web", ["tart", "run", "mf-web", "--no-graphics"], _Child(alive=True)
+    )
+
+    assert timeouts
+    assert all(timeout <= 0.25 for timeout in timeouts)
+    assert tick["now"] <= 15.0
 
 
 def test_suspend_all_freezes_running_non_golden_only(tmp_path):
@@ -277,6 +345,20 @@ def test_suspend_all_freezes_running_non_golden_only(tmp_path):
     assert not any(c == ["tart", "suspend", "mf-idle"] for c in calls)
     assert not any(c == ["tart", "suspend", "mf-frozen"] for c in calls)
     assert set(lease.suspended()) == {"mf-web", "mf-api", "mf-frozen"}
+
+
+def test_suspend_all_records_state_before_releasing_each_vm_lock(tmp_path, monkeypatch):
+    fleet, _, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-web", "running", "local")]
+    )
+
+    @contextmanager
+    def asserting_lock(*_names):
+        yield
+        assert lease.suspended() == {"mf-web"}
+
+    monkeypatch.setattr(fleet, "_locked_vms", asserting_lock)
+    assert fleet.suspend_all() == ["mf-web"]
 
 
 def test_suspend_all_noop_when_nothing_running(tmp_path):
@@ -308,6 +390,46 @@ def test_create_from_snapshot(tmp_path):
     fleet, calls, _, _ = _fleet(tmp_path)
     fleet.create("web", from_snapshot="base-clean")
     assert ["tart", "clone", "mfsnap-base-clean", "mf-web"] in calls
+
+
+def test_concurrent_create_same_name_clones_only_once(tmp_path):
+    class ConcurrentTart:
+        def __init__(self):
+            self.names: set[str] = set()
+            self.clone_calls = 0
+            self.guard = threading.Lock()
+
+        def list(self):
+            with self.guard:
+                return [VmInfo(name, "stopped", "local") for name in self.names]
+
+        def clone(self, _src, dst):
+            self.clone_calls += 1
+            time.sleep(0.03)  # let an unlocked second create observe the name as absent
+            with self.guard:
+                self.names.add(dst)
+
+        def get_config(self, _name):
+            return {"Disk": 50}
+
+    tart = ConcurrentTart()
+    fleet = Fleet(
+        tart=tart,
+        spawn=lambda _argv: None,
+        leases=Leases(str(tmp_path / "state.json"), clock=lambda: 0.0),
+    )
+    start = threading.Barrier(2)
+
+    def create():
+        start.wait()
+        fleet.create("web")
+
+    threads = [threading.Thread(target=create) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert tart.clone_calls == 1
 
 
 def test_create_with_preset_sets_resources_before_run(tmp_path):
@@ -343,13 +465,36 @@ def test_create_without_preset_skips_set(tmp_path):
 def test_create_existing_running_name_skips_clone_and_set(tmp_path):
     # Re-creating a name that's already a running VM (no expired lease) must NOT re-clone
     # and must NOT `tart set` — set on a running VM fails and previously surfaced as a
-    # spurious "failed to create" 409. It just re-issues `tart run` (idempotent).
-    fleet, calls, spawned, _ = _fleet(
+    # spurious "failed to create" 409. It is a true no-op and must not create a false
+    # intentional-suspend marker from Tart's "already running" launch error.
+    fleet, calls, spawned, lease = _fleet(
         tmp_path, vms=[VmInfo("mf-web", "running", "local")])
     fleet.create("web", cpu=8, memory=16384)
     assert not any(c[:2] == ["tart", "clone"] for c in calls)
     assert not any(c[:2] == ["tart", "set"] for c in calls)
-    assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+    assert ["tart", "run", "mf-web", "--no-graphics"] not in spawned
+    assert lease.suspended() == set()
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_saved_state"), [("stopped", False), ("suspended", True)]
+)
+def test_create_existing_nonrunning_vm_marks_only_real_saved_state(
+    tmp_path, monkeypatch, state, expected_saved_state
+):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", state, "local")])
+    launches = []
+    monkeypatch.setattr(
+        fleet,
+        "_resume_or_coldboot",
+        lambda full, *, preserve_suspend_on_failure: launches.append(
+            (full, preserve_suspend_on_failure)
+        ),
+    )
+
+    fleet.create("web")
+
+    assert launches == [("mf-web", expected_saved_state)]
 
 
 def test_create_reclaims_expired_target_name(tmp_path):
@@ -685,6 +830,50 @@ def test_reap_deletes_expired(tmp_path):
     assert lease.expired(1e12) == []
 
 
+def test_reap_keeps_failed_deletion_leased_for_retry(tmp_path, monkeypatch):
+    fleet, _, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
+    )
+    lease.record("mf-old", ttl=-1)
+
+    def fail(_name):
+        raise RuntimeError("tart delete failed")
+
+    monkeypatch.setattr(fleet, "_nuke_unlocked", fail)
+    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert lease.expired(2000.0) == ["mf-old"]
+
+
+def test_reap_skips_candidate_renewed_while_waiting_for_vm_lock(tmp_path, monkeypatch):
+    fleet, calls, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
+    )
+    lease.record("mf-old", ttl=-1)
+    original_lock = fleet._locked_vms
+
+    @contextmanager
+    def renewing_lock(*names):
+        with original_lock(*names):
+            lease.record("mf-old", ttl=60)
+            yield
+
+    monkeypatch.setattr(fleet, "_locked_vms", renewing_lock)
+
+    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert ["tart", "delete", "mf-old"] not in calls
+    assert lease.expired(2000.0) == []
+
+
+def test_reap_refreshes_stale_inventory_after_acquiring_vm_lock(tmp_path):
+    fleet, calls, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
+    )
+    lease.record("mf-old", ttl=-1)
+
+    assert fleet.reap(existing=[]) == ["mf-old"]
+    assert ["tart", "delete", "mf-old"] in calls
+
+
 def test_list_vms_reaps_first_and_marks_health(tmp_path):
     fleet, calls, _, lease = _fleet(
         tmp_path,
@@ -973,7 +1162,7 @@ def test_exec_returns_stdout_and_exit_code(tmp_path):
     from macfleet.leases import Leases
     fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
                   run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
-    assert fleet.exec("web", "echo hi") == {"stdout": "hi\n", "exit_code": 2}
+    assert fleet.exec("web", "echo hi") == {"stdout": "hi\n", "stderr": "", "exit_code": 2}
 
 
 # --- Fleet suspended tracking ---
@@ -1004,22 +1193,29 @@ def test_list_vms_reports_suspended(tmp_path):
     assert row["state"] == "suspended"
 
 
-def test_snapshot_resume_clears_stale_suspended_marker(tmp_path):
-    # Source was user-suspended before the snapshot ran. snapshot() suspends it further
-    # (or it's already suspended), clones, then resumes it via a raw `tart run` — that
-    # resume must also clear the lease-store suspended marker, or list_vms() would keep
-    # mislabeling the now-running source as "suspended" forever.
+def test_list_vms_reports_authoritative_lease_expiry(tmp_path):
+    fleet, _, _, lease = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    lease.record("mf-web", ttl=60)
+    row = next(r for r in fleet.list_vms() if r["name"] == "mf-web")
+    assert row["lease_expires_at"] == 1060.0
+
+
+def test_snapshot_preserves_user_suspended_source(tmp_path):
+    # Snapshotting an intentionally suspended source must not unexpectedly boot it.
     fleet, calls, spawned, lease = _fleet(tmp_path)  # _state -> running
     lease.suspend("mf-web")
     fleet.snapshot("web", "v1")
-    assert "mf-web" not in lease.suspended()
+    assert "mf-web" in lease.suspended()
+    assert ["tart", "run", "mf-web", "--no-graphics"] not in spawned
 
 
-def test_duplicate_resume_clears_stale_suspended_marker(tmp_path):
+def test_duplicate_preserves_user_suspended_source(tmp_path):
     fleet, calls, spawned, lease = _fleet(tmp_path)  # _state -> running
     lease.suspend("mf-web")
     fleet.duplicate("web", "web2")
-    assert "mf-web" not in lease.suspended()
+    assert "mf-web" in lease.suspended()
+    assert ["tart", "run", "mf-web", "--no-graphics"] not in spawned
+    assert ["tart", "run", "mf-web2", "--no-graphics"] in spawned
 
 
 # --- Fleet configured-resources cache ---
@@ -1056,6 +1252,20 @@ def test_list_vms_tolerates_tart_get_failure_for_one_vm(tmp_path):
     row = next(r for r in rows if r["name"] == "mf-web")
     assert row["cpu"] is None and row["memory_mb"] is None and row["disk_gb"] is None
     assert "mf-web" not in fleet._res_cache
+
+
+def test_list_vms_prunes_caches_for_externally_removed_vm(tmp_path):
+    fleet, _, _, _ = _fleet(tmp_path, vms=[])
+    fleet._res_cache["mf-old"] = {"cpu": 4}
+    fleet._res_cache_at["mf-old"] = 1.0
+    fleet._ip_cache["mf-old"] = (999999.0, "192.168.64.4")
+    fleet._control_tokens["mf-old"] = "old-token"
+    fleet._control_token_ips["mf-old"] = "192.168.64.4"
+    fleet._health_cache["mf-old"] = (999999.0, True)
+    fleet.list_vms()
+    for cache in (fleet._res_cache, fleet._res_cache_at, fleet._ip_cache,
+                  fleet._control_tokens, fleet._control_token_ips, fleet._health_cache):
+        assert "mf-old" not in cache
 
 
 def test_set_resources_invalidates_cache(tmp_path):

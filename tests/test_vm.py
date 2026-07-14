@@ -109,5 +109,15 @@ def test_run_nocheck_raises_on_timeout():
 def test_run_nocheck_caps_stdout():
     # A firehose (`yes` prints forever) must be bounded, not buffered into memory unbounded.
     proc = _run_nocheck(["yes"], timeout=5, max_bytes=1000)
-    assert len(proc.stdout.encode()) <= 1000 + 65536  # cap + at most one read chunk
+    assert len(proc.stdout.encode()) <= 1000
     assert proc.returncode != 0  # killed once the ceiling was hit
+
+
+def test_run_nocheck_caps_stderr_and_combined_output():
+    proc = _run_nocheck(
+        ["sh", "-c", "while :; do printf out; printf err >&2; done"],
+        timeout=5,
+        max_bytes=1000,
+    )
+    assert len(proc.stdout.encode()) + len(proc.stderr.encode()) <= 1000
+    assert proc.returncode != 0

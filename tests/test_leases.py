@@ -31,8 +31,11 @@ def test_record_then_expired(tmp_path):
     lease, clock = _leases(tmp_path)
     lease.record("mf-a", ttl=60)
     assert lease.expired(clock["t"]) == []
+    assert lease.is_expired("mf-a", clock["t"]) is False
+    assert lease.expiries() == {"mf-a": 1060.0}
     clock["t"] = 1000 + 61
     assert lease.expired(clock["t"]) == ["mf-a"]
+    assert lease.is_expired("mf-a", clock["t"]) is True
 
 
 def test_drop_removes_lease(tmp_path):
@@ -70,6 +73,7 @@ def test_expired_skips_entries_missing_expires_at(tmp_path):
     path.write_text('{"leases": {"mf-a": {"created_at": 1000, "source": "api"}}}')
     lease = Leases(str(path), clock=lambda: 0.0)
     assert lease.expired(1e12) == []  # malformed entry skipped, no crash
+    assert lease.expiries() == {}
 
 
 def test_suspended_set_roundtrip(tmp_path):
