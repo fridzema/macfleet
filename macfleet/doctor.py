@@ -53,6 +53,8 @@ def _tcc_screenshot(fleet: Any) -> CheckResult:
     """The documented golden-image trap: without Screen Recording granted at bake time,
     every screenshot comes back empty. Only testable against a live fleet VM — never
     golden, which is the clone source and must not be driven."""
+    if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
+        return "skip", "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 to test", None
     running = [v for v in fleet.tart.list()
                if v.state == "running" and v.name.startswith("mf-") and v.name != GOLDEN]
     if not running:

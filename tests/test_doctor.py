@@ -100,18 +100,30 @@ def test_golden_warm_skips_when_golden_absent():
     assert by_id(run_checks(FakeFleet()))["golden_warm"]["status"] == "skip"
 
 
-def test_tcc_skips_with_no_running_vm():
+def test_tcc_skips_when_computer_use_gate_off(monkeypatch):
+    # Gate off means TCC is untested, not broken — even with a running VM to test against.
+    monkeypatch.delenv("MACFLEET_ALLOW_CONTROL", raising=False)
+    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")])
+    c = by_id(run_checks(fleet))["tcc_screenshot"]
+    assert c["status"] == "skip"
+    assert "MACFLEET_ALLOW_CONTROL" in c["detail"]
+
+
+def test_tcc_skips_with_no_running_vm(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet = FakeFleet(vms=[VmInfo("mf-web", "stopped", "local")])
     assert by_id(run_checks(fleet))["tcc_screenshot"]["status"] == "skip"
 
 
-def test_tcc_ok_when_screenshot_returns_bytes():
+def test_tcc_ok_when_screenshot_returns_bytes(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")])
     c = by_id(run_checks(fleet))["tcc_screenshot"]
     assert c["status"] == "ok"
 
 
-def test_tcc_fails_on_empty_screenshot():
+def test_tcc_fails_on_empty_screenshot(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")],
                       computer_obj=FakeComputer(data=b""))
     c = by_id(run_checks(fleet))["tcc_screenshot"]
@@ -119,13 +131,15 @@ def test_tcc_fails_on_empty_screenshot():
     assert "re-bake" in c["fix"]
 
 
-def test_tcc_never_targets_golden():
+def test_tcc_never_targets_golden(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     # golden is running but is not a fleet VM; there is nothing else to test against.
     fleet = FakeFleet(vms=[VmInfo("mf-golden", "running", "local")])
     assert by_id(run_checks(fleet))["tcc_screenshot"]["status"] == "skip"
 
 
-def test_a_raising_check_becomes_a_fail_not_a_crash():
+def test_a_raising_check_becomes_a_fail_not_a_crash(monkeypatch):
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")],
                       computer_error=RuntimeError("computer-use disabled"))
     c = by_id(run_checks(fleet))["tcc_screenshot"]
