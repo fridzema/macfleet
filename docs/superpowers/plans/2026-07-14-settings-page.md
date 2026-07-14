@@ -30,7 +30,7 @@ One, deliberate, flagged for the record rather than dropped silently:
 - **GB→MB conversion happens at the call site of `api.create`**, exactly as the current code does (`memoryGb * 1024` becomes `memory_gb * 1024`). One site only.
 - Every component carries a `data-test` hook (see existing components); the Playwright suite selects on them.
 - Pinia stores are setup-style: `defineStore('name', () => { ... return {...} })`.
-- Cross-store calls resolve the other store **lazily at call time** (`useUi()` inside a function body, not at module scope) — `fleet.ts` does this already and its comment explains why: "resolved lazily at call time so the module cycle never breaks".
+- Cross-store wiring: the **`import` is static and top-level; the `useX()` call is what's deferred** into the function body. `fleet.ts` imports `useUi` at module scope and calls `useUi().selectOnly(name)` inside `create()`, with the comment "resolved lazily at call time so the module cycle never breaks". Follow that shape exactly — a dynamic `import()` is not usable here anyway, since these calls are synchronous.
 - Tests: Vitest + `@vue/test-utils`, `setActivePinia(createPinia())` in `beforeEach`, `vi.spyOn(api, '...')` to stub the client. Fakes over mocks. See `tests/unit/fleet.test.ts`.
 - **Await pending work with `flushPromises()` from `@vue/test-utils`** — the house idiom, used in 10 existing test files. Never `await new Promise(r => setTimeout(r, 0))`: it appears nowhere in this repo, and one macrotask tick does not reliably drain a chained promise the way `flushPromises` does.
 - Commands (from `desktop/`): `bun run test:unit`, `bun run test:e2e`, `make lint-desktop`, `make ci`.
@@ -667,7 +667,11 @@ The `createOptions` ref (~line 127) keeps `preset: 'standard'` as its initial li
         useFleet().createOptions.preset = cfg.default_preset
 ```
 
-and the same line at the end of `setDefaultPreset`'s success path. Import `useFleet` **inside the function bodies**, not at module scope — `fleet.ts` imports `settings.ts`, so a module-scope import here is a cycle.
+and the same line at the end of `setDefaultPreset`'s success path. Import `useFleet` statically at
+module scope and call it inside the function bodies — the same shape `fleet.ts` already uses for
+`useUi` (static import, deferred call). The deferred *call* is what keeps the cycle from breaking;
+the import itself is fine, and `useFleet().createOptions.preset = ...` is synchronous so a dynamic
+`import()` could not be used here regardless.
 
 - [ ] **Step 4b: Load settings at app mount**
 
