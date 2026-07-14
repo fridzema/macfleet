@@ -192,7 +192,8 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
     spawned = []
     lease = Leases(str(tmp_path / "state.json"), clock=lambda: clock_val)
     fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
-                  leases=lease, clock=lambda: clock_val)
+                  leases=lease, config=Config(str(tmp_path / "config.json")),
+                  clock=lambda: clock_val)
     return fleet, calls, spawned, lease
 
 
