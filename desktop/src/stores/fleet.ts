@@ -5,12 +5,14 @@ import {
   api,
   type FleetUpdate,
   type HostInfo,
+  type PresetName,
   type ProvisionRecord,
   type Resources,
   type Share,
   type Snapshot,
   type Vm,
 } from '../shared/api'
+import { useSettings } from './settings'
 import { useUi } from './ui'
 
 // Its only caller (below, in refresh()) always feeds it a name from `vms.value`, which is
@@ -21,7 +23,6 @@ import { useUi } from './ui'
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
 
 export type Tab = 'screen' | 'terminal' | 'logs' | 'resources' | 'connect' | 'folders'
-export type Preset = 'light' | 'standard' | 'heavy'
 
 // One in-guest command run in the Terminal tab. `code: null` means the exec call
 // itself failed (network/sidecar error) — distinct from a nonzero guest exit, which is
@@ -36,18 +37,9 @@ export interface CreateOptions {
   name: string
   // 'golden' clones the read-only template; anything else is a snapshot id.
   source: 'golden' | string
-  preset: Preset
+  preset: PresetName
   ttl: boolean
   advancedOpen: boolean
-}
-
-// cpu / RAM (GB) — matches the design comp's presets verbatim. No disk: `tart set
-// --disk-size` is grow-only and mf-golden already ships an ~80GB base disk, so sending
-// a preset disk size (e.g. Light's 40GB) would ask tart to shrink it and fail the clone.
-const PRESETS: Record<Preset, { cpu: number; memoryGb: number }> = {
-  light: { cpu: 2, memoryGb: 4 },
-  standard: { cpu: 4, memoryGb: 8 },
-  heavy: { cpu: 8, memoryGb: 16 },
 }
 
 const LEASE_TTL_SECONDS = 600
@@ -430,7 +422,16 @@ export const useFleet = defineStore('fleet', () => {
       /\s+/g,
       '-',
     )
-    const preset = PRESETS[opts.preset]
+    // Presets are engine-owned (macfleet/config.py) so the CLI and this app cannot disagree
+    // about what "standard" means. load() is idempotent, so this costs one request per app
+    // run, not one per create.
+    const settings = useSettings()
+    await settings.load()
+    const preset = settings.presets?.[opts.preset]
+    if (!preset) {
+      toast('Could not read VM sizes from the engine', '⚠')
+      return
+    }
     const fromSnapshot = opts.source === 'golden' ? undefined : opts.source
     const snap = fromSnapshot ? snapshots.value.find((s) => s.id === fromSnapshot) : undefined
 
@@ -452,7 +453,7 @@ export const useFleet = defineStore('fleet', () => {
         ...(fromSnapshot ? { from_snapshot: fromSnapshot } : {}),
         ...(opts.ttl ? { ttl: LEASE_TTL_SECONDS } : {}),
         cpu: preset.cpu,
-        memory: preset.memoryGb * 1024,
+        memory: preset.memory_gb * 1024,
       })
       createOptions.value = { ...opts, name: '', source: 'golden', advancedOpen: false }
       await refresh()
