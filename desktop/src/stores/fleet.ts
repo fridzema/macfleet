@@ -459,7 +459,16 @@ export const useFleet = defineStore('fleet', () => {
         cpu: preset.cpu,
         memory: preset.memory_gb * 1024,
       })
-      createOptions.value = { ...opts, name: '', source: 'golden', advancedOpen: false }
+      // `...opts` re-reads the live createOptions, which settings.load() may have rewritten
+      // mid-create — spreading it would reset the picker to the engine default. This line's
+      // job is to clear name/source/advancedOpen and KEEP what the user chose.
+      createOptions.value = {
+        ...opts,
+        preset: chosenPreset,
+        name: '',
+        source: 'golden',
+        advancedOpen: false,
+      }
       await refresh()
     } catch (e) {
       error.value = String(e)
