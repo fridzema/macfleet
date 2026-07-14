@@ -189,6 +189,14 @@ _IP_CACHE_TTL = 15.0
 _RESOURCE_CACHE_TTL = 30.0
 _RESTORE_FAILURE_MARKERS = ("failed to restore", "invalid argument")
 
+# Everything macfleet owns in tart's store. Anything without one of these prefixes belongs
+# to the user and must never be touched by a reset.
+_RESET_PREFIXES = ("mf-", "mfsnap-", "mfbackup-", "mftmp-")
+# Removed by name, not `rm -rf ~/.macfleet`: a blanket wipe would take engine.log out from
+# under the running process and silently take config.json with it. `operations/` is
+# deliberately absent — see reset_data.
+_RESET_STATE_FILES = ("state.json", "shares.json", "activity.jsonl")
+
 
 class Fleet:
     def __init__(self, tart: Tart | None = None, run: Runner = _run,
@@ -728,7 +736,12 @@ class Fleet:
             self._nuke_unlocked(name)
 
     def _nuke_unlocked(self, name: str) -> None:
-        full = ensure_mutable(name)
+        self._delete_unlocked(ensure_mutable(name))
+
+    def _delete_unlocked(self, full: str) -> None:
+        """Tear down one VM by its FULL name, with no golden guard. Every caller except
+        reset_data(scope="all") must come via _nuke_unlocked, which applies ensure_mutable —
+        golden is the clone source for every future create."""
         try:
             self.tart.stop(full)
         except RuntimeError:
@@ -743,6 +756,48 @@ class Fleet:
         with self._provision_lock:
             self._provision.pop(full, None)
         self._invalidate_fleet(full)
+
+    def reset_data(self, scope: str = "fleet") -> dict:
+        """Delete everything macfleet owns. `scope="fleet"` keeps mf-golden (a re-bake is
+        expensive and it is the clone source for every future create); `scope="all"` takes
+        golden too and resets settings to defaults.
+
+        A VM that refuses to delete is reported, not silently skipped, and does not abort
+        the rest of the sweep."""
+        if scope not in ("fleet", "all"):
+            raise RuntimeError(f"unknown reset scope {scope!r}: choose 'fleet' or 'all'")
+        deleted: list[str] = []
+        failed: list[dict] = []
+        for v in self.tart.list():
+            if not v.name.startswith(_RESET_PREFIXES):
+                continue
+            if v.name == GOLDEN and scope != "all":
+                continue
+            try:
+                with self._locked_vms(v.name):
+                    self._delete_unlocked(v.name)
+                deleted.append(v.name)
+            except RuntimeError as exc:
+                failed.append({"name": v.name, "error": str(exc)})
+        return {"deleted": deleted, "failed": failed,
+                "removed_paths": self._reset_state_files(scope)}
+
+    def _reset_state_files(self, scope: str) -> list[str]:
+        removed = []
+        storage = self._leases.storage_dir
+        for fname in _RESET_STATE_FILES:
+            path = os.path.join(storage, fname)
+            try:
+                os.unlink(path)
+                removed.append(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RuntimeError(f"could not remove {path}: {exc}") from exc
+        if scope == "all":
+            self.config.reset()
+            removed.append(self.config.path)
+        return removed
 
     def ip(self, name: str) -> str:
         full = fullname(name)

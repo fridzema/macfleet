@@ -1514,3 +1514,124 @@ def test_up_explicit_preset_wins(tmp_path, monkeypatch):
     monkeypatch.setattr(fleet, "create", lambda name, **kw: calls.append((name, kw)))
     fleet.up("web", preset="heavy")
     assert calls == [("web", {"cpu": 8, "memory": 16384})]
+
+
+class ResetTart:
+    """Records stop/delete and serves a fixed inventory."""
+
+    def __init__(self, vms):
+        self._vms = list(vms)
+        self.stopped = []
+        self.deleted = []
+        self.delete_error = None
+
+    def list(self):
+        return list(self._vms)
+
+    def stop(self, name):
+        self.stopped.append(name)
+
+    def delete(self, name):
+        if self.delete_error is not None and name == self.delete_error[0]:
+            raise RuntimeError(self.delete_error[1])
+        self.deleted.append(name)
+        self._vms = [v for v in self._vms if v.name != name]
+
+
+def _reset_fleet(tmp_path, vms):
+    # Config/Leases/Shares are imported at the top of this file (see Task 2).
+    tart = ResetTart(vms)
+    fleet = Fleet(
+        tart=tart,
+        leases=Leases(str(tmp_path / "state.json")),
+        shares=Shares(str(tmp_path / "shares.json")),
+        config=Config(str(tmp_path / "config.json")),
+        operation_lock_dir=str(tmp_path),
+    )
+    return fleet, tart
+
+
+def test_reset_fleet_deletes_vms_and_snapshots_but_keeps_golden(tmp_path):
+    fleet, tart = _reset_fleet(tmp_path, [
+        VmInfo("mf-golden", "suspended", "local"),
+        VmInfo("mf-web", "running", "local"),
+        VmInfo("mfsnap-web-v1", "stopped", "local"),
+        VmInfo("mfbackup-abc", "stopped", "local"),
+        VmInfo("mftmp-def", "stopped", "local"),
+    ])
+    result = fleet.reset_data("fleet")
+    assert set(result["deleted"]) == {"mf-web", "mfsnap-web-v1", "mfbackup-abc", "mftmp-def"}
+    assert "mf-golden" not in tart.deleted
+    assert result["failed"] == []
+
+
+def test_reset_all_deletes_golden_too(tmp_path):
+    fleet, tart = _reset_fleet(tmp_path, [
+        VmInfo("mf-golden", "suspended", "local"),
+        VmInfo("mf-web", "running", "local"),
+    ])
+    result = fleet.reset_data("all")
+    assert set(result["deleted"]) == {"mf-golden", "mf-web"}
+    assert "mf-golden" in tart.deleted
+
+
+def test_reset_never_touches_foreign_vms(tmp_path):
+    fleet, tart = _reset_fleet(tmp_path, [
+        VmInfo("mf-web", "running", "local"),
+        VmInfo("ubuntu-ci", "running", "local"),
+        VmInfo("sonoma-base", "stopped", "local"),
+    ])
+    result = fleet.reset_data("all")
+    assert result["deleted"] == ["mf-web"]
+    assert tart.deleted == ["mf-web"]
+
+
+def test_reset_removes_state_files_but_keeps_engine_log(tmp_path):
+    fleet, _ = _reset_fleet(tmp_path, [])
+    (tmp_path / "state.json").write_text("{}")
+    (tmp_path / "shares.json").write_text("{}")
+    (tmp_path / "activity.jsonl").write_text("")
+    (tmp_path / "engine.log").write_text("boot output")
+    fleet.reset_data("fleet")
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "shares.json").exists()
+    assert not (tmp_path / "activity.jsonl").exists()
+    # The running process is writing this; deleting it is how you lose the boot diagnosis.
+    assert (tmp_path / "engine.log").read_text() == "boot output"
+
+
+def test_reset_fleet_keeps_config_but_reset_all_clears_it(tmp_path):
+    fleet, _ = _reset_fleet(tmp_path, [])
+    fleet.config.set_default_preset("heavy")
+    fleet.reset_data("fleet")
+    assert fleet.config.default_preset() == "heavy"
+    fleet.reset_data("all")
+    assert fleet.config.default_preset() == "standard"
+
+
+def test_reset_leaves_operations_dir_alone(tmp_path):
+    # Zero-byte flock files. Unlinking one another process holds does not break its lock —
+    # it makes the next opener create a different file and silently lose mutual exclusion.
+    fleet, _ = _reset_fleet(tmp_path, [])
+    ops = tmp_path / "operations"
+    ops.mkdir(exist_ok=True)
+    (ops / "deadbeef.lock").write_text("")
+    fleet.reset_data("all")
+    assert (ops / "deadbeef.lock").exists()
+
+
+def test_reset_reports_failures_without_aborting(tmp_path):
+    fleet, tart = _reset_fleet(tmp_path, [
+        VmInfo("mf-a", "running", "local"),
+        VmInfo("mf-b", "running", "local"),
+    ])
+    tart.delete_error = ("mf-a", "tart delete failed: busy")
+    result = fleet.reset_data("fleet")
+    assert result["deleted"] == ["mf-b"]
+    assert result["failed"] == [{"name": "mf-a", "error": "tart delete failed: busy"}]
+
+
+def test_reset_rejects_unknown_scope(tmp_path):
+    fleet, _ = _reset_fleet(tmp_path, [])
+    with pytest.raises(RuntimeError, match="unknown reset scope"):
+        fleet.reset_data("everything")
