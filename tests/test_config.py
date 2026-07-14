@@ -66,19 +66,26 @@ def test_presets_have_cpu_and_memory_only():
         assert set(p) == {"cpu", "memory_gb"}
 
 
-def test_concurrent_writes_do_not_lose_updates(tmp_path):
-    # Mirrors tests/test_leases.py: without state_lock, interleaved
-    # load-modify-save cycles drop each other's writes.
-    c = Config(str(tmp_path / "config.json"))
+def test_concurrent_writes_always_leave_a_parseable_file(tmp_path):
+    # Config has one key and one mutator, so there is no lost-update to test — any
+    # interleaving yields some writer's value. What IS at stake is atomicity: _save writes
+    # to a temp file and os.replace()s it, so a reader never sees a half-written file. An
+    # in-place write would let _load hit a JSONDecodeError and silently report "standard" —
+    # a value no thread ever wrote.
+    path = tmp_path / "config.json"
+    c = Config(str(path))
     start = threading.Barrier(8)
+    written = ["light", "heavy"] * 4
 
-    def worker():
-        start.wait()
-        c.set_default_preset("heavy")
+    def worker(value):
+        start.wait()  # maximize overlap on the read-modify-write
+        c.set_default_preset(value)
 
-    threads = [threading.Thread(target=worker) for _ in range(8)]
+    threads = [threading.Thread(target=worker, args=(v,)) for v in written]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    assert c.default_preset() == "heavy"
+
+    assert c.default_preset() in ("light", "heavy")
+    assert json.loads(path.read_text())["default_preset"] in ("light", "heavy")
