@@ -348,3 +348,45 @@ describe('api', () => {
     vi.useRealTimers()
   })
 })
+
+describe('settings endpoints', () => {
+  it('config() GETs /config', async () => {
+    const f = mockFetch(200, {
+      default_preset: 'standard',
+      presets: { light: { cpu: 2, memory_gb: 4 } },
+    })
+    const cfg = await api.config()
+    expect(f).toHaveBeenCalledWith(`${API_BASE}/config`, undefined)
+    expect(cfg.default_preset).toBe('standard')
+    expect(cfg.presets.light).toEqual({ cpu: 2, memory_gb: 4 })
+  })
+
+  it('setConfig() PUTs the default_preset', async () => {
+    const f = mockFetch(200, { default_preset: 'heavy', presets: {} })
+    await api.setConfig('heavy')
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe(`${API_BASE}/config`)
+    expect(init?.method).toBe('PUT')
+    expect(JSON.parse(init?.body as string)).toEqual({ default_preset: 'heavy' })
+  })
+
+  it('doctor() unwraps the checks array', async () => {
+    mockFetch(200, {
+      checks: [{ id: 'arch', label: 'Apple silicon', status: 'ok', detail: 'arm64', fix: null }],
+    })
+    // Callers want the list, not the {checks:[...]} envelope.
+    const checks = await api.doctor()
+    expect(Array.isArray(checks)).toBe(true)
+    expect(checks[0].id).toBe('arch')
+  })
+
+  it('resetData() POSTs the scope', async () => {
+    const f = mockFetch(200, { deleted: ['mf-a'], failed: [], removed_paths: [] })
+    const res = await api.resetData('all')
+    const [url, init] = f.mock.calls[0]
+    expect(url).toBe(`${API_BASE}/data/reset`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ scope: 'all' })
+    expect(res.deleted).toEqual(['mf-a'])
+  })
+})
