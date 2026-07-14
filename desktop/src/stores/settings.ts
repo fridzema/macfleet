@@ -9,6 +9,7 @@ import {
   type ResetResult,
   type ResetScope,
 } from '../shared/api'
+import { useFleet } from './fleet'
 
 export const useSettings = defineStore('settings', () => {
   const { add: toast } = useToasts()
@@ -37,6 +38,10 @@ export const useSettings = defineStore('settings', () => {
         const cfg = await api.config()
         presets.value = cfg.presets
         defaultPreset.value = cfg.default_preset
+        // Point the create form at the configured default. Safe to overwrite: load() runs on
+        // app mount, before the user can have touched the picker, and after an explicit
+        // setDefaultPreset the overwrite is exactly what the user just asked for.
+        useFleet().createOptions.preset = cfg.default_preset
         loaded.value = true
       } catch (e) {
         toast(`Could not load settings: ${e}`, '⚠')
@@ -53,6 +58,7 @@ export const useSettings = defineStore('settings', () => {
       const cfg = await api.setConfig(p)
       // Trust the engine's echo, not the local guess — it is the authority on what stuck.
       defaultPreset.value = cfg.default_preset
+      useFleet().createOptions.preset = cfg.default_preset
       toast(`Default size set to ${cfg.default_preset}`, '✓')
     } catch (e) {
       toast(`Could not save default size: ${e}`, '⚠')

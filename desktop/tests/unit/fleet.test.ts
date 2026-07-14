@@ -1,8 +1,10 @@
+import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api, type FleetUpdate } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
+import { useSettings } from '../../src/stores/settings'
 import { useUi } from '../../src/stores/ui'
 
 beforeEach(() => {
@@ -458,6 +460,20 @@ describe('fleet store — lifecycle mutations', () => {
 describe('fleet store — create (options -> api args)', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
+    // Presets are engine-owned now. Seed settings as already-loaded — same as the real app,
+    // where Settings loads once on mount before create() ever needs it — with the same
+    // cpu/memory values the old hardcoded table used, so these pre-existing assertions still
+    // exercise real numbers. Seeding directly (not stubbing api.config) matters here: it makes
+    // create()'s internal `settings.load()` a no-op, so it never overwrites an explicitly-set
+    // createOptions.preset out from under a test (load() applies the *default* preset to the
+    // create form as a side effect — see settings.ts).
+    const settings = useSettings()
+    settings.presets = {
+      light: { cpu: 2, memory_gb: 4 },
+      standard: { cpu: 4, memory_gb: 8 },
+      heavy: { cpu: 8, memory_gb: 16 },
+    }
+    settings.loaded = true
     useFleet().loaded = true // engine connected — the create guard is exercised separately below
   })
 
@@ -535,6 +551,9 @@ describe('fleet store — create (options -> api args)', () => {
     s.createOptions.name = 'web'
     s.createOptions.advancedOpen = true
     const p = s.create()
+    // create() awaits settings.load() (a no-op here, already seeded) before the optimistic
+    // pending update — flush that tick so the assertion below observes it.
+    await flushPromises()
     expect(s.pending).toContain('web')
     release()
     await p
@@ -554,6 +573,7 @@ describe('fleet store — create (options -> api args)', () => {
     s.createOptions.name = 'web'
     const p1 = s.create()
     const p2 = s.create()
+    await flushPromises() // let both calls clear their settings.load() await before checking
     expect(s.pending.filter((n) => n === 'web')).toHaveLength(1)
     for (const release of releases) release()
     await Promise.all([p1, p2])
@@ -614,7 +634,8 @@ describe('fleet store — create (options -> api args)', () => {
     ui.selectOnly('other') // a prior selection that must be replaced
     s.createOptions.name = 'web'
     const p = s.create()
-    // selected synchronously, before api.create resolves
+    // selected before api.create resolves, once create()'s settings.load() await clears
+    await flushPromises()
     expect(ui.selectedVm).toBe('web')
     expect(ui.selectedVms).toEqual(['web'])
     release()
@@ -654,6 +675,8 @@ describe('fleet store — create (options -> api args)', () => {
     const p = s.newFromSnapshot({ id: 'web-golden', vm: 'web', label: 'golden', size: 10 })
     // source flips to the snapshot id synchronously, before the create call resolves
     expect(s.createOptions.source).toBe('web-golden')
+    // api.create fires after create()'s settings.load() await clears
+    await flushPromises()
     const [name, opts] = create.mock.calls.at(-1) as [string, unknown]
     expect(name).toMatch(/^golden-[0-9a-f]{3}$/)
     expect(opts).toMatchObject({ from_snapshot: 'web-golden' })
@@ -794,10 +817,77 @@ describe('fleet store — TTL countdown', () => {
   })
 })
 
+describe('create uses engine-owned presets', () => {
+  const CONFIG = {
+    default_preset: 'heavy' as const,
+    presets: {
+      light: { cpu: 2, memory_gb: 4 },
+      standard: { cpu: 4, memory_gb: 8 },
+      heavy: { cpu: 8, memory_gb: 16 },
+    },
+  }
+
+  it('sends the cpu/memory the engine defines, converting GB to MB', async () => {
+    vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const createSpy = vi.spyOn(api, 'create').mockResolvedValue(undefined as never)
+    const s = useFleet()
+    await useSettings().load()
+    await s.refresh()
+    s.createOptions.name = 'web'
+    s.createOptions.preset = 'light'
+    await s.create()
+    expect(createSpy).toHaveBeenCalledWith('web', expect.objectContaining({ cpu: 2, memory: 4096 }))
+  })
+
+  it('defaults the create form to the engine-configured preset', async () => {
+    vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
+    const s = useFleet()
+    await useSettings().load()
+    // The whole point of the "Default size" setting: a new VM gets it without the user
+    // touching the picker.
+    expect(s.createOptions.preset).toBe('heavy')
+  })
+
+  it('loads settings before creating even if nobody opened Settings', async () => {
+    const cfgSpy = vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const createSpy = vi.spyOn(api, 'create').mockResolvedValue(undefined as never)
+    const s = useFleet()
+    await s.refresh()
+    s.createOptions.name = 'web'
+    await s.create()
+    expect(cfgSpy).toHaveBeenCalled()
+    expect(createSpy).toHaveBeenCalledWith('web', expect.objectContaining({ cpu: 8 }))
+  })
+
+  it('does not create when presets are unavailable', async () => {
+    vi.spyOn(api, 'config').mockRejectedValue(new Error('engine down'))
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const createSpy = vi.spyOn(api, 'create').mockResolvedValue(undefined as never)
+    createSpy.mockClear() // call count accumulates across this file's shared spy
+    const s = useFleet()
+    await s.refresh()
+    s.createOptions.name = 'web'
+    await s.create()
+    // Better to refuse than to invent a size — inventing one is the bug this plan removes.
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+})
+
 describe('fleet store — pending create timeout', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
     vi.spyOn(api, 'create').mockResolvedValue({})
+    // Seed settings as already-loaded so create()'s internal settings.load() no-ops — see the
+    // longer comment in the "create (options -> api args)" describe block above.
+    const settings = useSettings()
+    settings.presets = {
+      light: { cpu: 2, memory_gb: 4 },
+      standard: { cpu: 4, memory_gb: 8 },
+      heavy: { cpu: 8, memory_gb: 16 },
+    }
+    settings.loaded = true
     useFleet().loaded = true
   })
 
