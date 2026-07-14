@@ -873,6 +873,23 @@ describe('create uses engine-owned presets', () => {
     // Better to refuse than to invent a size — inventing one is the bug this plan removes.
     expect(createSpy).not.toHaveBeenCalled()
   })
+
+  it('creates with the preset the user picked, not the configured default', async () => {
+    // Regression test for a real clobber: create() used to read createOptions.preset AFTER
+    // awaiting settings.load(), and load() writes cfg.default_preset into that very object.
+    // Reproduce the real path — nobody has opened Settings, so settings.load() has never run
+    // before this create() call fires its own defensive load().
+    vi.spyOn(api, 'config').mockResolvedValue(CONFIG) // default_preset: 'heavy'
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    const createSpy = vi.spyOn(api, 'create').mockResolvedValue(undefined as never)
+    createSpy.mockClear() // call count accumulates across this file's shared spy
+    const s = useFleet()
+    await s.refresh()
+    s.createOptions.name = 'web'
+    s.createOptions.preset = 'light' // user's explicit pick, differs from the 'heavy' default
+    await s.create()
+    expect(createSpy).toHaveBeenCalledWith('web', expect.objectContaining({ cpu: 2, memory: 4096 }))
+  })
 })
 
 describe('fleet store — pending create timeout', () => {

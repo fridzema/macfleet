@@ -418,6 +418,10 @@ export const useFleet = defineStore('fleet', () => {
       return
     }
     const opts = createOptions.value
+    // Capture the picked size BEFORE any await. `opts` is the live createOptions object, and
+    // settings.load() writes the configured default straight into it — so reading opts.preset
+    // after the await would hand back the default and silently ignore what the user chose.
+    const chosenPreset = opts.preset
     const name = (opts.name.trim() || `vm-${Math.random().toString(16).slice(2, 6)}`).replace(
       /\s+/g,
       '-',
@@ -427,7 +431,7 @@ export const useFleet = defineStore('fleet', () => {
     // run, not one per create.
     const settings = useSettings()
     await settings.load()
-    const preset = settings.presets?.[opts.preset]
+    const preset = settings.presets?.[chosenPreset]
     if (!preset) {
       toast('Could not read VM sizes from the engine', '⚠')
       return

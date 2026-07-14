@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useHotkeys } from '../composables/useHotkeys'
 import { useFleet } from '../stores/fleet'
+import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import AgentIndicator from './AgentIndicator.vue'
 
@@ -34,6 +35,8 @@ useHotkeys(() => ui.openPalette())
 
 onMounted(() => {
   fleet.fetchHost()
+  // The create form's default size comes from the engine; fetch it before the user can pick.
+  useSettings().load()
 })
 </script>
 
