@@ -247,6 +247,12 @@ class Fleet:
         # between threads in one process.
         self._operation_locks = [threading.RLock() for _ in range(64)]
 
+    @property
+    def leases(self) -> Leases:
+        """Read access for callers outside a fleet operation (doctor). Mutation still goes
+        through the Fleet methods that hold the per-VM lock."""
+        return self._leases
+
     @contextmanager
     def _locked_vms(self, *full_names: str):
         names = sorted(set(full_names))
