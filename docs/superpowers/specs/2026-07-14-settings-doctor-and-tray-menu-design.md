@@ -112,8 +112,13 @@ render against a stale table.
 | `golden_warm` | warn if golden not suspended | `macfleet warm` |
 | `tcc_screenshot` | fail if screenshot fails on a running VM; `skip` if none running | re-bake golden |
 | `orphans` | warn on leaked `mfbackup-*` / `mftmp-*` | Remove all data |
-| `stale_leases` | warn on leases for VMs tart no longer has | auto-prune |
+| `stale_leases` | warn on leases for VMs tart no longer has | none — cleared by Remove all data |
 | `disk` | warn on low free space on the tart volume | none |
+
+`fix` is a human-readable hint string, not an executable action. Doctor diagnoses;
+it does not repair. (`stale_leases` therefore does not auto-prune: `reap()` only
+drops leases that are *expired*, and adding a prune action to make one hint
+clickable is scope the feature does not need.)
 
 Checks derive from the unimplemented preflight list
 (`2026-07-03-macfleet-design.md:125`) plus traps the code implies: `restore`
@@ -133,9 +138,14 @@ Two scopes:
 - **`all`** — additionally `mf-golden`, and `config.json` resets to defaults.
 
 Deletion is a **whitelist, not `rm -rf ~/.macfleet`**: it removes `state.json`,
-`shares.json`, `activity.jsonl`, and `operations/` by name. Blanket removal would
-delete `engine.log` out from under the running process (§4) and silently take
+`shares.json`, and `activity.jsonl` by name. Blanket removal would delete
+`engine.log` out from under the running process (§4) and silently take
 `config.json` with it.
+
+`operations/` is deliberately **left alone**. It holds only zero-byte flock files,
+and unlinking one while another process holds a lock on it does not break that
+lock — it means the next opener creates a *different* file and mutual exclusion
+silently disappears. Nothing to gain, a race to lose.
 
 Only the `mf-` / `mfsnap-` / `mfbackup-` / `mftmp-` prefixes are ever touched —
 other VMs in `~/.tart/` are not ours. `scope=all` is the single path that
@@ -143,7 +153,12 @@ deliberately bypasses `ensure_mutable`'s golden guard (`vm.py:103`). Per-VM
 deletes reuse the existing `_locked_vms` lock and run sequentially. Returns the
 deleted VMs and removed paths so the UI reports what actually went.
 
-Gated by `MACFLEET_ALLOW_CONTROL`, like the other control operations.
+No new env gate. `MACFLEET_ALLOW_CONTROL` guards computer-use only
+(`connect.py:886`) — destructive ops like `nuke` are not gated by it, and the
+desktop sets it to `1` unconditionally (`lib.rs:128`), so reusing it here would
+be no gate at all. Reset is protected by the same per-run API token as every
+other route (`_guard` in `api.py`, applied as a global dependency) plus the UI's
+confirm dialog.
 
 CLI: `macfleet reset [--all]` with a confirmation prompt.
 
