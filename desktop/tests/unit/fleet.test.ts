@@ -890,6 +890,23 @@ describe('create uses engine-owned presets', () => {
     await s.create()
     expect(createSpy).toHaveBeenCalledWith('web', expect.objectContaining({ cpu: 2, memory: 4096 }))
   })
+
+  it("keeps the user's picked preset in the form after creating", async () => {
+    // Sibling of the test above, but asserting on form state rather than the api.create
+    // payload: the create-success reset (`createOptions.value = { ...opts, ... }`) also
+    // re-reads the live `opts`, which settings.load() rewrote mid-create — so the picker
+    // itself would silently snap back to the engine default even though the api call was
+    // sent with the right preset. Same "nobody opened Settings" setup as above.
+    vi.spyOn(api, 'config').mockResolvedValue(CONFIG) // default_preset: 'heavy'
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'create').mockResolvedValue(undefined as never)
+    const s = useFleet()
+    await s.refresh()
+    s.createOptions.name = 'web'
+    s.createOptions.preset = 'light' // user's explicit pick, differs from the 'heavy' default
+    await s.create()
+    expect(s.createOptions.preset).toBe('light')
+  })
 })
 
 describe('fleet store — pending create timeout', () => {
