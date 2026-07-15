@@ -14,9 +14,15 @@ export interface MockSnapshot {
   size: number
 }
 
+export interface MockConfig {
+  default_preset: string
+  presets: Record<string, { cpu: number; memory_gb: number }>
+}
+
 export interface MockApiState {
   vms: MockVm[]
   snapshots: MockSnapshot[]
+  config: MockConfig
 }
 
 /** `/vms/<name>/<action>` -> `<name>`. The engine accepts either the short or `mf-`
@@ -39,10 +45,52 @@ export async function mockApi(
   page: Page,
   initial: { vms?: MockVm[]; snapshots?: MockSnapshot[] } = {},
 ): Promise<MockApiState> {
-  const state: MockApiState = { vms: initial.vms ?? [], snapshots: initial.snapshots ?? [] }
+  const state: MockApiState = {
+    vms: initial.vms ?? [],
+    snapshots: initial.snapshots ?? [],
+    config: {
+      default_preset: 'standard',
+      presets: {
+        light: { cpu: 2, memory_gb: 4 },
+        standard: { cpu: 4, memory_gb: 8 },
+        heavy: { cpu: 8, memory_gb: 16 },
+      },
+    },
+  }
 
   await page.route('**/host', (route) =>
     route.fulfill({ json: { total_mem_gb: 32, cpu_count: 8, name: 'Mac' } }),
+  )
+
+  await page.route('**/config', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as { default_preset: string }
+      state.config.default_preset = body.default_preset
+    }
+    return route.fulfill({ json: state.config })
+  })
+
+  await page.route('**/doctor', (route) =>
+    route.fulfill({
+      json: {
+        checks: [
+          { id: 'arch', label: 'Apple silicon', status: 'ok', detail: 'arm64', fix: null },
+          {
+            id: 'golden_warm',
+            label: 'Golden image warm',
+            status: 'warn',
+            detail: "state is 'stopped'",
+            fix: 'macfleet warm',
+          },
+        ],
+      },
+    }),
+  )
+
+  await page.route('**/data/reset', (route) =>
+    route.fulfill({
+      json: { deleted: state.vms.map((v) => v.name), failed: [], removed_paths: [] },
+    }),
   )
 
   // AppHeader's AgentIndicator polls this on every page, so every journey needs it mocked.
