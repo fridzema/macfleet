@@ -77,6 +77,14 @@ describe('AppHeader', () => {
     wrapper.unmount()
   })
 
+  it('⌘, opens Settings', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
+    const wrapper = mount(AppHeader)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true }))
+    expect(pushSpy).toHaveBeenCalledWith('/settings')
+    wrapper.unmount()
+  })
+
   it('shows the running count plus host memory once the host loads', async () => {
     vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
     const fleet = useFleet()

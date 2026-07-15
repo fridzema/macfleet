@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { useDarkMode } from '../../src/composables/useDarkMode'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
+import router from '../../src/router'
 import { useFleet } from '../../src/stores/fleet'
 import { fuzzy, useUi } from '../../src/stores/ui'
 
@@ -334,6 +335,14 @@ describe('ui store — paletteItems', () => {
     const item = ui.paletteItems.find((i) => i.id === 'settings')
     expect(item).toBeDefined()
     expect(item?.group).toBe('App')
+  })
+
+  it('settings item navigates to /settings', () => {
+    const ui = useUi()
+    const pushSpy = vi.spyOn(router, 'push').mockResolvedValue(undefined)
+    const item = ui.paletteItems.find((i) => i.id === 'settings')
+    item?.run()
+    expect(pushSpy).toHaveBeenCalledWith('/settings')
   })
 })
 
