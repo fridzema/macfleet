@@ -131,4 +131,34 @@ describe('settings store', () => {
     expect(s.resetting).toBe(false)
     expect(useToasts().toasts.value.length).toBeGreaterThan(0)
   })
+
+  it('resetData("all") reloads settings from the engine so a stale default cannot survive', async () => {
+    const configSpy = vi.spyOn(api, 'config')
+    configSpy.mockClear() // call count accumulates across this file's shared spy
+    configSpy.mockResolvedValueOnce({ ...CONFIG, default_preset: 'heavy' as const })
+    const s = useSettings()
+    await s.load()
+    expect(s.defaultPreset).toBe('heavy')
+
+    vi.spyOn(api, 'resetData').mockResolvedValue({ deleted: [], failed: [], removed_paths: [] })
+    configSpy.mockResolvedValueOnce({ ...CONFIG, default_preset: 'standard' as const })
+    await s.resetData('all')
+
+    // connect.py -> config.reset() drops the config file, so the engine now serves the
+    // default (config.py's DEFAULT_PRESET) rather than the 'heavy' this session set earlier.
+    expect(s.defaultPreset).toBe('standard')
+    expect(configSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('resetData("fleet") does not touch settings — the engine never resets config for it', async () => {
+    const configSpy = vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
+    const s = useSettings()
+    await s.load()
+    configSpy.mockClear()
+
+    vi.spyOn(api, 'resetData').mockResolvedValue({ deleted: [], failed: [], removed_paths: [] })
+    await s.resetData('fleet')
+
+    expect(configSpy).not.toHaveBeenCalled()
+  })
 })

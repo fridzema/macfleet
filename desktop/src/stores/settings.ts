@@ -89,6 +89,13 @@ export const useSettings = defineStore('settings', () => {
       } else {
         toast(`Removed ${res.deleted.length} VM(s)`, '✓')
       }
+      if (scope === 'all') {
+        // scope="all" makes the engine reset config to defaults (connect.py -> config.reset()).
+        // load() is latched on `loaded`, so without dropping it the page would keep showing —
+        // and create() would keep using — a default the engine no longer has.
+        loaded.value = false
+        await load()
+      }
       return res
     } catch (e) {
       toast(`Reset failed: ${e}`, '⚠')
