@@ -12,7 +12,12 @@ const fleet = useFleet()
 // Destructured so the refs are top-level setup bindings and auto-unwrap in the template.
 // Held as `const engineLog = useEngineLog()`, `engineLog.lines` stays a Ref and every
 // template use needs `.value` — easy to get wrong and silently render "[object Object]".
-const { lines: logLines, load: loadEngineLog, reveal: revealEngineLog } = useEngineLog()
+const {
+  lines: logLines,
+  error: logError,
+  load: loadEngineLog,
+  reveal: revealEngineLog,
+} = useEngineLog()
 
 const STATUS_COLOR: Record<CheckStatus, string> = {
   ok: 'var(--emerald)',
@@ -184,8 +189,15 @@ onMounted(() => {
           Reveal in Finder
         </button>
       </div>
+      <p
+        v-if="logError"
+        data-test="engine-log-error"
+        class="rounded-[7px] border border-[var(--red)] bg-[var(--bg-elev)] px-3 py-2 text-[11.5px] text-[var(--red)]"
+      >
+        Could not read the engine log: {{ logError }}
+      </p>
       <pre
-        v-if="logLines.length"
+        v-else-if="logLines.length"
         data-test="engine-log"
         class="max-h-64 overflow-auto rounded-[7px] border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-dim)]"
       >{{ logLines.join('\n') }}</pre>

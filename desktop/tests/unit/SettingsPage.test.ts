@@ -6,8 +6,13 @@ import SettingsPage from '../../src/pages/SettingsPage.vue'
 import { api } from '../../src/shared/api'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ confirm: vi.fn() }))
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  readTextFile: vi.fn(),
+  BaseDirectory: { Home: 'Home' },
+}))
 
 import { confirm } from '@tauri-apps/plugin-dialog'
+import { readTextFile } from '@tauri-apps/plugin-fs'
 
 // Deliberately distinct from macfleet/config.py's real defaults (2/4, 4/8, 8/16) so a
 // regression to a hardcoded template table — the exact bug this page removes — fails here
@@ -26,6 +31,7 @@ beforeEach(() => {
   setToastScheduler(() => {})
   vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
   vi.spyOn(api, 'doctor').mockResolvedValue([])
+  vi.mocked(readTextFile).mockResolvedValue('')
 })
 
 afterEach(() => {
@@ -210,5 +216,25 @@ describe('SettingsPage — Doctor', () => {
     // Error is shown and stale checks are gone.
     expect(w.get('[data-test="doctor-error"]').text()).toContain('connection refused')
     expect(w.find('[data-test="check-arch"]').exists()).toBe(false)
+  })
+})
+
+describe('SettingsPage — Engine log', () => {
+  it('reports a read failure instead of showing the empty state', async () => {
+    vi.mocked(readTextFile).mockRejectedValue(new Error('permission denied'))
+    const w = mount(SettingsPage)
+    await flushPromises()
+    // A capability-scope denial must read as an error, not as "no log yet" — the two
+    // look identical to the user otherwise, which is exactly what this element exists to avoid.
+    expect(w.get('[data-test="engine-log-error"]').text()).toContain('permission denied')
+    expect(w.find('[data-test="engine-log-empty"]').exists()).toBe(false)
+  })
+
+  it('renders the log content when the read succeeds', async () => {
+    vi.mocked(readTextFile).mockResolvedValue('a\nb\nc')
+    const w = mount(SettingsPage)
+    await flushPromises()
+    expect(w.get('[data-test="engine-log"]').text()).toContain('a')
+    expect(w.find('[data-test="engine-log-error"]').exists()).toBe(false)
   })
 })
