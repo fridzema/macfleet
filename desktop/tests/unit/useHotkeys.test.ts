@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { useHotkeys } from '../../src/composables/useHotkeys'
 
-function mountHost(cb: () => void) {
+function mountHost(onOpenPalette: () => void, onOpenSettings?: () => void) {
   const Host = defineComponent({
     setup() {
-      useHotkeys(cb)
+      useHotkeys(onOpenPalette, onOpenSettings)
       return () => null
     },
   })
@@ -51,5 +51,29 @@ describe('useHotkeys', () => {
     wrapper.unmount()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))
     expect(cb).not.toHaveBeenCalled()
+  })
+
+  it('calls onOpenSettings for meta+,', () => {
+    const palette = vi.fn()
+    const settings = vi.fn()
+    mountHost(palette, settings)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true }))
+    expect(settings).toHaveBeenCalledTimes(1)
+    expect(palette).not.toHaveBeenCalled()
+  })
+
+  it('calls onOpenSettings for ctrl+,', () => {
+    const settings = vi.fn()
+    mountHost(vi.fn(), settings)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true }))
+    expect(settings).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a bare comma', () => {
+    const settings = vi.fn()
+    mountHost(vi.fn(), settings)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',' }))
+    // Typing a comma in the search field must not open Settings.
+    expect(settings).not.toHaveBeenCalled()
   })
 })

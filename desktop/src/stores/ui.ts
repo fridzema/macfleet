@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useToasts } from '../composables/useToasts'
+import router from '../router'
 import { useFleet } from './fleet'
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
@@ -230,6 +231,9 @@ export const useUi = defineStore('ui', () => {
     }
 
     push('theme', `Toggle ${isDark.value ? 'light' : 'dark'} theme`, 'App', () => toggleDark())
+    push('settings', 'Open settings', 'App', () => {
+      router.push('/settings')
+    })
 
     return items.filter((it) => fuzzy(query.value, it.label))
   })

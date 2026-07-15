@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useHotkeys } from '../composables/useHotkeys'
 import { useFleet } from '../stores/fleet'
@@ -9,6 +10,7 @@ import AgentIndicator from './AgentIndicator.vue'
 
 const fleet = useFleet()
 const ui = useUi()
+const router = useRouter()
 const { isDark, toggleDark } = useDarkMode()
 
 const themeIcon = computed(() => (isDark.value ? '☾' : '☀'))
@@ -31,7 +33,10 @@ const capacityLabel = computed(() => {
   return `${running} · ${fleet.host.total_mem_gb} GB`
 })
 
-useHotkeys(() => ui.openPalette())
+useHotkeys(
+  () => ui.openPalette(),
+  () => router.push('/settings'),
+)
 
 onMounted(() => {
   fleet.fetchHost()
@@ -98,6 +103,17 @@ onMounted(() => {
     </div>
 
     <AgentIndicator />
+
+    <button
+      type="button"
+      title="Settings (⌘,)"
+      aria-label="Settings"
+      data-test="settings-button"
+      class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[14px] text-[var(--text-dim)]"
+      @click="router.push('/settings')"
+    >
+      ⚙
+    </button>
 
     <button
       type="button"
