@@ -12,7 +12,13 @@
     "dialog:default",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPCONFIG/**" }, { "path": "$RESOURCE/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$RESOURCE/**" },
+        { "path": "$HOME/.macfleet/engine.log" },
+        { "path": "$HOME/.macfleet/engine.log.1" }
+      ]
     },
     "opener:default",
     "os:default"

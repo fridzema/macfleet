@@ -193,4 +193,22 @@ describe('SettingsPage — Doctor', () => {
     // Engine down is when a user opens Doctor — silence would be the worst answer.
     expect(w.get('[data-test="doctor-error"]').text()).toContain('connection refused')
   })
+
+  it('hides stale checks when a later run cannot reach the engine', async () => {
+    // First call resolves with checks, second call rejects.
+    const spy = vi
+      .spyOn(api, 'doctor')
+      .mockResolvedValueOnce(CHECKS)
+      .mockRejectedValueOnce(new Error('connection refused'))
+    const w = mount(SettingsPage)
+    await flushPromises()
+    // Mount-time runDoctor() populates the checks.
+    expect(w.find('[data-test="check-arch"]').exists()).toBe(true)
+    // Re-run the doctor and encounter the failure.
+    await w.get('[data-test="doctor-run"]').trigger('click')
+    await flushPromises()
+    // Error is shown and stale checks are gone.
+    expect(w.get('[data-test="doctor-error"]').text()).toContain('connection refused')
+    expect(w.find('[data-test="check-arch"]').exists()).toBe(false)
+  })
 })
