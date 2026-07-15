@@ -328,6 +328,13 @@ describe('ui store — paletteItems', () => {
     ui.query = 'zzz-does-not-match-anything'
     expect(ui.paletteItems).toEqual([])
   })
+
+  it('offers Open settings in the palette', () => {
+    const ui = useUi()
+    const item = ui.paletteItems.find((i) => i.id === 'settings')
+    expect(item).toBeDefined()
+    expect(item?.group).toBe('App')
+  })
 })
 
 describe('ui store — toasts', () => {

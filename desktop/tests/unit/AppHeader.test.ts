@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import AppHeader from '../../src/components/AppHeader.vue'
 import { useDarkMode } from '../../src/composables/useDarkMode'
 import { api } from '../../src/shared/api'
@@ -12,12 +13,20 @@ vi.mock('../../src/composables/useDarkMode', () => ({
   useDarkMode: vi.fn(),
 }))
 
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRouter: vi.fn(),
+}))
+
 let toggleDark: ReturnType<typeof vi.fn>
+let pushSpy: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   setActivePinia(createPinia())
   toggleDark = vi.fn()
+  pushSpy = vi.fn()
   vi.mocked(useDarkMode).mockReturnValue({ isDark: ref(false), toggleDark })
+  vi.mocked(useRouter).mockReturnValue({ push: pushSpy } as unknown as ReturnType<typeof useRouter>)
   vi.spyOn(api, 'agentsActivity').mockResolvedValue([])
 })
 
@@ -161,6 +170,14 @@ describe('AppHeader', () => {
     expect(button.attributes('aria-label')).toBe('Switch to dark mode')
     await button.trigger('click')
     expect(toggleDark).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('navigates to /settings from the gear button', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
+    const wrapper = mount(AppHeader)
+    await wrapper.get('[data-test="settings-button"]').trigger('click')
+    expect(pushSpy).toHaveBeenCalledWith('/settings')
     wrapper.unmount()
   })
 })
