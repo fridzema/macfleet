@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { computed, onMounted } from 'vue'
+import { useEngineLog } from '../composables/useEngineLog'
 import type { CheckStatus, PresetName } from '../shared/api'
 import { useFleet } from '../stores/fleet'
 import { useSettings } from '../stores/settings'
 
 const settings = useSettings()
 const fleet = useFleet()
+
+// Destructured so the refs are top-level setup bindings and auto-unwrap in the template.
+// Held as `const engineLog = useEngineLog()`, `engineLog.lines` stays a Ref and every
+// template use needs `.value` — easy to get wrong and silently render "[object Object]".
+const { lines: logLines, load: loadEngineLog, reveal: revealEngineLog } = useEngineLog()
 
 const STATUS_COLOR: Record<CheckStatus, string> = {
   ok: 'var(--emerald)',
@@ -41,6 +47,7 @@ async function reset(scope: 'fleet' | 'all'): Promise<void> {
 onMounted(() => {
   settings.load()
   settings.runDoctor()
+  loadEngineLog()
 })
 </script>
 
@@ -165,6 +172,26 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <div class="flex items-end justify-between">
+        <h3 class="text-[12px] font-semibold text-[var(--text-dim)]">Engine log</h3>
+        <button
+          type="button"
+          data-test="log-reveal"
+          class="h-7 rounded-lg border border-[var(--border)] px-2.5 text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)]"
+          @click="revealEngineLog()"
+        >
+          Reveal in Finder
+        </button>
+      </div>
+      <pre
+        v-if="logLines.length"
+        data-test="engine-log"
+        class="max-h-64 overflow-auto rounded-[7px] border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--text-dim)]"
+      >{{ logLines.join('\n') }}</pre>
+      <p v-else data-test="engine-log-empty" class="text-[11px] text-[var(--text-faint)]">
+        No engine log yet — it appears once the desktop app has started the engine.
+      </p>
     </section>
   </div>
 </template>
