@@ -7,11 +7,21 @@ import { useDarkMode } from '../../src/composables/useDarkMode'
 import { setToastScheduler, useToasts } from '../../src/composables/useToasts'
 import { api } from '../../src/shared/api'
 import { useFleet } from '../../src/stores/fleet'
+import { useSettings } from '../../src/stores/settings'
 import { useUi } from '../../src/stores/ui'
 
 vi.mock('../../src/composables/useDarkMode', () => ({
   useDarkMode: vi.fn(),
 }))
+
+// Deliberately distinct from macfleet/config.py's real defaults (2/4, 4/8, 8/16) — same
+// reasoning as SettingsPage.test.ts's CONFIG: a fixture matching production numbers
+// couldn't prove the dropdown's labels came from the engine rather than a hardcoded table.
+const PRESETS = {
+  light: { cpu: 3, memory_gb: 6 },
+  standard: { cpu: 5, memory_gb: 10 },
+  heavy: { cpu: 9, memory_gb: 18 },
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -319,6 +329,10 @@ describe('FleetSidebar — create panel', () => {
     ])
     const store = useFleet()
     const create = vi.spyOn(store, 'create').mockResolvedValue()
+    // The preset <select> now renders its <option>s from settings.presets — populate it
+    // directly so 'heavy' exists to select (this test isn't about the labels, just that
+    // picking a preset still lands in createOptions).
+    useSettings().presets = PRESETS
     const wrapper = mount(FleetSidebar)
     await flushPromises()
 
@@ -336,6 +350,37 @@ describe('FleetSidebar — create panel', () => {
       preset: 'heavy',
       ttl: true,
     })
+    wrapper.unmount()
+  })
+})
+
+describe('FleetSidebar — preset options', () => {
+  it('renders the resources dropdown from the engine config, not a hardcoded table', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'config').mockResolvedValue({ default_preset: 'standard', presets: PRESETS })
+    const wrapper = mount(FleetSidebar)
+    await useSettings().load()
+    await flushPromises()
+    await wrapper.find('[data-test="create-advanced-toggle"]').trigger('click')
+    const options = wrapper.find('[data-test="create-preset"]').findAll('option')
+    expect(options.map((o) => o.text().trim())).toEqual([
+      'Light · 3 vCPU · 6 GB',
+      'Standard · 5 vCPU · 10 GB',
+      'Heavy · 9 vCPU · 18 GB',
+    ])
+    wrapper.unmount()
+  })
+
+  it('selecting a preset still updates store.createOptions.preset', async () => {
+    vi.spyOn(api, 'listVms').mockResolvedValue([])
+    vi.spyOn(api, 'config').mockResolvedValue({ default_preset: 'standard', presets: PRESETS })
+    const store = useFleet()
+    const wrapper = mount(FleetSidebar)
+    await useSettings().load()
+    await flushPromises()
+    await wrapper.find('[data-test="create-advanced-toggle"]').trigger('click')
+    await wrapper.find('[data-test="create-preset"]').setValue('heavy')
+    expect(store.createOptions.preset).toBe('heavy')
     wrapper.unmount()
   })
 })

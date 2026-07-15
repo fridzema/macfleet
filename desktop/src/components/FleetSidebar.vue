@@ -1,14 +1,28 @@
 <script setup lang="ts">
 import { useDocumentVisibility } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { api, type Snapshot, type Vm, vmStatus } from '../shared/api'
+import { api, type PresetName, type Snapshot, type Vm, vmStatus } from '../shared/api'
 import { useFleet } from '../stores/fleet'
+import { useSettings } from '../stores/settings'
 import { type ContextMenuItem, useUi } from '../stores/ui'
 
 const store = useFleet()
 const ui = useUi()
+const settings = useSettings()
 
 const short = (n: string) => (n.startsWith('mf-') ? n.slice(3) : n)
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+// Labels come from the engine's config (macfleet/config.py), same as SettingsPage's
+// preset cards — a hardcoded copy here is exactly the drift this app no longer allows.
+// `settings.presets` is null until `settings.load()` resolves (AppHeader triggers that on
+// mount); until then this is empty and the <select> below simply has no <option>s — its
+// v-model (`store.createOptions.preset`) already holds a valid value regardless.
+const presetList = computed(() =>
+  settings.presets
+    ? (Object.entries(settings.presets) as [PresetName, { cpu: number; memory_gb: number }][])
+    : [],
+)
 
 // Comp `meta()` (design source line 492) — label + dot styling per state. `error` and
 // `suspended` aren't states the current backend reports (tart only ever says
@@ -436,9 +450,9 @@ onUnmounted(() => {
             data-test="create-preset"
             class="h-8 rounded-[7px] border border-[var(--border)] bg-[var(--bg)] px-2 font-mono text-xs text-[var(--text)]"
           >
-            <option value="light">Light · 2 vCPU · 4 GB</option>
-            <option value="standard">Standard · 4 vCPU · 8 GB</option>
-            <option value="heavy">Heavy · 8 vCPU · 16 GB</option>
+            <option v-for="[name, p] in presetList" :key="name" :value="name">
+              {{ capitalize(name) }} · {{ p.cpu }} vCPU · {{ p.memory_gb }} GB
+            </option>
           </select>
         </label>
         <label class="flex cursor-pointer items-center gap-2">
