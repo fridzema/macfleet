@@ -12,7 +12,8 @@ Two user-facing additions, plus the engine surface they both need:
    (connect VNC/SSH, copy IP, restart, suspend/resume, stop, delete).
 
 Confirmed product decisions: the tray menu is a **native** macOS menu (not a
-webview popover), driven by fleet state the frontend pushes to Rust; settings
+webview popover), **driven by Rust polling the engine directly** (revised from
+frontend-push — see §6 for why); settings
 live in an **engine config file** so the CLI, MCP server, and desktop share one
 default; Delete is available from the tray behind a native confirm dialog;
 "Remove all data" has two tiers with `mf-golden` protected by default; closing
@@ -246,32 +247,55 @@ Delete…
 
 Dots: `●` running (healthy), `◐` booting, `○` stopped.
 
-- `#[tauri::command] set_tray_vms(vms: Vec<TrayVm>)` rebuilds the menu and calls
-  `set_menu`. `TrayVm` is `{name, status}` **only** — IP is fetched lazily on
-  click via `api.connection(name)`, so a refresh does not cost one HTTP call per
-  VM.
+**Architecture — Rust-driven, not frontend-push (revised 2026-07-16).** The
+brainstorm chose "native menu + frontend pushes fleet state to Rust." Reading the
+code for plan 3 invalidated that: the live fleet subscription (`watchFleet` SSE)
+is owned by `FleetSidebar.vue`, which is mounted **only on the `/` route**, and it
+is deliberately paused when `document.visibilityState !== 'visible'`
+(`FleetSidebar.vue`'s `watch(visibility, …)` → `stopStream()`). So the stream is
+dead exactly when the tray needs it most — window hidden, or user on `/settings`.
+Frontend-push would require hoisting the stream to app scope, removing an
+intentional visibility optimization, and coupling tray liveness to webview health.
+For a menu-bar app whose whole point is working while the window is closed, a tray
+that freezes when the webview is hidden or wedged is a trap.
+
+**So Rust owns the tray's data and lifecycle actions directly.** Rust already holds
+the ephemeral port and per-run token (`ApiConfig` managed state), so it polls
+`GET /vms` on a timer and fires lifecycle actions over HTTP itself — immune to
+route, visibility, and webview state, and touching none of `FleetSidebar`'s
+abort/retry/visibility logic. This is macOS-only (Apple-silicon requirement), which
+keeps the Rust side simple.
+
+- A Rust poll loop (~2s) fetches `GET /vms` and projects each to
+  `TrayVm { name, state, healthy }` — three fields, not the whole `Vm` type, mirrored
+  against the stable REST contract the CLI and MCP already share. IP is fetched
+  lazily on a Connect/Copy click via `GET /vms/{name}/connection`, never carried in
+  the projection.
+- **Rebuild the menu only when the projected `Vec<TrayVm>` actually changes**, not
+  every poll. Rebuilding a native menu on a timer can flicker or dismiss an open
+  menu. The projection + change check is a pure Rust function, unit-testable
+  without a live tray.
 - Menu IDs encode `vm:<name>:<action>`; unambiguous because names cannot contain
   colons. Globals: `new`, `suspend-all`, `settings`, `doctor`, `show`, `quit`.
-- Global actions resolve as: `new` → show window + `fleet.create()` with the
-  configured default preset (same path as the palette's "Spin up new VM");
-  `suspend-all` → the existing suspend-all endpoint, no confirm (recoverable);
-  `settings` → show window + `router.push('/settings')`; `doctor` → the same,
-  scrolled to the Doctor section and auto-running the checks.
-- `show` on a per-VM submenu shows the window and selects that VM via
-  `ui.selectVm`.
-- Rust handles `show` / `quit` itself. Everything else emits
-  `tray-action {action, vm}` to a new `composables/useTrayMenu.ts`, which
-  dispatches through the existing store and `api.ts`.
+- **Rust executes directly** (it has the token): `restart`/`suspend`/`resume`/`down`
+  → the matching `POST /vms/{name}/…`; `delete` → a `tauri-plugin-dialog` native
+  confirm, then `POST /vms/{name}/nuke`; Connect VNC/SSH → `GET …/connection` then
+  `open vnc://admin@<ip>` / `open ssh://admin@<ip>` via macOS `open(1)`; Copy IP →
+  the connection IP to the clipboard.
+- **Rust emits to the webview** only for items that inherently surface the window:
+  `show` (show + select the VM), `settings`/`doctor` (show + navigate; doctor
+  auto-runs its checks), `new` (show + `fleet.create()` with the configured
+  default), and `suspend-all` (there is **no** `/suspend-all` HTTP route — it is
+  CLI/lifespan-only — so this routes to the webview, which suspends each running VM
+  through the store). A tiny `composables/useTrayMenu.ts` listens for the
+  `tray-action` event and dispatches through the store / router.
 - VMs are sorted by name so the menu does not jump between rebuilds.
-- **Rebuild only when the projected `{name,status}` set actually changes**, not on
-  every 2s SSE frame. Rebuilding a native menu on a timer can flicker or dismiss
-  an open menu.
-- Delete is guarded by a `tauri-plugin-dialog` confirm (the app's two-step arm
-  pattern cannot be expressed in a native menu). Stop/Suspend/Restart are
-  recoverable and fire immediately.
-- Connect VNC / SSH open `vnc://admin@<ip>` / `ssh://admin@<ip>` through
-  `tauri-plugin-opener` — macOS routes both natively. `opener:default`'s URL scope
-  likely permits only http/https, so both schemes need an explicit scope entry.
+- Stop/Suspend/Restart are recoverable and fire immediately. Delete alone is
+  confirmed.
+- `open vnc://` / `open ssh://` need no `tauri-plugin-opener` scope entry because
+  Rust shells out to `open(1)` directly. (Confirmed during plan 2: `opener:default`
+  covers only mailto/tel/https/http, so routing these through the plugin *would*
+  have needed a scope entry — shelling out sidesteps that.)
 - Connect/Copy IP items are disabled for non-running VMs.
 
 ### 7. Close → hide
@@ -281,8 +305,11 @@ Dots: `●` running (healthy), `◐` booting, `○` stopped.
 `RunEvent::Exit` teardown (process-group SIGTERM, `MACFLEET_SUSPEND_VMS_ON_EXIT`)
 still runs.
 
-Required by the tray design: the frontend-push menu needs the webview alive to
-render fleet state and dispatch actions.
+Required so the app (and its tray) survive window close. With the Rust-driven
+tray, close→hide is **not** needed to keep fleet data flowing — Rust polls
+regardless — but it is still needed so the process, and therefore the menu-bar
+icon, outlive the closed window. If close still quit, the tray would die with the
+window.
 
 Behaviour change: closing the window no longer suspends VMs — they run until an
 actual Quit. That is standard menu bar app semantics.
@@ -294,21 +321,21 @@ macOS. Verify before relying on it; if unwired, add a minimal app menu.
 ## Data flow
 
 ```
-SSE /fleet/events ──> stores/fleet.ts ──> project {name,status} ──> changed?
-                                                                      │ yes
-                                              invoke set_tray_vms  <──┘
-                                                      │
-                                              tray.rs rebuilds native menu
-                                                      │
-                                    user clicks ──> on_menu_event
-                                                      │
-                              show/quit ──> Rust      └──> emit tray-action
-                                                              │
-                                              useTrayMenu.ts ─┴─> fleet store / api.ts / router
+Rust poll (~2s) ──> GET /vms ──> project Vec<TrayVm> ──> changed?
+                                                          │ yes
+                                          tray.rs set_menu (rebuild)
+                                                  │
+                                user clicks ──> on_menu_event
+                                                  │
+        ┌── lifecycle/connect ──> Rust: POST /vms/{name}/… or open(1)/clipboard
+        │
+        └── show/settings/doctor/new/suspend-all ──> emit tray-action
+                                                          │
+                                          useTrayMenu.ts ─┴─> store / router
 ```
 
-The tray projection is a pure function (`vms -> TrayVm[]`) plus a change guard.
-That is where the logic lives, and it is unit-testable without a native menu.
+The tray projection is a pure Rust function (`Vec<Vm> -> Vec<TrayVm>`) plus a change
+guard. That is where the logic lives, and it is unit-testable without a native menu.
 
 ## Error handling
 
@@ -328,8 +355,9 @@ That is where the logic lives, and it is unit-testable without a native menu.
 - **pytest**: `config.py` (read/write/validate/lock, corrupt-file fallback);
   `doctor.py` against a fake `Tart` for each status; reset path-whitelist,
   prefix-scoping, and golden protection per scope. New endpoints in `api.py`.
-- **vitest**: `stores/settings.ts`; the tray projection + change guard (pure);
-  updated `router.test.ts`.
+- **vitest**: `stores/settings.ts`; updated `router.test.ts`; `useTrayMenu.ts`
+  dispatch.
+- **cargo test**: the tray projection + change guard (pure Rust function).
 - **Playwright**: the Settings page. The mock matches by path, so `/config`,
   `/doctor`, and `/data/reset` need mock entries.
 - The native tray is not e2e-testable — hence the pure projection function.
@@ -346,9 +374,10 @@ plans:
    independently and is usable from the CLI alone.
 2. **Settings page** — `/settings`, `stores/settings.ts`, the `api.ts` methods,
    `⌘,`, the fs capability entry, router test update. Depends on plan 1.
-3. **Tray menu + close→hide** — `tray.rs`, `set_tray_vms`, `useTrayMenu.ts`, the
-   opener scope entries, `CloseRequested`. Depends on plan 2 for the Settings and
-   Doctor deep-links.
+3. **Tray menu + close→hide** — `tray.rs` (Rust poll loop, projection, native
+   submenus, direct-HTTP actions), `useTrayMenu.ts` for the webview-routed items,
+   `CloseRequested`. Adds a `reqwest` dependency. Depends on plan 2 for the Settings
+   and Doctor deep-links.
 
 ## Rollout notes
 
