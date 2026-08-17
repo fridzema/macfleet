@@ -1,5 +1,8 @@
 mod handlers;
 mod state;
+// `pub` so the tray's pure logic is crate-external-reachable: without it every item is
+// unreachable from the rlib's root and pedantic's dead_code fires on the whole module.
+pub mod tray;
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
