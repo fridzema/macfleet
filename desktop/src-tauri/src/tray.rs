@@ -269,7 +269,42 @@ fn on_vm(app: &tauri::AppHandle, name: &str, verb: &str) {
             });
         }
         "delete" => confirm_and_delete(app, name),
-        // vnc/ssh/ip land in Task 5; show lands in Task 6.
+        "vnc" | "ssh" | "ip" => {
+            let Some(engine) = engine_from(app) else {
+                return;
+            };
+            let (app2, name, verb) = (app.clone(), name.to_string(), verb.to_string());
+            std::thread::spawn(move || match engine.connection_ip(&name) {
+                Ok(ip) => connect(&app2, &verb, &ip),
+                Err(e) => log::warn!("tray {verb} {name}: {e}"),
+            });
+        }
+        // show lands in Task 6.
+        _ => {}
+    }
+}
+
+/// VNC/SSH hand off to macOS via `open(1)` — no tauri-plugin-opener scope needed (opener only
+/// permits http/https/mailto/tel by default; shelling out sidesteps that). Copy IP writes to
+/// the clipboard. All three already have the IP resolved.
+fn connect(app: &tauri::AppHandle, verb: &str, ip: &str) {
+    match verb {
+        "vnc" => {
+            let _ = std::process::Command::new("open")
+                .arg(format!("vnc://admin@{ip}"))
+                .spawn();
+        }
+        "ssh" => {
+            let _ = std::process::Command::new("open")
+                .arg(format!("ssh://admin@{ip}"))
+                .spawn();
+        }
+        "ip" => {
+            use tauri_plugin_clipboard_manager::ClipboardExt;
+            if let Err(e) = app.clipboard().write_text(ip.to_string()) {
+                log::warn!("tray copy ip failed: {e}");
+            }
+        }
         _ => {}
     }
 }
