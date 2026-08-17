@@ -184,6 +184,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             let started = child.is_some();
+            // The token moves into managed state below; the tray's poll thread needs its own copy.
+            let api_token_for_poll = token.clone();
             app.manage(Sidecar(Mutex::new(child)));
             app.manage(state::ApiConfig { port, token });
 
@@ -214,20 +216,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let show = MenuItem::with_id(app, "show", "Show macfleet", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
+                .on_menu_event(|app, event| tray::on_menu_event(app, event.id.as_ref()))
                 .build(app)?;
+
+            // Drive the tray from a Rust-side poll of /vms. Deliberately not the webview's SSE:
+            // that stream is route-scoped and paused when the window is hidden, i.e. dead
+            // exactly when the tray needs it. Rust holds the port + token, so it polls directly.
+            // Spawned after the tray exists so the first rebuild can never find no tray to set.
+            if started {
+                tray::spawn_poll(app.handle().clone(), port, api_token_for_poll);
+            }
 
             Ok(())
         })

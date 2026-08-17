@@ -1,5 +1,7 @@
 use serde::Deserialize;
 use std::time::Duration;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::Manager;
 
 /// Authenticated blocking client for the local engine, used from the tray's background
 /// threads (never the UI thread). Blocking + a short timeout keeps each call self-contained:
@@ -139,6 +141,113 @@ pub fn parse_id(id: &str) -> Option<Action> {
         return None;
     }
     Some(Action::Global(id.to_string()))
+}
+
+/// One clickable tray item. Wraps the builder so the menu code below reads as structure
+/// rather than five-line constructor calls; no tray item ever needs an accelerator.
+fn item(
+    app: &tauri::AppHandle,
+    id: String,
+    label: &str,
+    enabled: bool,
+) -> tauri::Result<MenuItem<tauri::Wry>> {
+    MenuItem::with_id(app, id, label, enabled, None::<&str>)
+}
+
+/// One VM's submenu. Running VMs get connect + lifecycle actions (connect/copy are enabled
+/// only once the guest health check passes); anything else gets Resume.
+fn vm_submenu(app: &tauri::AppHandle, vm: &TrayVm) -> tauri::Result<Submenu<tauri::Wry>> {
+    let name = short(&vm.name).to_string();
+    let sub = Submenu::with_id(
+        app,
+        vm_id(&name, "sub"),
+        format!("{} {}", dot(vm), name),
+        true,
+    )?;
+    if vm.state == "running" {
+        let can = vm.healthy; // connect/copy only make sense once the guest is up
+        sub.append(&item(app, vm_id(&name, "vnc"), "Connect VNC", can)?)?;
+        sub.append(&item(app, vm_id(&name, "ssh"), "Connect SSH", can)?)?;
+        sub.append(&item(app, vm_id(&name, "ip"), "Copy IP address", can)?)?;
+        sub.append(&PredefinedMenuItem::separator(app)?)?;
+        sub.append(&item(app, vm_id(&name, "restart"), "Restart", true)?)?;
+        sub.append(&item(app, vm_id(&name, "suspend"), "Suspend", true)?)?;
+        sub.append(&item(app, vm_id(&name, "down"), "Stop", true)?)?;
+    } else {
+        sub.append(&item(app, vm_id(&name, "resume"), "Resume", true)?)?;
+    }
+    sub.append(&PredefinedMenuItem::separator(app)?)?;
+    sub.append(&item(app, vm_id(&name, "show"), "Show in app", true)?)?;
+    sub.append(&item(app, vm_id(&name, "delete"), "Delete…", true)?)?;
+    Ok(sub)
+}
+
+/// Build the whole tray menu for the current fleet. Per-VM submenus first, then the globals,
+/// then Show/Quit. Called on the main thread only (menu objects aren't Send on macOS).
+///
+/// # Errors
+///
+/// Returns the Tauri error if any menu item or submenu fails to construct.
+pub fn build_menu(app: &tauri::AppHandle, vms: &[TrayVm]) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+    for vm in vms {
+        menu.append(&vm_submenu(app, vm)?)?;
+    }
+    if !vms.is_empty() {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    menu.append(&item(app, "new".into(), "New VM", true)?)?;
+    menu.append(&item(app, "suspend-all".into(), "Suspend all", true)?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&item(app, "settings".into(), "Settings…", true)?)?;
+    menu.append(&item(app, "doctor".into(), "Doctor…", true)?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&item(app, "show".into(), "Show macfleet", true)?)?;
+    menu.append(&item(app, "quit".into(), "Quit", true)?)?;
+    Ok(menu)
+}
+
+/// Background poll: fetch `/vms`, project, and rebuild the tray menu only when the projection
+/// changes. Runs off the UI thread (blocking HTTP); menu rebuilds hop to the main thread via
+/// `run_on_main_thread` because macOS menu objects aren't Send. A failed poll (engine still
+/// booting, transient error) just skips a cycle and retries — the tray keeps its last good menu.
+pub fn spawn_poll(app: tauri::AppHandle, port: u16, token: String) {
+    std::thread::spawn(move || {
+        let engine = Engine::new(port, &token);
+        let mut last: Option<Vec<TrayVm>> = None;
+        loop {
+            if let Ok(vms) = engine.list_vms() {
+                let projected = project(vms);
+                if last.as_ref() != Some(&projected) {
+                    let app2 = app.clone();
+                    let for_menu = projected.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let (Some(tray), Ok(menu)) =
+                            (app2.tray_by_id("main"), build_menu(&app2, &for_menu))
+                        {
+                            let _ = tray.set_menu(Some(menu));
+                        }
+                    });
+                    last = Some(projected);
+                }
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
+pub fn on_menu_event(app: &tauri::AppHandle, id: &str) {
+    // Real dispatch lands in Task 4. For now, keep show/quit working so the app is usable.
+    match id {
+        "show" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
