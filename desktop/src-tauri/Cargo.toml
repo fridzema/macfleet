@@ -23,6 +23,11 @@ tauri-plugin-os = "2"
 tauri-plugin-log = "2"
 log = "0.4"
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "json",
+  "rustls-tls",
+] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
