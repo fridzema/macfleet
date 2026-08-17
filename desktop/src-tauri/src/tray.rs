@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// Authenticated blocking client for the local engine, used from the tray's background
 /// threads (never the UI thread). Blocking + a short timeout keeps each call self-contained:
@@ -236,9 +237,73 @@ pub fn spawn_poll(app: tauri::AppHandle, port: u16, token: String) {
     });
 }
 
+/// Tray click dispatch. Runs on the main thread (Tauri calls it there). Anything that does
+/// blocking I/O (HTTP, a confirm dialog) is pushed to a worker thread so the menu closes
+/// immediately and the UI thread never stalls. Engine access needs the per-run config, read
+/// from managed state.
 pub fn on_menu_event(app: &tauri::AppHandle, id: &str) {
-    // Real dispatch lands in Task 4. For now, keep show/quit working so the app is usable.
-    match id {
+    let Some(action) = parse_id(id) else { return };
+    match action {
+        Action::Global(g) => on_global(app, &g),
+        Action::Vm { name, verb } => on_vm(app, &name, &verb),
+    }
+}
+
+fn engine_from(app: &tauri::AppHandle) -> Option<Engine> {
+    let cfg = app.try_state::<crate::state::ApiConfig>()?;
+    Some(Engine::new(cfg.port, &cfg.token))
+}
+
+fn on_vm(app: &tauri::AppHandle, name: &str, verb: &str) {
+    match verb {
+        "restart" | "suspend" | "resume" | "down" => {
+            let Some(engine) = engine_from(app) else {
+                return;
+            };
+            let (name, verb) = (name.to_string(), verb.to_string());
+            let path = format!("/vms/{name}/{verb}");
+            std::thread::spawn(move || {
+                if let Err(e) = engine.post(&path) {
+                    log::warn!("tray {verb} {name} failed: {e}");
+                }
+            });
+        }
+        "delete" => confirm_and_delete(app, name),
+        // vnc/ssh/ip land in Task 5; show lands in Task 6.
+        _ => {}
+    }
+}
+
+fn confirm_and_delete(app: &tauri::AppHandle, name: &str) {
+    let Some(engine) = engine_from(app) else {
+        return;
+    };
+    let (app2, name) = (app.clone(), name.to_string());
+    std::thread::spawn(move || {
+        // Native two-button confirm — the app's in-UI two-step arm can't be expressed in a
+        // native menu, so a modal is the equivalent guard against a stray click.
+        let ok = app2
+            .dialog()
+            .message(format!(
+                "Delete {name}? This stops and removes the VM. It cannot be undone."
+            ))
+            .title("macfleet")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Delete".into(),
+                "Cancel".into(),
+            ))
+            .blocking_show();
+        if ok {
+            if let Err(e) = engine.post(&format!("/vms/{name}/nuke")) {
+                log::warn!("tray delete {name} failed: {e}");
+            }
+        }
+    });
+}
+
+fn on_global(app: &tauri::AppHandle, g: &str) {
+    match g {
         "show" => {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -246,6 +311,7 @@ pub fn on_menu_event(app: &tauri::AppHandle, id: &str) {
             }
         }
         "quit" => app.exit(0),
+        // new / suspend-all / settings / doctor land in Task 6.
         _ => {}
     }
 }
