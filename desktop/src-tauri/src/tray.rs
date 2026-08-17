@@ -1,4 +1,85 @@
 use serde::Deserialize;
+use std::time::Duration;
+
+/// Authenticated blocking client for the local engine, used from the tray's background
+/// threads (never the UI thread). Blocking + a short timeout keeps each call self-contained:
+/// a wedged engine can't pin a UI thread, and a poll that stalls just skips a cycle.
+pub struct Engine {
+    base: String,
+    token: String,
+    client: reqwest::blocking::Client,
+}
+
+fn url(base: &str, path: &str) -> String {
+    format!("{base}{path}")
+}
+
+impl Engine {
+    pub fn new(port: u16, token: &str) -> Engine {
+        Engine {
+            base: format!("http://127.0.0.1:{port}"),
+            token: token.to_string(),
+            client: reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(8))
+                .build()
+                .unwrap_or_default(),
+        }
+    }
+
+    /// # Errors
+    ///
+    /// Returns the transport/status/decode error as a string if the fleet cannot be listed.
+    pub fn list_vms(&self) -> Result<Vec<TrayVm>, String> {
+        self.client
+            .get(url(&self.base, "/vms"))
+            .header("X-Macfleet-Token", &self.token)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|e| e.to_string())?
+            .json::<Vec<TrayVm>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Fire a lifecycle POST (restart/suspend/resume/down/nuke). No body; the engine takes the
+    /// VM name from the path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error as a string on any transport failure or non-2xx status, so the caller
+    /// can surface it.
+    pub fn post(&self, path: &str) -> Result<(), String> {
+        self.client
+            .post(url(&self.base, path))
+            .header("X-Macfleet-Token", &self.token)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if the connection lookup fails or the VM has no IP assigned yet.
+    pub fn connection_ip(&self, short_name: &str) -> Result<String, String> {
+        #[derive(Deserialize)]
+        struct Conn {
+            ip: String,
+        }
+        let conn = self
+            .client
+            .get(url(&self.base, &format!("/vms/{short_name}/connection")))
+            .header("X-Macfleet-Token", &self.token)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|e| e.to_string())?
+            .json::<Conn>()
+            .map_err(|e| e.to_string())?;
+        if conn.ip.is_empty() || conn.ip == "—" {
+            return Err("VM has no IP yet".into());
+        }
+        Ok(conn.ip)
+    }
+}
 
 /// One VM as the tray needs it — three fields, not the whole engine `Vm`. Deserialized from
 /// `GET /vms`; extra JSON fields (source, cpu, `memory_mb`, `lease_expires_at`…) are ignored.
@@ -123,6 +204,25 @@ mod tests {
         assert!(parse_id("vm:web").is_none()); // missing verb
         assert!(parse_id("vm::restart").is_none()); // empty name
         assert!(parse_id("vm:web:").is_none()); // empty verb
+    }
+
+    #[test]
+    fn url_joins_base_and_path() {
+        assert_eq!(
+            url("http://127.0.0.1:8765", "/vms"),
+            "http://127.0.0.1:8765/vms"
+        );
+        assert_eq!(
+            url("http://127.0.0.1:8765", "/vms/web/restart"),
+            "http://127.0.0.1:8765/vms/web/restart"
+        );
+    }
+
+    #[test]
+    fn engine_new_builds_the_loopback_base() {
+        let e = Engine::new(53019, "tok");
+        assert_eq!(e.base, "http://127.0.0.1:53019");
+        assert_eq!(e.token, "tok");
     }
 
     fn tv(name: &str, state: &str, healthy: bool) -> TrayVm {
