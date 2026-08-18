@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="38" viewBox="0 0 44 38">
+  <!-- Menu-bar template glyph: alpha is the mask, RGB is ignored by macOS, so
+       depth is expressed purely as stroke opacity. The mask cuts a 1px gutter
+       around the front card out of the ghost layer, standing in for the neon
+       glow that separates the cards in the full-colour mark. -->
+  <defs>
+    <mask id="mf-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="44" height="38">
+      <rect width="44" height="38" fill="#fff"/>
+      <rect x="13.5" y="11.5" width="31" height="27" rx="6.5" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="none" stroke="#000" stroke-width="2.5" stroke-linejoin="round" mask="url(#mf-cut)">
+    <rect x="2" y="2" width="26" height="22" rx="4.5" opacity=".38"/>
+    <rect x="9" y="8" width="26" height="22" rx="4.5" opacity=".62"/>
+  </g>
+  <g fill="none" stroke="#000" stroke-linejoin="round">
+    <rect x="16" y="14" width="26" height="22" rx="4.5" stroke-width="3"/>
+    <path d="M16 21h26" stroke-width="2.6"/>
+  </g>
+  <circle cx="21.6" cy="17.6" r="2" fill="#000"/>
+</svg>

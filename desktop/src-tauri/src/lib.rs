@@ -91,8 +91,7 @@ fn engine_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
 ///
 /// # Panics
 ///
-/// Panics if the app has no default window icon (needed for the tray icon)
-/// or if the sidecar mutex is poisoned during shutdown.
+/// Panics if the sidecar mutex is poisoned during shutdown.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)] // one long Tauri builder + setup closure; splitting hurts clarity
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -227,7 +226,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let _tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                // Monochrome macOS template icon: macOS discards its RGB and tints the
+                // alpha to match the menu bar, so it stays legible in light mode, dark
+                // mode and under wallpaper tinting — unlike the full-colour app icon,
+                // which is a dark plate on a dark bar. `include_image!` bakes the PNG to
+                // raw RGBA at compile time relative to CARGO_MANIFEST_DIR, so this needs
+                // no `image-png` cargo feature and no bundle-resource plumbing.
+                .icon(tauri::include_image!("icons/tray-template.png"))
+                .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(|app, event| tray::on_menu_event(app, event.id.as_ref()))
                 .build(app)?;
