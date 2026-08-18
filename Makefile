@@ -5,7 +5,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help \
 	dev dev-frontend serve mcp \
-	build build-debug \
+	build build-debug icons \
 	test test-engine test-desktop e2e coverage demo \
 	lint lint-engine lint-desktop format format-engine format-desktop \
 	setup setup-engine setup-desktop clean
@@ -22,6 +22,7 @@ help:
 	@echo "Build:"
 	@echo "  build          Build the desktop app bundle"
 	@echo "  build-debug    Build the desktop app with debug symbols"
+	@echo "  icons          Regenerate the app icons from the brand master"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test           Run all unit tests (engine pytest + desktop vitest)"
@@ -67,6 +68,9 @@ build:
 
 build-debug:
 	$(MAKE) -C desktop build-debug
+
+icons:
+	$(MAKE) -C desktop icons
 
 # Testing
 test: test-engine test-desktop

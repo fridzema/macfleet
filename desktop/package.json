@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "build:engine": "../scripts/build-engine-sidecar.sh",
+    "icons": "tauri icon src-tauri/app-icon.png",
     "preview": "vite preview",
     "lint": "eslint . && biome check .",
     "lint:fix": "eslint . --fix && biome check --write .",
