@@ -5,6 +5,12 @@ import { setToastScheduler } from '../../src/composables/useToasts'
 import SettingsPage from '../../src/pages/SettingsPage.vue'
 import { api } from '../../src/shared/api'
 
+const push = vi.fn()
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRouter: () => ({ push }),
+}))
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({ confirm: vi.fn() }))
 vi.mock('@tauri-apps/plugin-fs', () => ({
   readTextFile: vi.fn(),
@@ -32,6 +38,7 @@ beforeEach(() => {
   vi.spyOn(api, 'config').mockResolvedValue(CONFIG)
   vi.spyOn(api, 'doctor').mockResolvedValue([])
   vi.mocked(readTextFile).mockResolvedValue('')
+  push.mockClear()
 })
 
 afterEach(() => {
@@ -236,5 +243,20 @@ describe('SettingsPage — Engine log', () => {
     await flushPromises()
     expect(w.get('[data-test="engine-log"]').text()).toContain('a')
     expect(w.find('[data-test="engine-log-error"]').exists()).toBe(false)
+  })
+})
+
+describe('SettingsPage — navigation', () => {
+  it('scrolls its own content, since the layout clips it', async () => {
+    const w = mount(SettingsPage)
+    await flushPromises()
+    expect(w.get('[data-test="settings-page"]').classes()).toContain('overflow-y-auto')
+  })
+
+  it('goes back to the fleet', async () => {
+    const w = mount(SettingsPage)
+    await flushPromises()
+    await w.get('[data-test="settings-back"]').trigger('click')
+    expect(push).toHaveBeenCalledWith('/')
   })
 })

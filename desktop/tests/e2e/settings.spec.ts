@@ -26,3 +26,13 @@ test('doctor renders the engine checks with their status', async ({ page }) => {
   await expect(warm).toContainText("state is 'stopped'")
   await expect(warm).toContainText('macfleet warm')
 })
+
+test('back returns to the fleet', async ({ page }) => {
+  await mockApi(page, {
+    vms: [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }],
+  })
+  await page.goto('/settings')
+  await page.getByTestId('settings-back').click()
+  await expect(page.getByTestId('settings-page')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/$/)
+})
