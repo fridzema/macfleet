@@ -15,9 +15,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run --extra mcp pytest -q
       - run: uv export --format requirements-txt --no-dev --extra mcp --no-emit-project --output-file requirements-audit.txt
-      - run: uvx pip-audit -r requirements-audit.txt
+      # uv already exported the complete, pinned transitive graph. Avoid asking
+      # pip-audit to create a second environment and resolve it again.
+      - run: uvx pip-audit --disable-pip --no-deps -r requirements-audit.txt
       - run: uv export --format requirements-txt --extra dev --no-emit-project --output-file build-requirements-audit.txt
-      - run: uvx pip-audit -r build-requirements-audit.txt
+      - run: uvx pip-audit --disable-pip --no-deps -r build-requirements-audit.txt
 
   desktop:
     runs-on: macos-15
@@ -48,4 +50,12 @@ jobs:
       - run: cargo install cargo-audit --locked
       # quick-xml 0.39 is only pulled by Linux's wayland-scanner build tool, which parses
       # trusted protocol XML at compile time; no newer compatible scanner exists yet.
-      - run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+      # rkyv 0.7 is an optional rust_decimal feature recorded in Cargo.lock through
+      # tauri-plugin-log -> byte-unit. It is absent from `cargo tree --target all`, so no
+      # vulnerable rkyv code is compiled into macfleet; rust_decimal has no compatible
+      # release on rkyv 0.8 yet.
+      - run: >-
+          cargo audit --file src-tauri/Cargo.lock
+          --ignore RUSTSEC-2026-0194
+          --ignore RUSTSEC-2026-0195
+          --ignore RUSTSEC-2026-0235
