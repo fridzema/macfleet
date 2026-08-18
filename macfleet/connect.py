@@ -34,6 +34,7 @@ from macfleet.vm import (
     shortname,
     validate_label,
     validate_name,
+    validate_snapshot_id,
 )
 
 GUEST_USER = "admin"
@@ -136,8 +137,8 @@ class GuestControl:
         except (urllib.error.URLError, OSError) as exc:
             raise RuntimeError(f"computer-server unreachable: {exc}") from exc
 
-    def screenshot(self) -> bytes:
-        return self._get("/macfleet/screenshot")
+    def screenshot(self, timeout: float = 30) -> bytes:
+        return self._get("/macfleet/screenshot", timeout=timeout)
 
     def logs(self, lines: int = 100, cursor: int | None = None) -> dict:
         query = f"lines={lines}"
@@ -502,6 +503,8 @@ class Fleet:
                memory: int | None = None, disk: int | None = None) -> None:
         target = ensure_mutable(name)
         validate_name(name)
+        if from_snapshot is not None:
+            validate_snapshot_id(from_snapshot)
         # Lock the destination only: clones from the same golden/snapshot source are safe to run
         # concurrently and fleet spin-up should not serialize on a shared read-only source.
         with self._locked_vms(target):
@@ -618,7 +621,10 @@ class Fleet:
     def up(self, name: str, preset: str | None = None) -> None:
         self.create(name, **self.preset_resources(preset))
 
-    def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
+    def reap(self) -> list[str]:
+        # Deliberately re-lists inside each VM's lock rather than taking a caller's inventory:
+        # a listing taken before a contended lock can be stale by the time the lock is held,
+        # and acting on it would delete a VM that was recreated under the same name.
         now = self._clock()
         reaped = []
         for full in self._leases.expired(now):
@@ -646,7 +652,7 @@ class Fleet:
             if self._fleet_cache is not None and now < self._fleet_cache[0]:
                 return [dict(vm) for vm in self._fleet_cache[1]]
         vms = self.tart.list()
-        reaped = set(self.reap(existing=vms))
+        reaped = set(self.reap())
         vms = [v for v in vms if v.name not in reaped]
         live_names = {v.name for v in vms}
         # The desktop API is long-lived while CLI/MCP clients can mutate Tart in separate
@@ -950,6 +956,7 @@ class Fleet:
         return out
 
     def delete_snapshot(self, snapshot_id: str) -> None:
+        validate_snapshot_id(snapshot_id)
         full = f"mfsnap-{snapshot_id}"
         with self._locked_vms(full):
             self.tart.delete(full)
@@ -1029,6 +1036,7 @@ class Fleet:
         installed, then removed. Works when the VM no longer exists (recreate)."""
         target = ensure_mutable(name)
         validate_name(name)
+        validate_snapshot_id(snapshot_id)
         snap = f"mfsnap-{snapshot_id}"
         with self._locked_vms(target, snap):
             self._restore_unlocked(name, snapshot_id)

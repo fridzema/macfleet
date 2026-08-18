@@ -842,7 +842,7 @@ def test_reap_keeps_failed_deletion_leased_for_retry(tmp_path, monkeypatch):
         raise RuntimeError("tart delete failed")
 
     monkeypatch.setattr(fleet, "_nuke_unlocked", fail)
-    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert fleet.reap() == []
     assert lease.expired(2000.0) == ["mf-old"]
 
 
@@ -861,19 +861,32 @@ def test_reap_skips_candidate_renewed_while_waiting_for_vm_lock(tmp_path, monkey
 
     monkeypatch.setattr(fleet, "_locked_vms", renewing_lock)
 
-    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert fleet.reap() == []
     assert ["tart", "delete", "mf-old"] not in calls
     assert lease.expired(2000.0) == []
 
 
-def test_reap_refreshes_stale_inventory_after_acquiring_vm_lock(tmp_path):
+def test_reap_refreshes_stale_inventory_after_acquiring_vm_lock(tmp_path, monkeypatch):
     fleet, calls, _, lease = _fleet(
         tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
     )
     lease.record("mf-old", ttl=-1)
+    original_lock = fleet._locked_vms
 
-    assert fleet.reap(existing=[]) == ["mf-old"]
-    assert ["tart", "delete", "mf-old"] in calls
+    @contextmanager
+    def vanishing_lock(*names):
+        with original_lock(*names):
+            # The VM disappears (say, an external `tart delete`) between candidate discovery
+            # and this lock. reap() must act on the listing it takes INSIDE the lock: drop the
+            # lease, and never issue a delete for a name it no longer owns.
+            monkeypatch.setattr(fleet.tart, "list", list)
+            yield
+
+    monkeypatch.setattr(fleet, "_locked_vms", vanishing_lock)
+
+    assert fleet.reap() == ["mf-old"]
+    assert ["tart", "delete", "mf-old"] not in calls
+    assert lease.expired(1e12) == []
 
 
 def test_list_vms_reaps_first_and_marks_health(tmp_path):
@@ -1383,6 +1396,20 @@ def test_create_rejects_invalid_name():
         with pytest.raises(RuntimeError, match="invalid VM name"):
             fleet.create(bad)
     assert not any(a[:2] == ["tart", "clone"] for a in seen)
+
+
+def test_snapshot_id_arguments_are_validated(tmp_path):
+    # Snapshot ids arrive from clients (API bodies, MCP arguments) and are interpolated into
+    # `mfsnap-<id>`, so they get the same treatment as a VM name — nothing reaches tart.
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    for bad in ("../mf-golden", "a b", "x/y", ""):
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.create("copy", from_snapshot=bad)
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.restore("web", bad)
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.delete_snapshot(bad)
+    assert not any(a[:2] in (["tart", "clone"], ["tart", "delete"]) for a in calls)
 
 
 def test_snapshot_rejects_hyphenated_label(tmp_path):
