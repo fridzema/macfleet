@@ -181,6 +181,26 @@ describe('AppHeader', () => {
     wrapper.unmount()
   })
 
+  it('renders the brand mark as a decorative svg that cannot swallow the button click', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
+    const wrapper = mount(AppHeader)
+    const mark = wrapper.find('[data-test="brand-mark"]')
+    expect(mark.exists()).toBe(true)
+    expect(mark.element.tagName.toLowerCase()).toBe('svg')
+    // Decorative: the button already carries aria-label="Back to the fleet".
+    expect(mark.attributes('aria-hidden')).toBe('true')
+    // Guards the e2e brand-home click: the mark must never be the pointer target.
+    expect(mark.classes()).toContain('pointer-events-none')
+    // Three stacked cards plus the front card's opaque knockout, and the status dot.
+    expect(mark.findAll('rect')).toHaveLength(4)
+    expect(mark.findAll('circle')).toHaveLength(1)
+    // Nested inside the brand button, so clicking it still routes home.
+    expect(wrapper.get('[data-test="brand-home"]').find('[data-test="brand-mark"]').exists()).toBe(
+      true,
+    )
+    wrapper.unmount()
+  })
+
   it('navigates to /settings from the gear button', async () => {
     vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
     const wrapper = mount(AppHeader)
