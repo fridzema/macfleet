@@ -188,4 +188,12 @@ describe('AppHeader', () => {
     expect(pushSpy).toHaveBeenCalledWith('/settings')
     wrapper.unmount()
   })
+
+  it('navigates home from the brand', async () => {
+    vi.spyOn(api, 'host').mockResolvedValue({ total_mem_gb: 32, cpu_count: 8, name: 'Mac' })
+    const wrapper = mount(AppHeader)
+    await wrapper.get('[data-test="brand-home"]').trigger('click')
+    expect(pushSpy).toHaveBeenCalledWith('/')
+    wrapper.unmount()
+  })
 })

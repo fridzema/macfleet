@@ -36,3 +36,13 @@ test('back returns to the fleet', async ({ page }) => {
   await expect(page.getByTestId('settings-page')).toHaveCount(0)
   await expect(page).toHaveURL(/\/$/)
 })
+
+test('the brand returns to the fleet', async ({ page }) => {
+  await mockApi(page, {
+    vms: [{ name: 'mf-web', state: 'running', source: 'local', healthy: true }],
+  })
+  await page.goto('/settings')
+  await page.getByTestId('brand-home').click()
+  await expect(page.getByTestId('settings-page')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/$/)
+})
