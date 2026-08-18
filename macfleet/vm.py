@@ -98,6 +98,8 @@ GOLDEN = "mf-golden"
 # name itself contains hyphens (see Fleet.snapshots, which splits on the last '-').
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._]{0,63}$")
+# A snapshot id is `<vm name>-<label>`, so it spans two validated segments joined by '-'.
+_SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,128}$")
 
 
 def ensure_mutable(name: str) -> str:
@@ -129,6 +131,18 @@ def validate_label(label: str) -> str:
             f"invalid snapshot label {label!r}: use letters, digits, '.', '_' (max 64 chars)"
         )
     return label
+
+
+def validate_snapshot_id(snapshot_id: str) -> str:
+    """Reject snapshot ids not usable as a URL path segment / tart argument. Ids arrive from
+    clients (API bodies, MCP arguments) rather than from snapshots(), so they get the same
+    treatment as a VM name instead of being interpolated into `mfsnap-<id>` unchecked."""
+    if not _SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        raise RuntimeError(
+            f"invalid snapshot id {snapshot_id!r}: use letters, digits, '.', '_', '-' "
+            "(max 129 chars)"
+        )
+    return snapshot_id
 
 
 @dataclass(frozen=True)
