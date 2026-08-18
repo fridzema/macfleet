@@ -5,3 +5,10 @@ node_modules/
 dist/
 target/
 desktop/src-tauri/binaries/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
