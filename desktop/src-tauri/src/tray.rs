@@ -130,8 +130,13 @@ pub fn short(name: &str) -> &str {
     name.strip_prefix("mf-").unwrap_or(name)
 }
 
-/// Stable display order so the menu doesn't reshuffle between rebuilds.
+/// Fleet members only, in a stable display order so the menu doesn't reshuffle between
+/// rebuilds. `/vms` is a view of everything Tart knows — pulled OCI images, `mfsnap-*`
+/// snapshots, hand-made VMs — so the `mf-` prefix is what marks a VM as ours, and the
+/// read-only `mf-golden` template is not a fleet member. Same filter as the webview's
+/// `refresh()`; the two must not disagree about what the fleet is.
 pub fn project(mut vms: Vec<TrayVm>) -> Vec<TrayVm> {
+    vms.retain(|v| v.name.starts_with("mf-") && v.name != "mf-golden");
     vms.sort_by(|a, b| a.name.cmp(&b.name));
     vms
 }
@@ -400,6 +405,25 @@ mod tests {
         assert_eq!(
             out.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(),
             ["mf-a", "mf-c"]
+        );
+    }
+
+    #[test]
+    fn project_keeps_only_fleet_vms() {
+        let out = project(vec![
+            tv("mf-web", "running", true),
+            tv(
+                "ghcr.io/cirruslabs/macos-tahoe-base:latest",
+                "stopped",
+                false,
+            ),
+            tv("mfsnap-vm-cc0e-20260709.193334", "stopped", false),
+            tv("cua-tahoe", "stopped", false),
+            tv("mf-golden", "stopped", false),
+        ]);
+        assert_eq!(
+            out.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(),
+            ["mf-web"]
         );
     }
 
