@@ -1,4 +1,4 @@
-from macfleet.doctor import run_checks
+from macfleet.doctor import TCC_SCREENSHOT_TIMEOUT, run_checks
 from macfleet.vm import VmInfo
 
 
@@ -14,7 +14,8 @@ class FakeComputer:
     def __init__(self, data=b"PNG"):
         self._data = data
 
-    def screenshot(self):
+    def screenshot(self, timeout=None):
+        self.timeout = timeout
         return self._data
 
 
@@ -27,6 +28,7 @@ class FakeFleet:
         self._computer_error = computer_error
 
     def list(self):
+        self.list_calls = getattr(self, "list_calls", 0) + 1
         return self._vms
 
     def computer(self, name):
@@ -195,3 +197,21 @@ def test_disk_ok_when_plentiful(monkeypatch):
         f_frsize = 1_000_000_000  # 500GB free
     monkeypatch.setattr(doctor.os, "statvfs", lambda _: St())
     assert by_id(run_checks(FakeFleet()))["disk"]["status"] == "ok"
+
+
+def test_report_shells_out_to_tart_list_once(monkeypatch):
+    # Five checks need the inventory; each used to spawn its own `tart list`.
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
+    fleet = FakeFleet(vms=[VmInfo("mf-golden", "suspended", "local"),
+                          VmInfo("mf-web", "running", "local")])
+    run_checks(fleet)
+    assert fleet.list_calls == 1
+
+
+def test_tcc_screenshot_is_bounded(monkeypatch):
+    # /doctor holds a threadpool worker, so the probe must not wait out the client default.
+    monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
+    computer = FakeComputer()
+    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")], computer_obj=computer)
+    assert by_id(run_checks(fleet))["tcc_screenshot"]["status"] == "ok"
+    assert computer.timeout == TCC_SCREENSHOT_TIMEOUT
