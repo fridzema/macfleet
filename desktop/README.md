@@ -29,6 +29,11 @@ bun run tauri dev
 This spawns the engine (`uv run --frozen macfleet serve`) as a managed
 sidecar process automatically — no separate `macfleet serve` needed.
 
+`bun run dev` alone serves the frontend in a browser instead. There is no Tauri host there to
+hand it the engine's per-run token, so point it at a running `macfleet serve` with
+`VITE_MACFLEET_TOKEN` (the token that command prints on startup) and, if it is not on
+`127.0.0.1:8765`, `VITE_MACFLEET_API_BASE`. See `.env.example`.
+
 ## Menu bar
 
 The app lives in the menu bar. Closing the window hides it — the VMs keep

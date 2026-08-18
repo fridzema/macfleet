@@ -46,7 +46,9 @@ against fakes and mocks, so **no VM and no baked image are needed to develop or 
 
    Whole-project targets need both halves installed; use `make test-engine` /
    `make lint-desktop` etc. to run one. `make e2e` runs the Playwright suite against a mocked
-   API. Before pushing, mirror CI: `make lint && make test && make e2e`, plus
+   API. `make dev-frontend` serves the frontend in a plain browser; since there is no Tauri
+   host to hand it the engine's per-run token, set `VITE_MACFLEET_TOKEN` (in `desktop/.env`)
+   to the token `macfleet serve` prints on startup, or every request comes back 401. Before pushing, mirror CI: `make lint && make test && make e2e`, plus
    `make -C desktop rust-test` for Rust changes.
 
 3. Commit using [Conventional Commits](https://www.conventionalcommits.org/). Commitlint
