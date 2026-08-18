@@ -1,8 +1,30 @@
 use serde::Deserialize;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+#[derive(Clone, serde::Serialize)]
+struct TrayAction {
+    action: String,
+    vm: Option<String>,
+}
+
+/// Show the main window, then emit a tray-action the webview handles. Used for everything that
+/// inherently belongs in the app (navigation, create) rather than a fire-and-forget HTTP call.
+fn surface_and_emit(app: &tauri::AppHandle, action: &str, vm: Option<String>) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit(
+        "tray-action",
+        TrayAction {
+            action: action.to_string(),
+            vm,
+        },
+    );
+}
 
 /// Authenticated blocking client for the local engine, used from the tray's background
 /// threads (never the UI thread). Blocking + a short timeout keeps each call self-contained:
@@ -279,7 +301,7 @@ fn on_vm(app: &tauri::AppHandle, name: &str, verb: &str) {
                 Err(e) => log::warn!("tray {verb} {name}: {e}"),
             });
         }
-        // show lands in Task 6.
+        "show" => surface_and_emit(app, "show", Some(name.to_string())),
         _ => {}
     }
 }
@@ -346,7 +368,7 @@ fn on_global(app: &tauri::AppHandle, g: &str) {
             }
         }
         "quit" => app.exit(0),
-        // new / suspend-all / settings / doctor land in Task 6.
+        "settings" | "doctor" | "new" | "suspend-all" => surface_and_emit(app, g, None),
         _ => {}
     }
 }
