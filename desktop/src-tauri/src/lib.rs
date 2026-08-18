@@ -115,6 +115,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![handlers::get_api_config])
+        .on_window_event(|window, event| {
+            // Menu-bar app: closing the window hides it and leaves the app (and its tray)
+            // running. Quit is the only path that actually exits — via the tray's "Quit", ⌘Q,
+            // or the app menu — and that runs RunEvent::Exit (SIGTERM the sidecar group,
+            // suspend the fleet). So closing the window no longer suspends VMs; quitting does.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             // Per-run port + secret. The port is ephemeral (never a fixed :8765 a stale
             // server could already own) and the token authenticates every API call — the
