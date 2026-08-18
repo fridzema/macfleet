@@ -49,7 +49,14 @@ onMounted(() => {
   <header
     class="relative z-[5] flex h-[52px] shrink-0 items-center gap-3.5 border-b border-[var(--border)] bg-[var(--bg-elev)] px-3.5"
   >
-    <div class="flex shrink-0 items-center gap-[9px]">
+    <button
+      type="button"
+      title="Back to the fleet"
+      aria-label="Back to the fleet"
+      data-test="brand-home"
+      class="flex shrink-0 items-center gap-[9px]"
+      @click="router.push('/')"
+    >
       <div
         class="flex h-[26px] w-[26px] items-center justify-center rounded-[7px]"
         style="
@@ -62,7 +69,7 @@ onMounted(() => {
         </div>
       </div>
       <div class="text-[14px] font-semibold tracking-[-0.02em]">macfleet</div>
-    </div>
+    </button>
 
     <div class="relative max-w-[400px] flex-1">
       <span
