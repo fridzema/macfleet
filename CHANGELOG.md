@@ -5,38 +5,6 @@ All notable changes to macfleet are documented here. This project adheres to
 
 ## [0.5.0] - 2026-08-18
 
-The desktop app is now a persistent menu-bar fleet controller, with engine-owned settings
-and diagnostics available from a dedicated settings screen.
-
-### Added
-
-- **Native menu-bar control.** The tray menu polls the authenticated engine and exposes VM
-  state, lifecycle actions, VNC/SSH connections, IP copying, and a route back into the app.
-  Closing the main window now hides it while the fleet remains accessible from the menu bar.
-- **Settings and diagnostics.** A new settings route controls the default VM size preset,
-  runs the engine's doctor checks, shows engine logs, and provides fleet-only or full data
-  reset actions.
-- **Engine configuration API.** Engine-owned size presets, atomic persisted configuration,
-  doctor diagnostics, data-reset operations, and their authenticated API endpoints keep CLI,
-  desktop, and tray behavior aligned.
-
-### Changed
-
-- **Consistent macfleet branding.** The application, tray, browser assets, documentation,
-  contributor guidance, security policy, and package metadata now use the macfleet name and
-  stacked-windows mark throughout.
-- Releases are explicitly source-only on GitHub until the desktop app can be signed and
-  notarized; the Python distribution is not published to PyPI.
-
-### Fixed
-
-- Create flows preserve and use the selected size preset instead of silently reverting to a
-  different preset.
-- Settings remain scrollable on short windows, expose clear navigation back to the fleet,
-  reload after a full reset, and report engine-log read failures.
-
-## [0.5.0] - 2026-08-18
-
 Settings, diagnostics, and a real menu-bar app: the engine gained a config
 store, doctor checks, and a two-tier data reset, all surfaced in a new settings
 page and a native tray menu. macfleet also got its own brand mark and its
@@ -339,7 +307,6 @@ managed over [`tart`](https://github.com/cirruslabs/tart), with a Python engine
 - Computer-use requires a one-time manual TCC (Accessibility + Screen Recording)
   grant on the golden image; see `scripts/bake.sh`.
 
-[0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
 [0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
 [0.4.2]: https://github.com/fridzema/macfleet/releases/tag/v0.4.2
 [0.4.1]: https://github.com/fridzema/macfleet/releases/tag/v0.4.1
