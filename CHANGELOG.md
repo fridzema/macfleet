@@ -3,6 +3,123 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-18
+
+The desktop app is now a persistent menu-bar fleet controller, with engine-owned settings
+and diagnostics available from a dedicated settings screen.
+
+### Added
+
+- **Native menu-bar control.** The tray menu polls the authenticated engine and exposes VM
+  state, lifecycle actions, VNC/SSH connections, IP copying, and a route back into the app.
+  Closing the main window now hides it while the fleet remains accessible from the menu bar.
+- **Settings and diagnostics.** A new settings route controls the default VM size preset,
+  runs the engine's doctor checks, shows engine logs, and provides fleet-only or full data
+  reset actions.
+- **Engine configuration API.** Engine-owned size presets, atomic persisted configuration,
+  doctor diagnostics, data-reset operations, and their authenticated API endpoints keep CLI,
+  desktop, and tray behavior aligned.
+
+### Changed
+
+- **Consistent macfleet branding.** The application, tray, browser assets, documentation,
+  contributor guidance, security policy, and package metadata now use the macfleet name and
+  stacked-windows mark throughout.
+- Releases are explicitly source-only on GitHub until the desktop app can be signed and
+  notarized; the Python distribution is not published to PyPI.
+
+### Fixed
+
+- Create flows preserve and use the selected size preset instead of silently reverting to a
+  different preset.
+- Settings remain scrollable on short windows, expose clear navigation back to the fleet,
+  reload after a full reset, and report engine-log read failures.
+
+## [0.4.2] - 2026-07-14
+
+A reliability release: engine and desktop hardening around concurrent VM operations
+and lease/lifecycle correctness. No new user-facing commands.
+
+### Fixed
+
+- **Concurrent VM operations no longer drop state.** Suspend, resume, rename, down,
+  and nuke serialize per VM across the CLI, MCP, and API via file locks plus striped
+  in-process locks, so overlapping operations can no longer interleave and silently
+  lose a lease or a state update. Lock ordering is by stripe number, so a hash
+  collision cannot invert lock order between multi-VM operations.
+- **Resume survives a slow un-restorable suspend.** The restore probe is now
+  synchronous (a short-lived CLI/API worker could exit before the previous background
+  watcher ran) over a longer bounded window, and matches the exact known VZ
+  `failed to restore … invalid argument` signature. Only that signature discards the
+  saved state and cold-boots; any other launch failure preserves the suspend state
+  for a later retry.
+- **Lease countdowns survive restarts, sleep, and reap retries.** The desktop rebuilds
+  the countdown from the engine's persisted absolute expiry on every fleet frame,
+  correcting timer drift after sleep/backgrounding, and announces an expired lease
+  only once per expiry — a still-present frame during a reap retry no longer
+  re-toasts.
+- **Screenshots can't leak across screens.** A `ScreenTab` whose in-flight screenshot
+  settles after unmount no longer recreates its poll timer and leaks work into the
+  next VM's screen.
+- **Engine-startup failures are visible and recoverable.** When the sidecar fails to
+  come up, the desktop shows the error with a retry button instead of a silent
+  perpetual "Booting…".
+- **Command output includes stderr.** `exec` results surface `stderr` alongside
+  `stdout`.
+
+### Internal
+
+- Finished the OxideDock → macfleet rebrand and removed the leftover Tauri template
+  scaffolding (the `greet`/`get_app_info` commands, the `AppState` visit counter,
+  `commands.rs`/`error.rs`, the `ipc.ts` bridge and its test, and `bootstrap.sh`).
+  The lib crate is now `macfleet_desktop_lib`.
+
+## [0.4.1] - 2026-07-13
+
+A bug-fix release. Everything here is guest-provisioning or VM-lifecycle robustness.
+
+### Fixed
+
+- **Clicks land where you click.** The in-guest gateway rescales mouse coordinates
+  from the screenshot's pixel space to the display's logical points
+  (`CGDisplayBounds`). cua clicks via `CGWarpMouseCursorPosition` (logical points)
+  while the desktop maps clicks against the larger screenshot and cua applied no
+  scaling, so on a HiDPI guest every click landed off.
+- **Resume survives an un-restorable suspend.** macOS Virtualization can reject a
+  saved suspend state (`VZ Code=12 "failed to restore … invalid argument"`);
+  `resume()` now watches the `tart run` and, if the restore fails, discards the state
+  and cold-boots instead of silently staying suspended.
+- **`scripts/bake.sh` can bake a fresh golden again.** The provision script pins the
+  `cs-venv` to Python 3.12 so `cua-computer-server` (which requires ≥3.12) installs on
+  a base image whose default `python3` is 3.9.
+
+## [0.4.0] - 2026-07-13
+
+Creating a VM now selects it immediately and shows a live provisioning stepper until
+the guest is healthy.
+
+### Added
+
+- **Per-VM provisioning progress.** `Fleet.create()` records the clone/configure/boot/
+  health phases, advanced from live tart state plus the guest health check, and the
+  desktop renders them as a Clone → Boot → Ready panel before switching to the normal
+  detail view.
+- **`GET /vms/{name}/provision`** for a just-created VM's progress; `/fleet/events` now
+  streams `{vms, provisioning}` instead of a bare VM array.
+
+### Changed
+
+- **Create affordances wait for the engine.** They stay behind a clear "Starting
+  engine…" state until the engine's first successful list.
+- **`tauri dev` runs the live `uv run` engine** instead of the bundled PyInstaller
+  binary, avoiding stale code and 30s readiness-probe failures under macOS Gatekeeper.
+
+### Fixed
+
+- **Version-skew tolerance.** The fleet SSE stream accepts both the legacy bare-array
+  frame and the new `{vms, provisioning}` shape, so a version-skewed engine cannot
+  freeze the fleet view.
+
 ## [0.3.1] - 2026-07-10
 
 A reliability and security hardening pass across the engine and desktop client,
@@ -171,5 +288,12 @@ managed over [`tart`](https://github.com/cirruslabs/tart), with a Python engine
 - Computer-use requires a one-time manual TCC (Accessibility + Screen Recording)
   grant on the golden image; see `scripts/bake.sh`.
 
+[0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
+[0.4.2]: https://github.com/fridzema/macfleet/releases/tag/v0.4.2
+[0.4.1]: https://github.com/fridzema/macfleet/releases/tag/v0.4.1
+[0.4.0]: https://github.com/fridzema/macfleet/releases/tag/v0.4.0
+[0.3.1]: https://github.com/fridzema/macfleet/releases/tag/v0.3.1
+[0.3.0]: https://github.com/fridzema/macfleet/releases/tag/v0.3.0
+[0.2.0]: https://github.com/fridzema/macfleet/releases/tag/v0.2.0
 [0.1.1]: https://github.com/fridzema/macfleet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/fridzema/macfleet/releases/tag/v0.1.0
