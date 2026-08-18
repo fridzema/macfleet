@@ -1,6 +1,6 @@
 [project]
 name = "macfleet"
-version = "0.4.2"
+version = "0.5.0"
 description = "Spin up and control a fleet of macOS VMs via tart + cua"
 readme = "README.md"
 requires-python = ">=3.12"
