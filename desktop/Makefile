@@ -1,4 +1,4 @@
-.PHONY: help dev dev-frontend build build-debug lint lint-fix format format-check \
+.PHONY: help dev dev-frontend build build-debug icons lint lint-fix format format-check \
 	test test-unit test-e2e test-watch rust-lint rust-format rust-audit rust-test \
 	rust-coverage coverage ci check setup clean release-status
 
@@ -11,6 +11,7 @@ help:
 	@echo "  dev-frontend   Start frontend dev server only"
 	@echo "  build          Build for production"
 	@echo "  build-debug    Build with debug symbols"
+	@echo "  icons          Regenerate every icon from src-tauri/app-icon.png"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  lint           Run all linters"
@@ -55,6 +56,12 @@ build:
 
 build-debug:
 	bun tauri build --debug
+
+# Regenerate every derived icon from src-tauri/app-icon.png (the brand master) plus
+# the monochrome menu-bar template PNG. Commit the result; nothing in CI regenerates
+# icons, and `tauri icon` output is not byte-reproducible across CLI versions.
+icons:
+	bun run icons
 
 # Linting & Formatting
 lint:
