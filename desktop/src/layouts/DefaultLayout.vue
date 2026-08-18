@@ -5,6 +5,11 @@ import CommandPalette from '../components/CommandPalette.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import SnapshotDialog from '../components/SnapshotDialog.vue'
 import ToastStack from '../components/ToastStack.vue'
+import { useTrayMenu } from '../composables/useTrayMenu'
+
+// App scope, not a route component: DefaultLayout wraps every route and never unmounts, so
+// the tray listener outlives navigation (unlike the route-scoped fleet SSE).
+useTrayMenu()
 </script>
 
 <template>
