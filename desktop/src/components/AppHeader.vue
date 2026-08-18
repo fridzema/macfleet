@@ -57,17 +57,43 @@ onMounted(() => {
       class="flex shrink-0 items-center gap-[9px]"
       @click="router.push('/')"
     >
-      <div
-        class="flex h-[26px] w-[26px] items-center justify-center rounded-[7px]"
-        style="
-          background: linear-gradient(150deg, var(--emerald), #0b7a5c);
-          box-shadow: 0 2px 8px -2px var(--emerald);
-        "
+      <!-- Brand mark: the app icon's stacked-window glyph, redrawn for 26px. The ghost
+           cards use currentColor so they invert with the theme; the front card keeps the
+           logo's violet identity and its emerald status dot. Decorative — the button
+           already carries the accessible name, and pointer-events-none keeps the SVG
+           from ever becoming the click target. -->
+      <svg
+        data-test="brand-mark"
+        class="pointer-events-none shrink-0"
+        width="26"
+        height="26"
+        viewBox="0 0 26 26"
+        fill="none"
+        aria-hidden="true"
+        focusable="false"
       >
-        <div class="relative h-[11px] w-[11px] rounded-[3px] border-2 border-white">
-          <div class="absolute inset-[1.5px] rounded-[1px] bg-white opacity-50" />
-        </div>
-      </div>
+        <g stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <rect x="2" y="3.5" width="15" height="12" rx="2.5" opacity="0.28" />
+          <rect x="5.5" y="7" width="15" height="12" rx="2.5" opacity="0.5" />
+        </g>
+        <!-- Opaque knockout so the ghost strokes don't muddy the front card's wash.
+             Matches the header's own bg-[var(--bg-elev)]. -->
+        <rect x="9" y="10.5" width="15" height="12" rx="2.5" fill="var(--bg-elev)" />
+        <rect
+          x="9"
+          y="10.5"
+          width="15"
+          height="12"
+          rx="2.5"
+          fill="var(--violet)"
+          fill-opacity="0.18"
+          stroke="var(--violet)"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+        />
+        <path d="M9 14.25h15" stroke="var(--violet)" stroke-width="1.25" />
+        <circle cx="11.9" cy="12.4" r="1.15" fill="var(--emerald)" />
+      </svg>
       <div class="text-[14px] font-semibold tracking-[-0.02em]">macfleet</div>
     </button>
 

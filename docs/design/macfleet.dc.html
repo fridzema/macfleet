@@ -57,9 +57,16 @@
   <!-- ============ HEADER ============ -->
   <header style="height:52px;flex:0 0 52px;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--border);background:var(--bg-elev);position:relative;z-index:5">
     <div style="display:flex;align-items:center;gap:9px;flex:0 0 auto">
-      <div style="width:26px;height:26px;border-radius:7px;background:linear-gradient(150deg,var(--emerald),#0b7a5c);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px -2px var(--emerald)">
-        <div style="width:11px;height:11px;border:2px solid #fff;border-radius:3px;position:relative"><div style="position:absolute;inset:1.5px;background:#fff;opacity:.5;border-radius:1px"></div></div>
-      </div>
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true" style="flex:0 0 auto;pointer-events:none">
+        <g stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <rect x="2" y="3.5" width="15" height="12" rx="2.5" opacity=".28"/>
+          <rect x="5.5" y="7" width="15" height="12" rx="2.5" opacity=".5"/>
+        </g>
+        <rect x="9" y="10.5" width="15" height="12" rx="2.5" fill="var(--bg-elev)"/>
+        <rect x="9" y="10.5" width="15" height="12" rx="2.5" fill="var(--violet)" fill-opacity=".18" stroke="var(--violet)" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M9 14.25h15" stroke="var(--violet)" stroke-width="1.25"/>
+        <circle cx="11.9" cy="12.4" r="1.15" fill="var(--emerald)"/>
+      </svg>
       <div style="font-weight:650;letter-spacing:-.02em;font-size:14px">macfleet</div>
     </div>
 
