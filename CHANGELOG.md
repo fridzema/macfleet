@@ -35,6 +35,57 @@ and diagnostics available from a dedicated settings screen.
 - Settings remain scrollable on short windows, expose clear navigation back to the fleet,
   reload after a full reset, and report engine-log read failures.
 
+## [0.5.0] - 2026-08-18
+
+Settings, diagnostics, and a real menu-bar app: the engine gained a config
+store, doctor checks, and a two-tier data reset, all surfaced in a new settings
+page and a native tray menu. macfleet also got its own brand mark and its
+first-party project docs.
+
+### Added
+
+- **Settings page.** A `/settings` route with the default VM size (sourced from
+  the engine's presets, never a client-side copy), the doctor checks with the
+  engine log inline, and a two-tier data reset.
+- **Engine settings surface.** A config store with engine-owned size presets
+  (`GET`/`PUT /config`), eight doctor diagnostics (`GET /doctor`), and a
+  two-tier data reset (`POST /data/reset`, `macfleet reset [--all]`).
+- **Menu-bar tray menu.** The Rust host polls the fleet with its own
+  authenticated engine client and renders it as a native tray menu: status
+  dots, lifecycle actions, VNC/SSH connect, copy IP, and window surfacing.
+  Closing the window now hides the app instead of quitting it.
+- **Engine log.** The desktop captures its engine sidecar's output to
+  `~/.macfleet/engine.log`, rotated on each launch.
+- **Brand mark.** An icon master with `make icons`, rebranded bundle icons and
+  favicon, a monochrome template tray icon, and a header mark that navigates
+  home.
+- **L1-L3 hardware release check.** `make verify-hardware` runs the
+  above-L0 ladder end to end — clone, boot, SSH, guest exec, snapshot, then MCP
+  stdio through create_from_snapshot, exec, screenshot, and delete — refusing
+  to touch pre-existing VMs and cleaning up after itself.
+- **Project docs.** `LICENSE` (MIT), `CONTRIBUTING.md`, and `SECURITY.md` at
+  the repo root, package metadata in `pyproject.toml`, and README sections for
+  installing macfleet and for its security model.
+
+### Fixed
+
+- **Presets survive the create form.** Create no longer silently uses the wrong
+  preset, keeps the user's pick after a successful create, and labels the
+  options from the engine.
+- **Settings is reachable and readable.** The page scrolls, offers a way back,
+  and reloads after a full reset.
+- **Doctor reports `skip`, not `fail`,** when the computer-use gate is off, and
+  surfaces engine-log read failures instead of showing an empty state.
+- **The tray lists only fleet VMs**, not every VM `tart` knows about.
+
+### Changed
+
+- **Dependency audits narrowed.** `pip-audit` no longer re-resolves a second
+  environment on top of uv's pinned export, and the Rust audit ignores an
+  advisory for an optional dependency that is not compiled into macfleet.
+- **OxideDock scaffold leftovers removed** — brand tokens, devcontainer name,
+  env example, updater endpoint, and the stale lockfile package name.
+
 ## [0.4.2] - 2026-07-14
 
 A reliability release: engine and desktop hardening around concurrent VM operations
@@ -288,6 +339,7 @@ managed over [`tart`](https://github.com/cirruslabs/tart), with a Python engine
 - Computer-use requires a one-time manual TCC (Accessibility + Screen Recording)
   grant on the golden image; see `scripts/bake.sh`.
 
+[0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
 [0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
 [0.4.2]: https://github.com/fridzema/macfleet/releases/tag/v0.4.2
 [0.4.1]: https://github.com/fridzema/macfleet/releases/tag/v0.4.1
