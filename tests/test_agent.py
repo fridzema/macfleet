@@ -7,13 +7,19 @@ class FakeComputer:
     def __init__(self):
         self.clicks = []
 
-    def screenshot(self): return b"png"
-    def click(self, x, y): self.clicks.append((x, y))
-    def type(self, text): pass
+    def screenshot(self):
+        return b"png"
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+
+    def type(self, text):
+        pass
 
 
 class ScriptedDriver:
-    def __init__(self, actions): self.actions = list(actions)
+    def __init__(self, actions):
+        self.actions = list(actions)
 
     def next_action(self, screenshot, task):
         return self.actions.pop(0)
@@ -21,10 +27,12 @@ class ScriptedDriver:
 
 def test_run_task_applies_clicks_until_done():
     comp = FakeComputer()
-    driver = ScriptedDriver([
-        {"action": "click", "x": 10, "y": 20},
-        {"action": "done"},
-    ])
+    driver = ScriptedDriver(
+        [
+            {"action": "click", "x": 10, "y": 20},
+            {"action": "done"},
+        ]
+    )
     steps = run_task(comp, "open menu", driver)
     assert steps == 2
     assert comp.clicks == [(10, 20)]
@@ -39,8 +47,11 @@ def test_run_task_stops_at_max_steps():
 
 # --- AnthropicDriver: computer-use translation + conversation threading ---
 
-_PNG = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 8 + (
-    (640).to_bytes(4, "big") + (480).to_bytes(4, "big"))
+_PNG = (
+    bytes.fromhex("89504e470d0a1a0a")
+    + b"\x00" * 8
+    + ((640).to_bytes(4, "big") + (480).to_bytes(4, "big"))
+)
 
 
 def test_png_size_reads_ihdr_and_falls_back():
@@ -50,7 +61,9 @@ def test_png_size_reads_ihdr_and_falls_back():
 
 def test_translate_maps_supported_actions():
     assert _translate({"action": "left_click", "coordinate": [12, 34]}) == (
-        {"action": "click", "x": 12, "y": 34}, True)
+        {"action": "click", "x": 12, "y": 34},
+        True,
+    )
     assert _translate({"action": "type", "text": "hi"}) == ({"action": "type", "text": "hi"}, True)
     assert _translate({"action": "screenshot"}) == ({"action": "screenshot"}, True)
     # Unsupported by the toy harness -> not honored (reported back as a tool error).
@@ -80,10 +93,16 @@ class _FakeClient:
 
 
 def test_anthropic_driver_translates_click_then_done():
-    client = _FakeClient([
-        [_Block(type="tool_use", id="tu1", input={"action": "left_click", "coordinate": [5, 6]})],
-        [_Block(type="text", text="all done")],  # no tool_use -> done
-    ])
+    client = _FakeClient(
+        [
+            [
+                _Block(
+                    type="tool_use", id="tu1", input={"action": "left_click", "coordinate": [5, 6]}
+                )
+            ],
+            [_Block(type="text", text="all done")],  # no tool_use -> done
+        ]
+    )
     driver = AnthropicDriver(client=client)
     assert driver.next_action(_PNG, "open menu") == {"action": "click", "x": 5, "y": 6}
     assert driver.next_action(_PNG, "open menu") == {"action": "done"}
@@ -99,11 +118,17 @@ def test_anthropic_driver_translates_click_then_done():
 
 
 def test_anthropic_driver_reports_extra_tool_uses_as_errors():
-    client = _FakeClient([
-        [_Block(type="tool_use", id="a", input={"action": "left_click", "coordinate": [1, 2]}),
-         _Block(type="tool_use", id="b", input={"action": "type", "text": "x"})],
-        [_Block(type="text", text="stop")],
-    ])
+    client = _FakeClient(
+        [
+            [
+                _Block(
+                    type="tool_use", id="a", input={"action": "left_click", "coordinate": [1, 2]}
+                ),
+                _Block(type="tool_use", id="b", input={"action": "type", "text": "x"}),
+            ],
+            [_Block(type="text", text="stop")],
+        ]
+    )
     driver = AnthropicDriver(client=client)
     assert driver.next_action(_PNG, "go") == {"action": "click", "x": 1, "y": 2}
     driver.next_action(_PNG, "go")

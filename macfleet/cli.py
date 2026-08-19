@@ -13,9 +13,12 @@ def _fleet() -> Fleet:
 
 
 @app.command()
-def up(name: str,
-       preset: str | None = typer.Option(
-           None, "--preset", help="light | standard | heavy (default: configured)")) -> None:
+def up(
+    name: str,
+    preset: str | None = typer.Option(
+        None, "--preset", help="light | standard | heavy (default: configured)"
+    ),
+) -> None:
     """Clone mf-golden -> mf-<name> and boot it."""
     _fleet().up(name, preset=preset)
     typer.echo(f"up: mf-{name}")
@@ -41,14 +44,19 @@ def nuke(name: str) -> None:
 
 
 @app.command()
-def reset(everything: bool = typer.Option(
-        False, "--all", help="also delete mf-golden and reset settings to defaults")) -> None:
+def reset(
+    everything: bool = typer.Option(
+        False, "--all", help="also delete mf-golden and reset settings to defaults"
+    ),
+) -> None:
     """Delete every fleet VM, snapshot, and macfleet state file."""
     scope = "all" if everything else "fleet"
-    what = ("every fleet VM, snapshot, macfleet state file, mf-golden itself, and your "
-            "settings — golden needs a full re-bake afterwards"
-            if everything else
-            "every fleet VM, snapshot, and macfleet state file (mf-golden is kept)")
+    what = (
+        "every fleet VM, snapshot, macfleet state file, mf-golden itself, and your "
+        "settings — golden needs a full re-bake afterwards"
+        if everything
+        else "every fleet VM, snapshot, and macfleet state file (mf-golden is kept)"
+    )
     typer.confirm(f"This permanently deletes {what}. Continue?", abort=True)
     result = _fleet().reset_data(scope)
     for name in result["deleted"]:
@@ -72,7 +80,8 @@ def reap() -> None:
 def ls() -> None:
     """List fleet VMs."""
     for v in _fleet().tart.list():
-        typer.echo(f"{v.state:8} {v.name}")
+        if v.name.startswith("mf-") and v.name != "mf-golden":
+            typer.echo(f"{v.state:8} {v.name}")
 
 
 @app.command()
@@ -197,9 +206,13 @@ def serve(port: int = 8765) -> None:
     token, generated = _resolve_api_token(os.environ.get("MACFLEET_API_TOKEN"))
     if generated:
         typer.echo(f"API token (send as X-Macfleet-Token): {token}", err=True)
-    uvicorn.run(build_app(token=token,
-                          suspend_vms_on_exit=os.environ.get("MACFLEET_SUSPEND_VMS_ON_EXIT") == "1"),
-                host="127.0.0.1", port=port)
+    uvicorn.run(
+        build_app(
+            token=token, suspend_vms_on_exit=os.environ.get("MACFLEET_SUSPEND_VMS_ON_EXIT") == "1"
+        ),
+        host="127.0.0.1",
+        port=port,
+    )
 
 
 if __name__ == "__main__":

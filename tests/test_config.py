@@ -89,7 +89,9 @@ def test_unlocked_reads_never_observe_a_half_written_file(tmp_path):
 
     r = threading.Thread(target=reader)
     r.start()
-    writers = [threading.Thread(target=writer, args=(v,)) for v in ("light", "heavy", "light", "heavy")]
+    writers = [
+        threading.Thread(target=writer, args=(v,)) for v in ("light", "heavy", "light", "heavy")
+    ]
     for t in writers:
         t.start()
     for t in writers:

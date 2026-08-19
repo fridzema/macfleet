@@ -60,7 +60,11 @@ def test_create_vm_records_activity(monkeypatch):
     monkeypatch.setenv("MACFLEET_AGENT", "claude-code")
     fake = FakeFleet()
     recorded = []
-    fake.activity = type("A", (), {"record": lambda self, who, action, target: recorded.append((who, action, target))})()
+    fake.activity = type(
+        "A",
+        (),
+        {"record": lambda self, who, action, target: recorded.append((who, action, target))},
+    )()
     M.mcp_create_vm(fake, name="web")
     assert recorded == [("claude-code", "created", "web")]
 

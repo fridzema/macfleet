@@ -126,8 +126,9 @@ def test_tcc_ok_when_screenshot_returns_bytes(monkeypatch):
 
 def test_tcc_fails_on_empty_screenshot(monkeypatch):
     monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
-    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")],
-                      computer_obj=FakeComputer(data=b""))
+    fleet = FakeFleet(
+        vms=[VmInfo("mf-web", "running", "local")], computer_obj=FakeComputer(data=b"")
+    )
     c = by_id(run_checks(fleet))["tcc_screenshot"]
     assert c["status"] == "fail"
     assert "re-bake" in c["fix"]
@@ -142,8 +143,10 @@ def test_tcc_never_targets_golden(monkeypatch):
 
 def test_a_raising_check_becomes_a_fail_not_a_crash(monkeypatch):
     monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
-    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")],
-                      computer_error=RuntimeError("computer-use disabled"))
+    fleet = FakeFleet(
+        vms=[VmInfo("mf-web", "running", "local")],
+        computer_error=RuntimeError("computer-use disabled"),
+    )
     c = by_id(run_checks(fleet))["tcc_screenshot"]
     assert c["status"] == "fail"
     assert "computer-use disabled" in c["detail"]
@@ -155,9 +158,13 @@ def test_orphans_ok_when_none():
 
 
 def test_orphans_warns_and_names_leaks():
-    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local"),
-                           VmInfo("mfbackup-abc", "stopped", "local"),
-                           VmInfo("mftmp-def", "stopped", "local")])
+    fleet = FakeFleet(
+        vms=[
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("mfbackup-abc", "stopped", "local"),
+            VmInfo("mftmp-def", "stopped", "local"),
+        ]
+    )
     c = by_id(run_checks(fleet))["orphans"]
     assert c["status"] == "warn"
     assert "mfbackup-abc" in c["detail"]
@@ -165,8 +172,7 @@ def test_orphans_warns_and_names_leaks():
 
 
 def test_stale_leases_ok_when_all_live():
-    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")],
-                      expiries={"mf-web": 123.0})
+    fleet = FakeFleet(vms=[VmInfo("mf-web", "running", "local")], expiries={"mf-web": 123.0})
     assert by_id(run_checks(fleet))["stale_leases"]["status"] == "ok"
 
 
@@ -184,6 +190,7 @@ def test_disk_warns_when_low(monkeypatch):
     class St:
         f_bavail = 1
         f_frsize = 1_000_000_000  # 1GB free
+
     monkeypatch.setattr(doctor.os, "statvfs", lambda _: St())
     c = by_id(run_checks(FakeFleet()))["disk"]
     assert c["status"] == "warn"
@@ -195,6 +202,7 @@ def test_disk_ok_when_plentiful(monkeypatch):
     class St:
         f_bavail = 500
         f_frsize = 1_000_000_000  # 500GB free
+
     monkeypatch.setattr(doctor.os, "statvfs", lambda _: St())
     assert by_id(run_checks(FakeFleet()))["disk"]["status"] == "ok"
 
@@ -202,8 +210,9 @@ def test_disk_ok_when_plentiful(monkeypatch):
 def test_report_shells_out_to_tart_list_once(monkeypatch):
     # Five checks need the inventory; each used to spawn its own `tart list`.
     monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
-    fleet = FakeFleet(vms=[VmInfo("mf-golden", "suspended", "local"),
-                          VmInfo("mf-web", "running", "local")])
+    fleet = FakeFleet(
+        vms=[VmInfo("mf-golden", "suspended", "local"), VmInfo("mf-web", "running", "local")]
+    )
     run_checks(fleet)
     assert fleet.list_calls == 1
 
