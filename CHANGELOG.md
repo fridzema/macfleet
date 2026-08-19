@@ -3,7 +3,7 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.5.0] - 2026-08-18
+## [0.5.0] - 2026-08-19
 
 Settings, diagnostics, and a real menu-bar app: the engine gained a config
 store, doctor checks, and a two-tier data reset, all surfaced in a new settings
