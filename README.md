@@ -6,13 +6,35 @@ Spin up N named VMs cloned from one provisioned golden image, SSH in for scripte
 work, or hand a VM to a computer-use agent to click/type through a GUI. It ships as a
 Python engine (CLI + local API + MCP server) and a Tauri desktop app (fleet view, live
 screen, per-VM terminal/logs/resources) built on the same core. Run it with `make dev`;
-release bundles include a self-contained engine executable and need only `tart` at runtime.
+a local desktop build includes a self-contained engine executable and needs only `tart` at
+runtime.
 
 ## Prerequisites
 
 - Apple-silicon Mac (uses Apple's Virtualization.framework via `tart`).
 - [`tart`](https://github.com/cirruslabs/tart): `brew install cirruslabs/cli/tart`
 - [`uv`](https://github.com/astral-sh/uv) for Python dependency management.
+
+## Install
+
+Releases are published as source on GitHub only. There is no PyPI package or prebuilt desktop
+download: the app is not code-signed or notarized, so both halves are built from a clone:
+
+```bash
+git clone https://github.com/fridzema/macfleet.git
+cd macfleet
+make setup            # engine venv + desktop deps
+scripts/bake.sh       # one-time golden image (see below)
+```
+
+That is everything the CLI, the API, and the MCP server need — drive them with `uv run
+macfleet …` from the clone, or `uv tool install .` to put `macfleet` on your PATH.
+
+For the desktop app, `make dev` runs it from source, and `make build` produces a bundle under
+`desktop/src-tauri/target/release/bundle/` (a `.app` and a `.dmg`) with the engine embedded as
+a self-contained executable — that machine then needs only `tart`, not Python or `uv`. Because
+the bundle is unsigned, macOS Gatekeeper blocks it on first launch: right-click the app and
+choose **Open**, or clear the quarantine attribute yourself.
 
 ## Setup
 
@@ -68,7 +90,7 @@ uv run macfleet nuke web            # stop + delete mf-web
 uv run macfleet reset               # delete every fleet VM, snapshot, and state file (keeps mf-golden)
 uv run macfleet reset --all         # also delete mf-golden and reset settings — forces a re-bake
 uv run macfleet bake                # print the golden-image bake checklist
-uv run macfleet serve               # start the local API (for the future desktop app)
+uv run macfleet serve               # start the local API (desktop app and integrations)
 
 uv run macfleet suspend web         # freeze mf-web's running state
 uv run macfleet resume web          # resume a suspended mf-web
@@ -134,6 +156,46 @@ targets fleet VMs over their guest IP — never the host. The privileged guest `
 gateway also requires a boot-rotated token that the engine retrieves over SSH, so direct
 HTTP calls cannot bypass the host-side gate. Without the flag, `Fleet.computer()` raises.
 
+## Security model
+
+macfleet is a single-user tool for a host you own. It assumes the operator is trusted, and
+it draws exactly one hard boundary: the **host** is protected from the fleet, and the fleet is
+not protected from anything.
+
+What is defended:
+
+- **The local API.** `macfleet serve` binds `127.0.0.1` and always requires a token — a random
+  one is generated when `MACFLEET_API_TOKEN` is unset or empty, and the desktop app passes its
+  own per-run token on an ephemeral port. Every route needs it, reads included, because `GET
+  /vms` reaps expired VMs and `POST /vms/{name}/exec` runs guest commands. Otherwise any
+  local page or process could drive the fleet.
+- **Computer-use.** Disabled unless `MACFLEET_ALLOW_CONTROL=1`, and it only ever targets a
+  fleet VM's guest IP, never the host. The guest's privileged `/cmd` gateway additionally
+  requires a token that rotates on every boot and is stored 0600, retrieved by the engine over
+  SSH — so direct HTTP to a guest cannot bypass the host-side gate.
+- **The host's own VMs.** Every destructive operation is namespaced to `mf-`/`mfsnap-`
+  prefixes, `mf-golden` is protected from mutation, and VM names and snapshot labels are
+  validated before they reach `tart`. Shell-outs use argument vectors — never a shell — with
+  bounded runtime and bounded captured output.
+- **The supply chain.** The golden base image is digest-pinned in `scripts/bake.sh`; CI audits
+  Python, JS, and Rust dependencies on every push.
+
+What is deliberately *not* defended — treat a fleet VM as disposable, never as a sandbox:
+
+- **Guests run with SIP disabled** (the base image ships that way) and macfleet seeds TCC
+  grants for Screen Recording, Accessibility, and PostEvent directly into the system TCC
+  database, so the headless helper can capture the screen with no manual step. Every clone
+  inherits those grants.
+- **The guest gateway listens on `0.0.0.0:8000`** inside the VM. It is token-authenticated,
+  but it is reachable from anything that can route to the guest on tart's network.
+- **The guest account is `admin`** with the base image's default password, plus your SSH
+  public key copied in during the bake.
+- **Anything a guest can reach, guest code can reach** — including any host folder you share
+  into it (mounted read-only unless you ask otherwise).
+
+Do not put secrets in a fleet VM, and do not run untrusted code in one unless you accept that
+it can do anything a local user with SIP off can do.
+
 ## MCP server (for AI agents)
 
 Expose the fleet to an AI agent:
@@ -167,10 +229,23 @@ rename/duplicate, get/set_resources, get_connection, exec, and — when
 - **L3 — MCP end-to-end.** With the server registered (see above), from an agent:
   `list_vms` -> `create_from_snapshot` -> `exec` -> `screenshot` -> `delete_vm`.
 
-L1-L3 require an Apple-silicon host with a baked `mf-golden` image and are run
-manually; they are verification steps, not part of the automated test suite.
+L1-L3 require an Apple-silicon host with a baked `mf-golden` image. Run the complete
+release check with `make verify-hardware`; it creates only `mf-releasecheck`,
+`mf-releasecopy`, and `mfsnap-releasecheck-ready`, refuses to touch pre-existing entries
+with those names, and cleans up after itself. It remains a manual release gate rather than
+part of CI because hosted runners do not provide Virtualization.framework VM capacity.
 
 ## Design docs
 
 - [`docs/superpowers/specs/`](docs/superpowers/specs/) — design spec.
 - [`docs/superpowers/plans/`](docs/superpowers/plans/) — implementation plan.
+
+## Contributing
+
+Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+setup, test, and commit conventions, and [SECURITY.md](SECURITY.md) for reporting a
+vulnerability privately.
+
+## License
+
+[MIT](LICENSE) © Robert Fridzema

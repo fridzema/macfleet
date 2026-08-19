@@ -3,6 +3,142 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-19
+
+Settings, diagnostics, and a real menu-bar app: the engine gained a config
+store, doctor checks, and a two-tier data reset, all surfaced in a new settings
+page and a native tray menu. macfleet also got its own brand mark and its
+first-party project docs.
+
+### Added
+
+- **Settings page.** A `/settings` route with the default VM size (sourced from
+  the engine's presets, never a client-side copy), the doctor checks with the
+  engine log inline, and a two-tier data reset.
+- **Engine settings surface.** A config store with engine-owned size presets
+  (`GET`/`PUT /config`), eight doctor diagnostics (`GET /doctor`), and a
+  two-tier data reset (`POST /data/reset`, `macfleet reset [--all]`).
+- **Menu-bar tray menu.** The Rust host polls the fleet with its own
+  authenticated engine client and renders it as a native tray menu: status
+  dots, lifecycle actions, VNC/SSH connect, copy IP, and window surfacing.
+  Closing the window now hides the app instead of quitting it.
+- **Engine log.** The desktop captures its engine sidecar's output to
+  `~/.macfleet/engine.log`, rotated on each launch.
+- **Brand mark.** An icon master with `make icons`, rebranded bundle icons and
+  favicon, a monochrome template tray icon, and a header mark that navigates
+  home.
+- **L1-L3 hardware release check.** `make verify-hardware` runs the
+  above-L0 ladder end to end — clone, boot, SSH, guest exec, snapshot, then MCP
+  stdio through create_from_snapshot, exec, screenshot, and delete — refusing
+  to touch pre-existing VMs and cleaning up after itself.
+- **Project docs.** `LICENSE` (MIT), `CONTRIBUTING.md`, and `SECURITY.md` at
+  the repo root, package metadata in `pyproject.toml`, and README sections for
+  installing macfleet and for its security model.
+
+### Fixed
+
+- **Presets survive the create form.** Create no longer silently uses the wrong
+  preset, keeps the user's pick after a successful create, and labels the
+  options from the engine.
+- **Settings is reachable and readable.** The page scrolls, offers a way back,
+  and reloads after a full reset.
+- **Doctor reports `skip`, not `fail`,** when the computer-use gate is off, and
+  surfaces engine-log read failures instead of showing an empty state.
+- **The tray lists only fleet VMs**, not every VM `tart` knows about.
+
+### Changed
+
+- **Dependency audits narrowed.** `pip-audit` no longer re-resolves a second
+  environment on top of uv's pinned export, and the Rust audit ignores an
+  advisory for an optional dependency that is not compiled into macfleet.
+- **OxideDock scaffold leftovers removed** — brand tokens, devcontainer name,
+  env example, updater endpoint, and the stale lockfile package name.
+
+## [0.4.2] - 2026-07-14
+
+A reliability release: engine and desktop hardening around concurrent VM operations
+and lease/lifecycle correctness. No new user-facing commands.
+
+### Fixed
+
+- **Concurrent VM operations no longer drop state.** Suspend, resume, rename, down,
+  and nuke serialize per VM across the CLI, MCP, and API via file locks plus striped
+  in-process locks, so overlapping operations can no longer interleave and silently
+  lose a lease or a state update. Lock ordering is by stripe number, so a hash
+  collision cannot invert lock order between multi-VM operations.
+- **Resume survives a slow un-restorable suspend.** The restore probe is now
+  synchronous (a short-lived CLI/API worker could exit before the previous background
+  watcher ran) over a longer bounded window, and matches the exact known VZ
+  `failed to restore … invalid argument` signature. Only that signature discards the
+  saved state and cold-boots; any other launch failure preserves the suspend state
+  for a later retry.
+- **Lease countdowns survive restarts, sleep, and reap retries.** The desktop rebuilds
+  the countdown from the engine's persisted absolute expiry on every fleet frame,
+  correcting timer drift after sleep/backgrounding, and announces an expired lease
+  only once per expiry — a still-present frame during a reap retry no longer
+  re-toasts.
+- **Screenshots can't leak across screens.** A `ScreenTab` whose in-flight screenshot
+  settles after unmount no longer recreates its poll timer and leaks work into the
+  next VM's screen.
+- **Engine-startup failures are visible and recoverable.** When the sidecar fails to
+  come up, the desktop shows the error with a retry button instead of a silent
+  perpetual "Booting…".
+- **Command output includes stderr.** `exec` results surface `stderr` alongside
+  `stdout`.
+
+### Internal
+
+- Finished the OxideDock → macfleet rebrand and removed the leftover Tauri template
+  scaffolding (the `greet`/`get_app_info` commands, the `AppState` visit counter,
+  `commands.rs`/`error.rs`, the `ipc.ts` bridge and its test, and `bootstrap.sh`).
+  The lib crate is now `macfleet_desktop_lib`.
+
+## [0.4.1] - 2026-07-13
+
+A bug-fix release. Everything here is guest-provisioning or VM-lifecycle robustness.
+
+### Fixed
+
+- **Clicks land where you click.** The in-guest gateway rescales mouse coordinates
+  from the screenshot's pixel space to the display's logical points
+  (`CGDisplayBounds`). cua clicks via `CGWarpMouseCursorPosition` (logical points)
+  while the desktop maps clicks against the larger screenshot and cua applied no
+  scaling, so on a HiDPI guest every click landed off.
+- **Resume survives an un-restorable suspend.** macOS Virtualization can reject a
+  saved suspend state (`VZ Code=12 "failed to restore … invalid argument"`);
+  `resume()` now watches the `tart run` and, if the restore fails, discards the state
+  and cold-boots instead of silently staying suspended.
+- **`scripts/bake.sh` can bake a fresh golden again.** The provision script pins the
+  `cs-venv` to Python 3.12 so `cua-computer-server` (which requires ≥3.12) installs on
+  a base image whose default `python3` is 3.9.
+
+## [0.4.0] - 2026-07-13
+
+Creating a VM now selects it immediately and shows a live provisioning stepper until
+the guest is healthy.
+
+### Added
+
+- **Per-VM provisioning progress.** `Fleet.create()` records the clone/configure/boot/
+  health phases, advanced from live tart state plus the guest health check, and the
+  desktop renders them as a Clone → Boot → Ready panel before switching to the normal
+  detail view.
+- **`GET /vms/{name}/provision`** for a just-created VM's progress; `/fleet/events` now
+  streams `{vms, provisioning}` instead of a bare VM array.
+
+### Changed
+
+- **Create affordances wait for the engine.** They stay behind a clear "Starting
+  engine…" state until the engine's first successful list.
+- **`tauri dev` runs the live `uv run` engine** instead of the bundled PyInstaller
+  binary, avoiding stale code and 30s readiness-probe failures under macOS Gatekeeper.
+
+### Fixed
+
+- **Version-skew tolerance.** The fleet SSE stream accepts both the legacy bare-array
+  frame and the new `{vms, provisioning}` shape, so a version-skewed engine cannot
+  freeze the fleet view.
+
 ## [0.3.1] - 2026-07-10
 
 A reliability and security hardening pass across the engine and desktop client,
@@ -171,5 +307,12 @@ managed over [`tart`](https://github.com/cirruslabs/tart), with a Python engine
 - Computer-use requires a one-time manual TCC (Accessibility + Screen Recording)
   grant on the golden image; see `scripts/bake.sh`.
 
+[0.5.0]: https://github.com/fridzema/macfleet/releases/tag/v0.5.0
+[0.4.2]: https://github.com/fridzema/macfleet/releases/tag/v0.4.2
+[0.4.1]: https://github.com/fridzema/macfleet/releases/tag/v0.4.1
+[0.4.0]: https://github.com/fridzema/macfleet/releases/tag/v0.4.0
+[0.3.1]: https://github.com/fridzema/macfleet/releases/tag/v0.3.1
+[0.3.0]: https://github.com/fridzema/macfleet/releases/tag/v0.3.0
+[0.2.0]: https://github.com/fridzema/macfleet/releases/tag/v0.2.0
 [0.1.1]: https://github.com/fridzema/macfleet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/fridzema/macfleet/releases/tag/v0.1.0

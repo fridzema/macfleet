@@ -434,7 +434,7 @@ onUnmounted(() => {
             data-test="create-source"
             class="h-8 rounded-[7px] border border-[var(--border)] bg-[var(--bg)] px-2 font-mono text-xs text-[var(--text)]"
           >
-            <option value="golden">Golden image (macOS 14.5)</option>
+            <option value="golden">Golden image</option>
             <option v-for="sn in store.snapshots" :key="sn.id" :value="sn.id">
               Snapshot · {{ sn.label }}
             </option>

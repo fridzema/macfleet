@@ -13,14 +13,22 @@ interface ResolvedApi {
 
 // Resolved once from the Rust host: the ephemeral port the engine sidecar actually runs on
 // (so the app can't be fooled into talking to a stale server on a fixed port) plus the
-// per-run token required on every API call. Fixed base + null token outside Tauri (vite dev,
-// e2e), where the engine runs unauthenticated and the Playwright mock matches by path.
+// per-run token required on every API call.
+//
+// Outside Tauri (`bun run dev` in a browser, Playwright e2e) there is no host to ask, so the
+// base and token come from the environment. The Playwright mock matches by path and ignores
+// both. A real `macfleet serve` ALWAYS requires a token, so browser-only development needs
+// VITE_MACFLEET_TOKEN set to the token that `macfleet serve` printed on startup — without it
+// every request comes back 401.
 let configPromise: Promise<ResolvedApi> | null = null
 function apiConfig(): Promise<ResolvedApi> {
   if (!configPromise) {
     const p = (async (): Promise<ResolvedApi> => {
       if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
-        return { base: API_BASE, token: null }
+        return {
+          base: import.meta.env.VITE_MACFLEET_API_BASE || API_BASE,
+          token: import.meta.env.VITE_MACFLEET_TOKEN || null,
+        }
       }
       const cfg = await invoke<{ port: number; token: string }>('get_api_config')
       return { base: `http://127.0.0.1:${cfg.port}`, token: cfg.token }

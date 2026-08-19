@@ -79,6 +79,7 @@ def test_guest_dependencies_are_version_pinned():
 
 def test_plist_writes_log_file():
     from macfleet.provision import render_provision_script, SERVER_LOG
+
     s = render_provision_script()
     assert SERVER_LOG in s
     assert "StandardOutPath" in s

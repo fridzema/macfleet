@@ -1,6 +1,7 @@
 import macfleet
 
+from importlib.metadata import version
+
 
 def test_version_present():
-    assert isinstance(macfleet.__version__, str)
-    assert macfleet.__version__
+    assert macfleet.__version__ == version("macfleet")

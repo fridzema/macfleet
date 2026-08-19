@@ -13,12 +13,14 @@ def _who() -> str:
 
 # --- Tool logic (fleet-injected, unit-testable) ---------------------------------
 
+
 def mcp_list_vms(fleet) -> list[dict]:
     return fleet.list_vms()
 
 
-def mcp_create_vm(fleet, name: str, from_snapshot: str | None = None,
-                  ttl_seconds: int | None = None) -> dict:
+def mcp_create_vm(
+    fleet, name: str, from_snapshot: str | None = None, ttl_seconds: int | None = None
+) -> dict:
     fleet.create(name, from_snapshot=from_snapshot, ttl=ttl_seconds)
     fleet.activity.record(_who(), "created", name)
     return {"ok": True, "name": name}
@@ -38,6 +40,7 @@ def mcp_exec(fleet, name: str, command: str) -> dict:
 
 # --- FastMCP server -------------------------------------------------------------
 
+
 def build_server(fleet: Fleet | None = None) -> FastMCP:
     fleet = fleet or Fleet()
     mcp = FastMCP("macfleet")
@@ -48,8 +51,9 @@ def build_server(fleet: Fleet | None = None) -> FastMCP:
         return mcp_list_vms(fleet)
 
     @mcp.tool()
-    def create_vm(name: str, from_snapshot: str | None = None,
-                  ttl_seconds: int | None = None) -> dict:
+    def create_vm(
+        name: str, from_snapshot: str | None = None, ttl_seconds: int | None = None
+    ) -> dict:
         """Create/clone a fleet VM and boot it. from_snapshot: a snapshot id from
         list_snapshots (resumes its captured state). ttl_seconds: auto-delete after N
         seconds (use for throwaway agent VMs)."""
@@ -110,8 +114,13 @@ def build_server(fleet: Fleet | None = None) -> FastMCP:
         return fleet.resources(name)
 
     @mcp.tool()
-    def set_resources(name: str, cpu: int | None = None, memory: int | None = None,
-                      disk_size: int | None = None, display: str | None = None) -> dict:
+    def set_resources(
+        name: str,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk_size: int | None = None,
+        display: str | None = None,
+    ) -> dict:
         """Set a VM's resources. The VM must be stopped. Disk can only grow."""
         fleet.set_resources(name, cpu=cpu, memory=memory, disk_size=disk_size, display=display)
         fleet.activity.record(_who(), "resized", name)
@@ -154,6 +163,7 @@ def build_server(fleet: Fleet | None = None) -> FastMCP:
         return mcp_exec(fleet, name, command)
 
     if os.environ.get("MACFLEET_ALLOW_CONTROL") == "1":
+
         @mcp.tool()
         def screenshot(name: str) -> Image:
             """Capture the VM's screen as a PNG (computer-use)."""

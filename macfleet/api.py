@@ -92,8 +92,12 @@ class ResetRequest(BaseModel):
     scope: Literal["fleet", "all"] = "fleet"
 
 
-def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
-              token: str | None = None, suspend_vms_on_exit: bool = False) -> FastAPI:
+def build_app(
+    fleet: Fleet | None = None,
+    reap_interval: float = 60.0,
+    token: str | None = None,
+    suspend_vms_on_exit: bool = False,
+) -> FastAPI:
     fleet = fleet or Fleet()
 
     async def _guard(request: Request) -> None:
@@ -133,12 +137,19 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
                 except Exception:
                     logger.exception("suspend-on-exit failed")
 
-    api = FastAPI(title="macfleet", lifespan=lifespan,
-                  dependencies=[Depends(_guard)] if token else None)
+    api = FastAPI(
+        title="macfleet", lifespan=lifespan, dependencies=[Depends(_guard)] if token else None
+    )
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
-        allow_methods=["*"], allow_headers=["*"],
+        allow_origins=[
+            "http://127.0.0.1:1420",
+            "http://localhost:1420",
+            "tauri://localhost",
+            "https://tauri.localhost",
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @api.exception_handler(RuntimeError)
@@ -175,13 +186,12 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
     async def fleet_events(request: Request) -> StreamingResponse:
         """Push changed fleet snapshots. One stream replaces the desktop's tight polling;
         a slow fallback refresh remains client-side for recovery."""
+
         async def events() -> AsyncIterator[str]:
             previous = ""
             while not await request.is_disconnected():
                 try:
-                    current = json.dumps(
-                        await _fleet_snapshot(fleet), separators=(",", ":")
-                    )
+                    current = json.dumps(await _fleet_snapshot(fleet), separators=(",", ":"))
                     if current != previous:
                         previous = current
                         yield f"data: {current}\n\n"
@@ -190,7 +200,8 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
                 await asyncio.sleep(2)
 
         return StreamingResponse(
-            events(), media_type="text/event-stream",
+            events(),
+            media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
@@ -200,8 +211,14 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
 
     @api.post("/vms")
     def create(body: CreateRequest) -> dict:
-        fleet.create(body.name, from_snapshot=body.from_snapshot, ttl=body.ttl,
-                     cpu=body.cpu, memory=body.memory, disk=body.disk)
+        fleet.create(
+            body.name,
+            from_snapshot=body.from_snapshot,
+            ttl=body.ttl,
+            cpu=body.cpu,
+            memory=body.memory,
+            disk=body.disk,
+        )
         return {"ok": True}
 
     @api.get("/host")
@@ -266,8 +283,9 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
 
     @api.put("/vms/{name}/resources")
     def put_resources(name: str, body: ResourcesRequest) -> dict:
-        fleet.set_resources(name, cpu=body.cpu, memory=body.memory,
-                            disk_size=body.disk_size, display=body.display)
+        fleet.set_resources(
+            name, cpu=body.cpu, memory=body.memory, disk_size=body.disk_size, display=body.display
+        )
         return {"ok": True}
 
     @api.get("/vms/{name}/connection")
@@ -313,8 +331,11 @@ def build_app(fleet: Fleet | None = None, reap_interval: float = 60.0,
         return fleet.metrics(name)
 
     @api.get("/vms/{name}/logs")
-    def logs(name: str, lines: int = Query(default=100, ge=1, le=5_000),
-             cursor: int | None = Query(default=None, ge=0)) -> dict:
+    def logs(
+        name: str,
+        lines: int = Query(default=100, ge=1, le=5_000),
+        cursor: int | None = Query(default=None, ge=0),
+    ) -> dict:
         return fleet.logs(name, lines, cursor)
 
     @api.post("/vms/{name}/screenshot")

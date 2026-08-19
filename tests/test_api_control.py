@@ -60,6 +60,8 @@ def test_key_forwards_combo():
 
 
 def test_click_returns_409_when_control_disabled():
-    fleet = FakeFleet(computer_error=RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1"))
+    fleet = FakeFleet(
+        computer_error=RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1")
+    )
     client = TestClient(build_app(fleet))
     assert client.post("/vms/web/click", json={"x": 1, "y": 2}).status_code == 409

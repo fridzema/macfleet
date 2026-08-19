@@ -36,17 +36,17 @@ def test_limit(tmp_path):
 
 def test_missing_or_corrupt_reads_empty(tmp_path):
     path = tmp_path / "activity.jsonl"
-    assert Activity(str(path)).recent() == []          # missing
-    path.write_text('{"who":"a"}\nnot json\n')          # one good-ish + one corrupt line
+    assert Activity(str(path)).recent() == []  # missing
+    path.write_text('{"who":"a"}\nnot json\n')  # one good-ish + one corrupt line
     got = Activity(str(path)).recent()
-    assert len(got) == 1 and got[0]["who"] == "a"        # corrupt line skipped
+    assert len(got) == 1 and got[0]["who"] == "a"  # corrupt line skipped
 
 
 def test_byte_corrupt_file_reads_empty_and_self_heals(tmp_path):
     path = tmp_path / "activity.jsonl"
     path.write_bytes(b'{"who":"a"}\n\xff\xfe not utf8\n')
     a = Activity(str(path))
-    assert a.recent() == []            # corrupt file -> empty, no crash
-    a.record("b", "did", "vm0")        # record() calls _load() internally
+    assert a.recent() == []  # corrupt file -> empty, no crash
+    a.record("b", "did", "vm0")  # record() calls _load() internally
     r = a.recent()
-    assert len(r) == 1 and r[0]["who"] == "b"   # wrote a clean file
+    assert len(r) == 1 and r[0]["who"] == "b"  # wrote a clean file

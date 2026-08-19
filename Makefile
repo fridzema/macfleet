@@ -6,7 +6,7 @@
 .PHONY: help \
 	dev dev-frontend serve mcp \
 	build build-debug icons \
-	test test-engine test-desktop e2e coverage demo \
+	test test-engine test-desktop e2e coverage demo verify-hardware \
 	lint lint-engine lint-desktop format format-engine format-desktop \
 	setup setup-engine setup-desktop clean
 
@@ -31,6 +31,7 @@ help:
 	@echo "  e2e            Run desktop end-to-end tests (Playwright)"
 	@echo "  coverage       Run desktop unit tests with coverage"
 	@echo "  demo           Run the L0 integration demo test"
+	@echo "  verify-hardware Run the destructive, self-cleaning L1-L3 release check"
 	@echo ""
 	@echo "Lint & Format:"
 	@echo "  lint           Lint everything (engine ruff + desktop eslint/biome/clippy)"
@@ -89,6 +90,9 @@ coverage:
 
 demo:
 	uv run pytest tests/test_integration_l0.py -v
+
+verify-hardware:
+	scripts/verify-release-hardware.sh
 
 # Lint & Format
 lint: lint-engine lint-desktop

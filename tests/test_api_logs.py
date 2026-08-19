@@ -16,14 +16,15 @@ def fake_tart(name="mf-a"):
         else:
             out = ""
         return subprocess.CompletedProcess(argv, 0, out, "")
+
     return Tart(run=run)
 
 
 def test_logs_endpoint_returns_incremental_tail(monkeypatch):
     fleet = Fleet(tart=fake_tart())
-    guest = type("Guest", (), {
-        "logs": lambda self, lines, cursor: {"lines": "line1\nline2\n", "cursor": 42}
-    })()
+    guest = type(
+        "Guest", (), {"logs": lambda self, lines, cursor: {"lines": "line1\nline2\n", "cursor": 42}}
+    )()
     monkeypatch.setattr(fleet, "_guest_client", lambda name: guest)
     client = TestClient(build_app(fleet))
     r = client.get("/vms/a/logs?lines=50")
@@ -43,7 +44,8 @@ def test_logs_endpoint_maps_runtime_error_to_409_with_cors(monkeypatch):
     # route must return a clean 409 (not a bare 500), so the CORS header survives the middleware.
     fleet = Fleet(tart=fake_tart())
     monkeypatch.setattr(
-        fleet, "_guest_client",
+        fleet,
+        "_guest_client",
         lambda name: (_ for _ in ()).throw(RuntimeError("guest connection failed")),
     )
     client = TestClient(build_app(fleet))
