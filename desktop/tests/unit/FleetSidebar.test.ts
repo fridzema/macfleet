@@ -315,10 +315,7 @@ describe('FleetSidebar — create panel', () => {
     await flushPromises()
     await wrapper.find('[data-test="create-advanced-toggle"]').trigger('click')
     const options = wrapper.find('[data-test="create-source"]').findAll('option')
-    expect(options.map((o) => o.text())).toEqual([
-      'Golden image (macOS 14.5)',
-      'Snapshot · clean-ventura',
-    ])
+    expect(options.map((o) => o.text())).toEqual(['Golden image', 'Snapshot · clean-ventura'])
     wrapper.unmount()
   })
 

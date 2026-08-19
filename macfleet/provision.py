@@ -19,7 +19,7 @@ _GATEWAY_PATH = "/Users/admin/cs-venv/macfleet_gateway.py"
 # screenshot's pixel space (what the desktop clicks against) to the display's logical points
 # (what CGWarpMouseCursorPosition — cua's cursor backend — actually uses), which differ on a
 # HiDPI guest and which cua does not reconcile itself.
-_GATEWAY = r'''from __future__ import annotations
+_GATEWAY = r"""from __future__ import annotations
 
 import base64
 import http.server
@@ -275,7 +275,7 @@ try:
 finally:
     backend.terminate()
     backend.wait(timeout=10)
-'''
+"""
 
 _PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

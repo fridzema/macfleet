@@ -42,7 +42,7 @@ class Activity:
         with state_lock(self._path):
             entries = self._load()
             entries.append({"who": who, "action": action, "target": target, "ts": self._clock()})
-            entries = entries[-self._cap:]
+            entries = entries[-self._cap :]
             d = os.path.dirname(self._path)
             if d:
                 os.makedirs(d, exist_ok=True)

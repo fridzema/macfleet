@@ -66,7 +66,11 @@ def _golden_warm(_fleet: Any, vms: Any) -> CheckResult:
         if v.name == GOLDEN:
             if v.state == "suspended":
                 return "ok", "suspended — new VMs resume in ~2s", None
-            return "warn", f"state is {v.state!r} — new VMs will cold-boot (~30-60s)", "macfleet warm"
+            return (
+                "warn",
+                f"state is {v.state!r} — new VMs will cold-boot (~30-60s)",
+                "macfleet warm",
+            )
     return "skip", f"{GOLDEN} not present", "macfleet bake"
 
 
@@ -76,8 +80,9 @@ def _tcc_screenshot(fleet: Any, vms: Any) -> CheckResult:
     golden, which is the clone source and must not be driven."""
     if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
         return "skip", "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 to test", None
-    running = [v for v in vms()
-               if v.state == "running" and v.name.startswith("mf-") and v.name != GOLDEN]
+    running = [
+        v for v in vms() if v.state == "running" and v.name.startswith("mf-") and v.name != GOLDEN
+    ]
     if not running:
         return "skip", "no running VM to test against", None
     name = shortname(running[0].name)
@@ -91,8 +96,11 @@ def _orphans(_fleet: Any, vms: Any) -> CheckResult:
     leaked = sorted(v.name for v in vms() if v.name.startswith(_ORPHAN_PREFIXES))
     if not leaked:
         return "ok", "none", None
-    return ("warn", f"{len(leaked)} leaked: {', '.join(leaked)}",
-            "Settings → Data → Remove all VMs & data")
+    return (
+        "warn",
+        f"{len(leaked)} leaked: {', '.join(leaked)}",
+        "Settings → Data → Remove all VMs & data",
+    )
 
 
 def _stale_leases(fleet: Any, vms: Any) -> CheckResult:
@@ -138,6 +146,7 @@ def run_checks(fleet: Any) -> list[dict]:
             status, detail, fix = fn(fleet, vms)
         except Exception as exc:  # noqa: BLE001 — a check's failure IS a finding
             status, detail, fix = "fail", str(exc), None
-        results.append({"id": check_id, "label": label, "status": status,
-                        "detail": detail, "fix": fix})
+        results.append(
+            {"id": check_id, "label": label, "status": status, "detail": detail, "fix": fix}
+        )
     return results

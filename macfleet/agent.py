@@ -17,8 +17,14 @@ def _png_size(png: bytes) -> tuple[int, int]:
 
 
 def _image_block(png: bytes) -> dict[str, Any]:
-    return {"type": "image", "source": {"type": "base64", "media_type": "image/png",
-                                        "data": base64.b64encode(png).decode()}}
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": base64.b64encode(png).decode(),
+        },
+    }
 
 
 def _translate(action_input: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -77,28 +83,50 @@ class AnthropicDriver:
     def next_action(self, screenshot: bytes, task: str) -> dict[str, Any]:
         width, height = _png_size(screenshot)
         if not self._messages:
-            self._messages.append({"role": "user", "content": [
-                {"type": "text", "text": task}, _image_block(screenshot)]})
+            self._messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": task}, _image_block(screenshot)],
+                }
+            )
         else:
             # Answer every tool_use from last turn: the acted-on one gets the fresh
             # (post-action) screenshot; the rest get an error so Claude knows only one ran.
             results: list[dict[str, Any]] = []
             for tool_use_id, provides in self._pending:
                 if provides:
-                    results.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                    "content": [_image_block(screenshot)]})
+                    results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": [_image_block(screenshot)],
+                        }
+                    )
                 else:
-                    results.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                    "content": "action not supported by this harness "
-                                    "(only left_click, type, screenshot)", "is_error": True})
+                    results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": "action not supported by this harness "
+                            "(only left_click, type, screenshot)",
+                            "is_error": True,
+                        }
+                    )
             self._messages.append({"role": "user", "content": results})
         self._pending = []
 
         resp = self._client.beta.messages.create(
-            model=self._model, max_tokens=4096,
+            model=self._model,
+            max_tokens=4096,
             betas=["computer-use-2025-11-24"],
-            tools=[{"type": "computer_20251124", "name": "computer",
-                    "display_width_px": width, "display_height_px": height}],
+            tools=[
+                {
+                    "type": "computer_20251124",
+                    "name": "computer",
+                    "display_width_px": width,
+                    "display_height_px": height,
+                }
+            ],
             messages=self._messages,
         )
         self._messages.append({"role": "assistant", "content": resp.content})

@@ -8,18 +8,29 @@ on:
 jobs:
   engine:
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --extra dev --extra mcp
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run --extra mcp pytest -q
       - run: uv export --format requirements-txt --no-dev --extra mcp --no-emit-project --output-file requirements-audit.txt
+        if: matrix.python-version == '3.14'
       # uv already exported the complete, pinned transitive graph. Avoid asking
       # pip-audit to create a second environment and resolve it again.
       - run: uvx pip-audit --disable-pip --no-deps -r requirements-audit.txt
+        if: matrix.python-version == '3.14'
       - run: uv export --format requirements-txt --extra dev --no-emit-project --output-file build-requirements-audit.txt
+        if: matrix.python-version == '3.14'
       - run: uvx pip-audit --disable-pip --no-deps -r build-requirements-audit.txt
+        if: matrix.python-version == '3.14'
 
   desktop:
     runs-on: macos-15

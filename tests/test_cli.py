@@ -1,5 +1,7 @@
 from typer.testing import CliRunner
+
 import macfleet.cli as cli
+from macfleet.vm import VmInfo
 
 runner = CliRunner()
 
@@ -8,8 +10,11 @@ class FakeFleet:
     def __init__(self):
         self.calls = []
 
-    def up(self, name, preset=None): self.calls.append(("up", name, preset))
-    def nuke(self, name): self.calls.append(("nuke", name))
+    def up(self, name, preset=None):
+        self.calls.append(("up", name, preset))
+
+    def nuke(self, name):
+        self.calls.append(("nuke", name))
 
     def reset_data(self, scope):
         self.calls.append(("reset_data", scope))
@@ -80,6 +85,26 @@ def test_reap_command(monkeypatch):
     assert result.stdout == "mf-old\nmf-stale\n"
 
 
+def test_ls_lists_only_fleet_vms(monkeypatch):
+    class FakeTart:
+        def list(self):
+            return [
+                VmInfo("mf-web", "running", "local"),
+                VmInfo("mf-golden", "stopped", "local"),
+                VmInfo("mfsnap-web-clean", "stopped", "local"),
+                VmInfo("personal-vm", "stopped", "local"),
+                VmInfo("ghcr.io/example/macos:latest", "stopped", "OCI"),
+            ]
+
+    class FakeFleet:
+        tart = FakeTart()
+
+    monkeypatch.setattr(cli, "_fleet", FakeFleet)
+    result = runner.invoke(cli.app, ["ls"])
+    assert result.exit_code == 0
+    assert result.stdout == "running  mf-web\n"
+
+
 def test_restore_command(monkeypatch):
     calls = {}
 
@@ -98,6 +123,7 @@ def test_snapshot_command(monkeypatch):
 
     class FakeFleet:
         tart = None
+
         def snapshot(self, name, label):
             calls["snap"] = (name, label)
             return f"{name}-{label}"
@@ -150,7 +176,10 @@ def test_reset_all_scope(monkeypatch):
 def test_reset_exits_nonzero_when_a_vm_fails(monkeypatch):
     fake = FakeFleet()
     fake.reset_data = lambda scope: {
-        "deleted": [], "failed": [{"name": "mf-a", "error": "busy"}], "removed_paths": []}
+        "deleted": [],
+        "failed": [{"name": "mf-a", "error": "busy"}],
+        "removed_paths": [],
+    }
     monkeypatch.setattr(cli, "_fleet", lambda: fake)
     result = runner.invoke(cli.app, ["reset"], input="y\n")
     assert result.exit_code == 1

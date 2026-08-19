@@ -90,7 +90,7 @@ def test_suspended_coexists_with_leases(tmp_path):
     lease.record("mf-a", ttl=60)
     lease.suspend("mf-b")
     assert lease.expired(2000.0) == ["mf-a"]  # leases still work
-    assert lease.suspended() == {"mf-b"}       # suspended preserved
+    assert lease.suspended() == {"mf-b"}  # suspended preserved
 
 
 def test_rename_moves_suspended_marker(tmp_path):

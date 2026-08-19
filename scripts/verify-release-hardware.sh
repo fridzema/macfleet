@@ -7,6 +7,9 @@ cd "${repo_dir}"
 check_vm="releasecheck"
 check_copy="releasecopy"
 check_snapshot="releasecheck-ready"
+owns_check_vm=0
+owns_check_copy=0
+owns_check_snapshot=0
 
 local_vm_exists() {
   # Do not use grep -q here: with pipefail it may close the pipe early, making tart's
@@ -16,27 +19,30 @@ local_vm_exists() {
 
 cleanup() {
   set +e
-  for _attempt in 1 2 3; do
-    local_vm_exists "mf-${check_copy}" || break
-    uv run macfleet nuke "${check_copy}" >/dev/null 2>&1
-    sleep 2
-  done
-  for _attempt in 1 2 3; do
-    local_vm_exists "mfsnap-${check_snapshot}" || break
-    MACFLEET_RELEASE_SNAPSHOT_ID="${check_snapshot}" uv run python -c \
-      'import os; from macfleet.connect import Fleet; Fleet().delete_snapshot(os.environ["MACFLEET_RELEASE_SNAPSHOT_ID"])' \
-      >/dev/null 2>&1
-    sleep 2
-  done
-  for _attempt in 1 2 3; do
-    local_vm_exists "mf-${check_vm}" || break
-    uv run macfleet nuke "${check_vm}" >/dev/null 2>&1
-    sleep 2
-  done
+  if (( owns_check_copy )); then
+    for _attempt in 1 2 3; do
+      local_vm_exists "mf-${check_copy}" || break
+      uv run macfleet nuke "${check_copy}" >/dev/null 2>&1
+      sleep 2
+    done
+  fi
+  if (( owns_check_snapshot )); then
+    for _attempt in 1 2 3; do
+      local_vm_exists "mfsnap-${check_snapshot}" || break
+      MACFLEET_RELEASE_SNAPSHOT_ID="${check_snapshot}" uv run python -c \
+        'import os; from macfleet.connect import Fleet; Fleet().delete_snapshot(os.environ["MACFLEET_RELEASE_SNAPSHOT_ID"])' \
+        >/dev/null 2>&1
+      sleep 2
+    done
+  fi
+  if (( owns_check_vm )); then
+    for _attempt in 1 2 3; do
+      local_vm_exists "mf-${check_vm}" || break
+      uv run macfleet nuke "${check_vm}" >/dev/null 2>&1
+      sleep 2
+    done
+  fi
 }
-
-trap cleanup EXIT
-trap 'exit 130' INT TERM
 
 if [[ "$(uname -m)" != "arm64" ]]; then
   echo "hardware check requires an Apple-silicon Mac" >&2
@@ -52,9 +58,16 @@ for candidate in "mf-${check_vm}" "mf-${check_copy}" "mfsnap-${check_snapshot}";
   fi
 done
 
+# Cleanup is armed only after every preflight check has proved the reserved names absent.
+# The ownership flags below are set immediately before operations that may partially create
+# a resource, so failures are recoverable without ever touching something that predated us.
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
 echo "L1: tart $(tart --version), mf-golden present"
 
 echo "L2: clone, boot, SSH, guest exec, computer-use readiness, and snapshot"
+owns_check_vm=1
 uv run macfleet up "${check_vm}"
 uv run macfleet ssh "${check_vm}" "sw_vers -productVersion"
 uv run macfleet exec "${check_vm}" "sw_vers"
@@ -80,9 +93,11 @@ while time.monotonic() < deadline:
 else:
     raise RuntimeError(f"computer-use did not become ready within 180s: {last_error}")
 PY
+owns_check_snapshot=1
 uv run macfleet snapshot "${check_vm}" ready
 
 echo "L3: MCP stdio, snapshot clone, guest exec, screenshot, and delete"
+owns_check_copy=1
 MACFLEET_RELEASE_VM="${check_vm}" \
 MACFLEET_RELEASE_COPY="${check_copy}" \
 MACFLEET_RELEASE_SNAPSHOT_ID="${check_snapshot}" \

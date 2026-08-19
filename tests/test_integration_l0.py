@@ -12,6 +12,7 @@ def scripted_tart(state):
         if argv[:2] == ["tart", "list"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
         return subprocess.CompletedProcess(argv, 0, "", "")
+
     return Tart(run=run)
 
 
@@ -20,8 +21,11 @@ def test_l0_list_then_up(monkeypatch):
     fleet = Fleet(tart=scripted_tart(state))
     monkeypatch.setattr(fleet, "status", lambda name: False)
     # avoid launching a real `tart run` subprocess
-    monkeypatch.setattr(fleet, "up", lambda name: state.append(
-        {"Name": f"mf-{name}", "State": "running", "Source": "local"}))
+    monkeypatch.setattr(
+        fleet,
+        "up",
+        lambda name: state.append({"Name": f"mf-{name}", "State": "running", "Source": "local"}),
+    )
     client = TestClient(build_app(fleet))
 
     assert len(client.get("/vms").json()) == 1
