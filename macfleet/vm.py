@@ -25,7 +25,9 @@ SUBPROCESS_TIMEOUT = 300.0
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 
-def _run(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT) -> "subprocess.CompletedProcess[str]":
+def _run(
+    argv: list[str], timeout: float = SUBPROCESS_TIMEOUT
+) -> "subprocess.CompletedProcess[str]":
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
@@ -35,8 +37,9 @@ def _run(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT) -> "subprocess.Co
     return proc
 
 
-def _run_nocheck(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT,
-                 max_bytes: int = MAX_OUTPUT_BYTES) -> "subprocess.CompletedProcess[str]":
+def _run_nocheck(
+    argv: list[str], timeout: float = SUBPROCESS_TIMEOUT, max_bytes: int = MAX_OUTPUT_BYTES
+) -> "subprocess.CompletedProcess[str]":
     # Like _run but never raises on a nonzero exit — used for `tart exec`, where a nonzero exit
     # is the guest command's result, not a tart failure. Reads via Popen + select so it can BOTH
     # bound runtime (a hang can't pin a worker) and cap captured stdout (a firehose can't OOM the
@@ -80,7 +83,8 @@ def _run_nocheck(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT,
         proc.stdout.close()  # type: ignore[union-attr]
         proc.stderr.close()  # type: ignore[union-attr]
     return subprocess.CompletedProcess(
-        argv, proc.returncode, out.decode(errors="replace"), err.decode(errors="replace"))
+        argv, proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+    )
 
 
 def fullname(name: str) -> str:
@@ -88,7 +92,7 @@ def fullname(name: str) -> str:
 
 
 def shortname(name: str) -> str:
-    return name[len("mf-"):] if name.startswith("mf-") else name
+    return name[len("mf-") :] if name.startswith("mf-") else name
 
 
 GOLDEN = "mf-golden"
@@ -98,6 +102,8 @@ GOLDEN = "mf-golden"
 # name itself contains hyphens (see Fleet.snapshots, which splits on the last '-').
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._]{0,63}$")
+# A snapshot id is `<vm name>-<label>`, so it spans two validated segments joined by '-'.
+_SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,128}$")
 
 
 def ensure_mutable(name: str) -> str:
@@ -129,6 +135,18 @@ def validate_label(label: str) -> str:
             f"invalid snapshot label {label!r}: use letters, digits, '.', '_' (max 64 chars)"
         )
     return label
+
+
+def validate_snapshot_id(snapshot_id: str) -> str:
+    """Reject snapshot ids not usable as a URL path segment / tart argument. Ids arrive from
+    clients (API bodies, MCP arguments) rather than from snapshots(), so they get the same
+    treatment as a VM name instead of being interpolated into `mfsnap-<id>` unchecked."""
+    if not _SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        raise RuntimeError(
+            f"invalid snapshot id {snapshot_id!r}: use letters, digits, '.', '_', '-' "
+            "(max 129 chars)"
+        )
+    return snapshot_id
 
 
 @dataclass(frozen=True)
@@ -184,11 +202,22 @@ class Tart:
     def get_config(self, name: str) -> dict:
         return json.loads(self._run(["tart", "get", name, "--format", "json"]).stdout)
 
-    def set_config(self, name: str, *, cpu: int | None = None, memory: int | None = None,
-                   disk_size: int | None = None, display: str | None = None) -> None:
+    def set_config(
+        self,
+        name: str,
+        *,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk_size: int | None = None,
+        display: str | None = None,
+    ) -> None:
         argv = ["tart", "set", name]
-        for value, flag in ((cpu, "--cpu"), (memory, "--memory"),
-                            (disk_size, "--disk-size"), (display, "--display")):
+        for value, flag in (
+            (cpu, "--cpu"),
+            (memory, "--memory"),
+            (disk_size, "--disk-size"),
+            (display, "--display"),
+        ):
             if value is not None:
                 argv += [flag, str(value)]
         self._run(argv)

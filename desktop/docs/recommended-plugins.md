@@ -58,7 +58,7 @@ bun add @tauri-apps/plugin-updater
      "updater": {
        "pubkey": "YOUR_PUBLIC_KEY_HERE",
        "endpoints": [
-         "https://github.com/fridzema/oxide-dock/releases/latest/download/latest.json"
+         "https://github.com/fridzema/macfleet/releases/latest/download/latest.json"
        ]
      }
    }

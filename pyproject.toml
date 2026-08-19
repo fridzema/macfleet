@@ -1,8 +1,25 @@
 [project]
 name = "macfleet"
-version = "0.4.2"
+version = "0.5.0"
 description = "Spin up and control a fleet of macOS VMs via tart + cua"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Robert Fridzema" }]
+keywords = ["macos", "vm", "tart", "virtualization", "computer-use", "mcp"]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Emulators",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = ["typer>=0.12", "fastapi>=0.111", "uvicorn>=0.30"]
 
 [project.optional-dependencies]
@@ -12,6 +29,12 @@ agent = ["anthropic>=0.40"]
 dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27", "pyinstaller==6.21.0"]
 mcp = ["mcp>=1.0"]
 
+[project.urls]
+Homepage = "https://github.com/fridzema/macfleet"
+Repository = "https://github.com/fridzema/macfleet"
+Issues = "https://github.com/fridzema/macfleet/issues"
+Changelog = "https://github.com/fridzema/macfleet/blob/main/CHANGELOG.md"
+
 [project.scripts]
 macfleet = "macfleet.cli:app"
 macfleet-mcp = "macfleet.mcp:main"
@@ -19,6 +42,19 @@ macfleet-mcp = "macfleet.mcp:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/macfleet",
+    "/tests",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["macfleet"]
 
 [tool.ruff]
 target-version = "py312"

@@ -16,6 +16,7 @@ from macfleet.vm import Tart, VmInfo
 def fake_runner(script):
     def run(argv):
         return subprocess.CompletedProcess(argv, 0, stdout=script(argv), stderr="")
+
     return run
 
 
@@ -37,9 +38,13 @@ def test_scp_push_cmd_shape():
 
 def test_up_clones_golden_and_starts():
     seen = []
+
     def tart_run(argv):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+        return subprocess.CompletedProcess(
+            argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", ""
+        )
+
     fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
     fleet.up("web")
     assert ["tart", "clone", "mf-golden", "mf-web"] in seen
@@ -57,7 +62,9 @@ def test_computer_reads_and_caches_guest_token_over_ssh(monkeypatch):
     monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")))
     calls = []
-    monkeypatch.setattr(fleet, "ssh", lambda name, command: calls.append((name, command)) or "token\n")
+    monkeypatch.setattr(
+        fleet, "ssh", lambda name, command: calls.append((name, command)) or "token\n"
+    )
     monkeypatch.setattr(fleet, "ip", lambda name: "192.168.64.4")
 
     assert fleet.computer("web")._token == "token"
@@ -86,6 +93,7 @@ def _opener(response_text, captured):
     def open_(req, timeout=None):
         captured.append((req.full_url, json.loads(req.data.decode()) if req.data else None))
         return _FakeResp(response_text)
+
     return open_
 
 
@@ -118,9 +126,7 @@ def test_guest_control_sends_gateway_token():
 
 def test_guest_logs_use_cursor_gateway_endpoint():
     cap = []
-    gc = GuestControl(
-        "http://vm:8000", opener=_opener('{"lines":"next\\n","cursor":42}', cap)
-    )
+    gc = GuestControl("http://vm:8000", opener=_opener('{"lines":"next\\n","cursor":42}', cap))
     assert gc.logs(25, 10) == {"lines": "next\n", "cursor": 42}
     assert cap[0][0] == "http://vm:8000/macfleet/logs?lines=25&cursor=10"
 
@@ -152,7 +158,9 @@ def test_guest_key_combo_uses_hotkey_single_uses_press_key():
 
 
 def test_guest_command_failure_raises_runtimeerror():
-    gc = GuestControl("http://vm:8000", opener=_opener('data: {"success": false, "error": "boom"}', []))
+    gc = GuestControl(
+        "http://vm:8000", opener=_opener('data: {"success": false, "error": "boom"}', [])
+    )
     with pytest.raises(RuntimeError, match="boom"):
         gc.click(1, 1)
 
@@ -160,6 +168,7 @@ def test_guest_command_failure_raises_runtimeerror():
 def test_guest_unreachable_raises_runtimeerror():
     def boom(req, timeout=None):
         raise urllib.error.URLError("connection refused")
+
     gc = GuestControl("http://vm:8000", opener=boom)
     with pytest.raises(RuntimeError, match="unreachable"):
         gc.screenshot()
@@ -176,8 +185,18 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
         calls.append(argv)
         if argv[:2] == ["tart", "list"]:
             import json as j
-            return subprocess.CompletedProcess(argv, 0, j.dumps(
-                [{"Name": v.name, "State": v.state, "Source": v.source, "Size": v.size} for v in listing]), "")
+
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                j.dumps(
+                    [
+                        {"Name": v.name, "State": v.state, "Source": v.source, "Size": v.size}
+                        for v in listing
+                    ]
+                ),
+                "",
+            )
         if argv[:2] == ["tart", "get"]:
             # Full config so `resources()`'s strict getter doesn't raise on missing
             # keys; State reflects the matching VM's actual listed state (falling
@@ -185,15 +204,24 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
             # snapshot/duplicate tests' assumption that an unlisted target is live).
             vm = next((v for v in listing if v.name == argv[2]), None)
             state = vm.state if vm else "running"
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                {"State": state, "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}), "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps({"State": state, "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}),
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     spawned = []
     lease = Leases(str(tmp_path / "state.json"), clock=lambda: clock_val)
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
-                  leases=lease, config=Config(str(tmp_path / "config.json")),
-                  clock=lambda: clock_val)
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=spawned.append,
+        leases=lease,
+        config=Config(str(tmp_path / "config.json")),
+        clock=lambda: clock_val,
+    )
     return fleet, calls, spawned, lease
 
 
@@ -233,10 +261,15 @@ def _resume_fleet(tmp_path, child):
         spawns.append(argv)
         return child
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawn,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
-                  clock=lambda: 0.0, monotonic=lambda: tick["now"],
-                  sleep=lambda seconds: tick.__setitem__("now", tick["now"] + seconds))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=spawn,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        clock=lambda: 0.0,
+        monotonic=lambda: tick["now"],
+        sleep=lambda seconds: tick.__setitem__("now", tick["now"] + seconds),
+    )
     return fleet, calls, spawns
 
 
@@ -288,8 +321,9 @@ def test_resume_restores_suspend_marker_after_generic_failure(tmp_path):
 def test_watcher_leaves_a_successful_restore_alone(tmp_path):
     # `tart run` still running (restore OK): never stop, never re-boot.
     fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=True))
-    fleet._coldboot_if_restore_failed("mf-web", ["tart", "run", "mf-web", "--no-graphics"],
-                                      _Child(alive=True))
+    fleet._coldboot_if_restore_failed(
+        "mf-web", ["tart", "run", "mf-web", "--no-graphics"], _Child(alive=True)
+    )
     assert spawns == []
     assert not any(c[:2] == ["tart", "stop"] for c in calls)
 
@@ -297,9 +331,7 @@ def test_watcher_leaves_a_successful_restore_alone(tmp_path):
 def test_watcher_preserves_suspend_state_for_unrelated_launch_failure(tmp_path):
     fleet, calls, spawns = _resume_fleet(tmp_path, _Child(alive=False))
     child = _Child(alive=False, code=1, diagnostic="shared directory is unavailable")
-    fleet._coldboot_if_restore_failed(
-        "mf-web", ["tart", "run", "mf-web", "--no-graphics"], child
-    )
+    fleet._coldboot_if_restore_failed("mf-web", ["tart", "run", "mf-web", "--no-graphics"], child)
     assert spawns == []
     assert not any(c[:2] == ["tart", "stop"] for c in calls)
     assert fleet._leases.suspended() == {"mf-web"}
@@ -331,9 +363,9 @@ def test_suspend_all_freezes_running_non_golden_only(tmp_path):
     vms = [
         VmInfo("mf-web", "running", ""),
         VmInfo("mf-api", "running", ""),
-        VmInfo("mf-golden", "running", ""),   # protected template — never touched
-        VmInfo("mf-idle", "stopped", ""),     # not running — skipped
-        VmInfo("mf-frozen", "running", ""),   # already suspended (below) — skipped
+        VmInfo("mf-golden", "running", ""),  # protected template — never touched
+        VmInfo("mf-idle", "stopped", ""),  # not running — skipped
+        VmInfo("mf-frozen", "running", ""),  # already suspended (below) — skipped
     ]
     fleet, calls, _, lease = _fleet(tmp_path, vms=vms)
     lease.suspend("mf-frozen")
@@ -350,9 +382,7 @@ def test_suspend_all_freezes_running_non_golden_only(tmp_path):
 
 
 def test_suspend_all_records_state_before_releasing_each_vm_lock(tmp_path, monkeypatch):
-    fleet, _, _, lease = _fleet(
-        tmp_path, vms=[VmInfo("mf-web", "running", "local")]
-    )
+    fleet, _, _, lease = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
 
     @contextmanager
     def asserting_lock(*_names):
@@ -370,9 +400,7 @@ def test_suspend_all_noop_when_nothing_running(tmp_path):
 
 
 def test_list_vms_coalesces_immediate_refreshes(tmp_path, monkeypatch):
-    fleet, calls, _, _ = _fleet(
-        tmp_path, vms=[VmInfo("mf-web", "running", "local")]
-    )
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
     monkeypatch.setattr(fleet, "status", lambda name: True)
     first = fleet.list_vms()
     second = fleet.list_vms()
@@ -448,8 +476,12 @@ def test_create_with_preset_sets_resources_before_run(tmp_path):
     def spawn(argv):
         events.append(("spawn", argv))
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawn,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=spawn,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     fleet.create("web", cpu=4, memory=8192, disk=100)  # 100 > cloned base's 80GB -> grows
     set_idx = events.index(
         ("run", ["tart", "set", "mf-web", "--cpu", "4", "--memory", "8192", "--disk-size", "100"])
@@ -469,8 +501,7 @@ def test_create_existing_running_name_skips_clone_and_set(tmp_path):
     # and must NOT `tart set` — set on a running VM fails and previously surfaced as a
     # spurious "failed to create" 409. It is a true no-op and must not create a false
     # intentional-suspend marker from Tart's "already running" launch error.
-    fleet, calls, spawned, lease = _fleet(
-        tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    fleet, calls, spawned, lease = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
     fleet.create("web", cpu=8, memory=16384)
     assert not any(c[:2] == ["tart", "clone"] for c in calls)
     assert not any(c[:2] == ["tart", "set"] for c in calls)
@@ -503,18 +534,21 @@ def test_create_reclaims_expired_target_name(tmp_path):
     # The target name is held by a VM whose lease already expired: reclaim it (stop+delete)
     # then clone fresh over the name.
     fleet, calls, _, lease = _fleet(
-        tmp_path, vms=[VmInfo("mf-web", "running", "local")], clock_val=2000.0)
+        tmp_path, vms=[VmInfo("mf-web", "running", "local")], clock_val=2000.0
+    )
     lease.record("mf-web", ttl=-1)  # expired at t=2000
     fleet.create("web")
     assert calls.index(["tart", "delete", "mf-web"]) < calls.index(
-        ["tart", "clone", "mf-golden", "mf-web"])
+        ["tart", "clone", "mf-golden", "mf-web"]
+    )
 
 
 def test_create_does_not_reap_unrelated_expired_vm(tmp_path):
     # An unrelated expired VM must NOT block create with its (slow) graceful stop — the
     # background reap loop sweeps it, not create. Creating "web" leaves "mf-old" untouched.
     fleet, calls, _, lease = _fleet(
-        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0)
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
+    )
     lease.record("mf-old", ttl=-1)  # expired, but unrelated to "web"
     fleet.create("web")
     assert not any(c[:2] == ["tart", "delete"] for c in calls)
@@ -532,8 +566,12 @@ def test_ip_is_cached_and_invalidated_on_stop(tmp_path):
             return subprocess.CompletedProcess(argv, 0, "[]", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     assert fleet.ip("web") == "192.168.64.7"
     assert fleet.ip("web") == "192.168.64.7"
     assert len([c for c in calls if c[:2] == ["tart", "ip"]]) == 1  # second call cached
@@ -547,8 +585,13 @@ def test_ip_raises_when_empty(tmp_path):
     # raise a clear error rather than return "" and let callers build broken admin@/http:// URLs.
     def run(argv):
         return subprocess.CompletedProcess(argv, 0, "" if argv[:2] == ["tart", "ip"] else "[]", "")
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     with pytest.raises(RuntimeError, match="has no IP yet"):
         fleet.ip("web")
 
@@ -564,8 +607,12 @@ def test_ssh_retries_transient_connection_error(tmp_path):
             return subprocess.CompletedProcess(argv, 0, "ok\n", "")
         return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     assert fleet.ssh("web", "whoami", sleep=lambda _: None) == "ok\n"
     assert attempts["n"] == 3
 
@@ -579,8 +626,12 @@ def test_ssh_does_not_retry_command_failure(tmp_path):
             raise RuntimeError("ssh mf-web whoami failed: some-command: not found")
         return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     with pytest.raises(RuntimeError, match="not found"):
         fleet.ssh("web", "whoami", sleep=lambda _: None)
     assert attempts["n"] == 1  # a real command failure surfaces immediately, no retry
@@ -592,13 +643,22 @@ def test_warm_golden_suspends_when_guest_becomes_healthy(tmp_path, monkeypatch):
     def run(argv):
         calls.append(argv)
         if argv[:2] == ["tart", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                [{"Name": "mf-golden", "State": "stopped", "Source": "local"}]), "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps([{"Name": "mf-golden", "State": "stopped", "Source": "local"}]),
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     spawned = []
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=spawned.append,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        clock=lambda: 0.0,
+    )
     monkeypatch.setattr(fleet, "status", lambda name: True)  # guest reachable immediately
     slept = []
     assert fleet.warm_golden(sleep=slept.append) is True
@@ -613,14 +673,22 @@ def test_warm_golden_times_out_without_suspending(tmp_path, monkeypatch):
     def run(argv):
         calls.append(argv)
         if argv[:2] == ["tart", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                [{"Name": "mf-golden", "State": "stopped", "Source": "local"}]), "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps([{"Name": "mf-golden", "State": "stopped", "Source": "local"}]),
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     now = {"t": 0.0}
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
-                  clock=lambda: now["t"])
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        clock=lambda: now["t"],
+    )
     monkeypatch.setattr(fleet, "status", lambda name: False)  # never reachable
 
     def sleep(p):
@@ -662,8 +730,12 @@ def test_create_disk_shrink_is_guarded_grow_only(tmp_path):
             raise RuntimeError("tart set --disk-size: cannot shrink disk")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet = Fleet(tart=Tart(run=run_would_raise_on_shrink), run=run_would_raise_on_shrink,
-                  spawn=lambda a: None, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+    fleet = Fleet(
+        tart=Tart(run=run_would_raise_on_shrink),
+        run=run_would_raise_on_shrink,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     fleet.create("web", disk=40)  # smaller than current 80GB -> must not shrink, must not raise
 
     # Growing still emits --disk-size as before.
@@ -677,8 +749,12 @@ def test_create_disk_shrink_is_guarded_grow_only(tmp_path):
             return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet2 = Fleet(tart=Tart(run=run_grows), run=run_grows, spawn=lambda a: None,
-                   leases=Leases(str(tmp_path / "s2.json"), clock=lambda: 0.0))
+    fleet2 = Fleet(
+        tart=Tart(run=run_grows),
+        run=run_grows,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s2.json"), clock=lambda: 0.0),
+    )
     fleet2.create("web2", disk=100)  # larger than current 80GB -> grows normally
     assert ["tart", "set", "mf-web2", "--disk-size", "100"] in events
 
@@ -694,8 +770,9 @@ def test_create_resource_failure_removes_partial_clone(tmp_path):
             raise RuntimeError("invalid resources")
         return subprocess.CompletedProcess(argv, 0, '{"Disk": 80}', "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json")))
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, spawn=lambda a: None, leases=Leases(str(tmp_path / "s.json"))
+    )
     with pytest.raises(RuntimeError, match="invalid resources"):
         fleet.create("web", cpu=4)
     assert ["tart", "delete", "mf-web"] in calls
@@ -714,7 +791,11 @@ def test_create_records_provisioning_steps_for_a_fresh_clone(tmp_path):
     rec = fleet.provision("web")
     assert rec is not None and rec["done"] is False and rec["error"] is None
     assert _prov_status(rec) == {
-        "clone": "done", "configure": "done", "boot": "active", "health": "pending"}
+        "clone": "done",
+        "configure": "done",
+        "boot": "active",
+        "health": "pending",
+    }
 
 
 def test_create_records_configure_skipped_without_a_preset(tmp_path):
@@ -740,8 +821,13 @@ def test_create_clone_failure_records_provisioning_error(tmp_path):
             raise RuntimeError("clone boom")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        clock=lambda: 0.0,
+    )
     with pytest.raises(RuntimeError, match="clone boom"):
         fleet.create("web")
     rec = fleet.provision("web")
@@ -764,16 +850,32 @@ def test_list_vms_advances_completes_then_prunes_provisioning(tmp_path, monkeypa
 
     def run(argv):
         if argv[:2] == ["tart", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                [{"Name": v, "State": "running", "Source": "local", "Size": 1} for v in listing]), "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps(
+                    [{"Name": v, "State": "running", "Source": "local", "Size": 1} for v in listing]
+                ),
+                "",
+            )
         if argv[:2] == ["tart", "get"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                {"State": "running", "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}), "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps(
+                    {"State": "running", "CPU": 4, "Memory": 8192, "Disk": 50, "Display": "x"}
+                ),
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: clock["t"]),
-                  clock=lambda: clock["t"])
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: clock["t"]),
+        clock=lambda: clock["t"],
+    )
     healthy = {"v": False}
     monkeypatch.setattr(fleet, "status", lambda name: healthy["v"])
 
@@ -824,7 +926,9 @@ def test_up_delegates_to_create(tmp_path):
 
 
 def test_reap_deletes_expired(tmp_path):
-    fleet, calls, _, lease = _fleet(tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0)
+    fleet, calls, _, lease = _fleet(
+        tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
+    )
     lease.record("mf-old", ttl=-1)  # already expired at t=2000
     reaped = fleet.reap()
     assert reaped == ["mf-old"]
@@ -842,7 +946,7 @@ def test_reap_keeps_failed_deletion_leased_for_retry(tmp_path, monkeypatch):
         raise RuntimeError("tart delete failed")
 
     monkeypatch.setattr(fleet, "_nuke_unlocked", fail)
-    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert fleet.reap() == []
     assert lease.expired(2000.0) == ["mf-old"]
 
 
@@ -861,19 +965,32 @@ def test_reap_skips_candidate_renewed_while_waiting_for_vm_lock(tmp_path, monkey
 
     monkeypatch.setattr(fleet, "_locked_vms", renewing_lock)
 
-    assert fleet.reap(existing=[VmInfo("mf-old", "running", "local")]) == []
+    assert fleet.reap() == []
     assert ["tart", "delete", "mf-old"] not in calls
     assert lease.expired(2000.0) == []
 
 
-def test_reap_refreshes_stale_inventory_after_acquiring_vm_lock(tmp_path):
+def test_reap_refreshes_stale_inventory_after_acquiring_vm_lock(tmp_path, monkeypatch):
     fleet, calls, _, lease = _fleet(
         tmp_path, vms=[VmInfo("mf-old", "running", "local")], clock_val=2000.0
     )
     lease.record("mf-old", ttl=-1)
+    original_lock = fleet._locked_vms
 
-    assert fleet.reap(existing=[]) == ["mf-old"]
-    assert ["tart", "delete", "mf-old"] in calls
+    @contextmanager
+    def vanishing_lock(*names):
+        with original_lock(*names):
+            # The VM disappears (say, an external `tart delete`) between candidate discovery
+            # and this lock. reap() must act on the listing it takes INSIDE the lock: drop the
+            # lease, and never issue a delete for a name it no longer owns.
+            monkeypatch.setattr(fleet.tart, "list", list)
+            yield
+
+    monkeypatch.setattr(fleet, "_locked_vms", vanishing_lock)
+
+    assert fleet.reap() == ["mf-old"]
+    assert ["tart", "delete", "mf-old"] not in calls
+    assert lease.expired(1e12) == []
 
 
 def test_list_vms_reaps_first_and_marks_health(tmp_path):
@@ -890,8 +1007,15 @@ def test_list_vms_reaps_first_and_marks_health(tmp_path):
     # structure: name/state/source/healthy for every VM `tart list` returned, minus
     # anything reap() just deleted.
     assert vms == [
-        {"name": "mf-web", "state": "stopped", "source": "local", "healthy": False,
-         "cpu": 4, "memory_mb": 8192, "disk_gb": 50},
+        {
+            "name": "mf-web",
+            "state": "stopped",
+            "source": "local",
+            "healthy": False,
+            "cpu": 4,
+            "memory_mb": 8192,
+            "disk_gb": 50,
+        },
     ]
 
 
@@ -914,7 +1038,9 @@ def test_snapshot_running_vm_suspends_clones_resumes(tmp_path):
     fleet, calls, spawned, _ = _fleet(tmp_path)  # _state returns "running" via fake
     sid = fleet.snapshot("web", "clean")
     assert sid == "web-clean"
-    assert calls.index(["tart", "suspend", "mf-web"]) < calls.index(["tart", "clone", "mf-web", "mfsnap-web-clean"])
+    assert calls.index(["tart", "suspend", "mf-web"]) < calls.index(
+        ["tart", "clone", "mf-web", "mfsnap-web-clean"]
+    )
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned  # resumed original
 
 
@@ -932,8 +1058,14 @@ def test_snapshot_falls_back_to_stop_when_suspend_fails(tmp_path):
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=lambda a: None,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), clock=lambda: 0.0)
+
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        clock=lambda: 0.0,
+    )
     fleet.snapshot("web", "clean")
     assert ["tart", "stop", "mf-web"] in calls  # clean-disk fallback
 
@@ -954,19 +1086,25 @@ def test_snapshot_clone_failure_still_resumes_source(tmp_path):
 
 
 def test_snapshot_rejects_duplicate_id(tmp_path):
-    fleet, _, _, _ = _fleet(tmp_path, vms=[
-        VmInfo("mf-web", "stopped", "local"),
-        VmInfo("mfsnap-web-clean", "stopped", "local"),
-    ])
+    fleet, _, _, _ = _fleet(
+        tmp_path,
+        vms=[
+            VmInfo("mf-web", "stopped", "local"),
+            VmInfo("mfsnap-web-clean", "stopped", "local"),
+        ],
+    )
     with pytest.raises(RuntimeError, match="already exists"):
         fleet.snapshot("web", "clean")
 
 
 def test_snapshots_lists_and_parses(tmp_path):
-    fleet, _, _, _ = _fleet(tmp_path, vms=[
-        VmInfo("mfsnap-web-clean", "stopped", "local", 3.2),
-        VmInfo("mf-web", "running", "local"),
-    ])
+    fleet, _, _, _ = _fleet(
+        tmp_path,
+        vms=[
+            VmInfo("mfsnap-web-clean", "stopped", "local", 3.2),
+            VmInfo("mf-web", "running", "local"),
+        ],
+    )
     snaps = fleet.snapshots()
     assert snaps == [{"id": "web-clean", "vm": "web", "label": "clean", "size": 3.2}]
 
@@ -978,10 +1116,13 @@ def test_delete_snapshot(tmp_path):
 
 
 def test_restore_stops_deletes_clones_runs_when_vm_exists(tmp_path):
-    fleet, calls, spawned, _ = _fleet(tmp_path, vms=[
-        VmInfo("mf-web", "running", "local"),
-        VmInfo("mfsnap-web-clean", "stopped", "local"),
-    ])
+    fleet, calls, spawned, _ = _fleet(
+        tmp_path,
+        vms=[
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("mfsnap-web-clean", "stopped", "local"),
+        ],
+    )
     fleet.restore("web", "web-clean")
     clone = next(c for c in calls if c[:3] == ["tart", "clone", "mfsnap-web-clean"])
     staged = clone[3]
@@ -996,7 +1137,8 @@ def test_restore_stops_deletes_clones_runs_when_vm_exists(tmp_path):
 
 def test_restore_recreates_when_vm_absent(tmp_path):
     fleet, calls, spawned, _ = _fleet(
-        tmp_path, vms=[VmInfo("mfsnap-web-clean", "stopped", "local")])
+        tmp_path, vms=[VmInfo("mfsnap-web-clean", "stopped", "local")]
+    )
     fleet.restore("web", "web-clean")
     assert not any(c[:2] == ["tart", "delete"] for c in calls)
     clone = next(c for c in calls if c[:3] == ["tart", "clone", "mfsnap-web-clean"])
@@ -1005,10 +1147,13 @@ def test_restore_recreates_when_vm_absent(tmp_path):
 
 
 def test_restore_clone_failure_does_not_touch_current_vm(tmp_path):
-    fleet, calls, _, _ = _fleet(tmp_path, vms=[
-        VmInfo("mf-web", "running", "local"),
-        VmInfo("mfsnap-web-clean", "stopped", "local"),
-    ])
+    fleet, calls, _, _ = _fleet(
+        tmp_path,
+        vms=[
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("mfsnap-web-clean", "stopped", "local"),
+        ],
+    )
 
     def fail_clone(_src, _dst):
         raise RuntimeError("disk full")
@@ -1022,10 +1167,13 @@ def test_restore_clone_failure_does_not_touch_current_vm(tmp_path):
 
 
 def test_restore_swap_failure_rolls_back_and_resumes_current_vm(tmp_path):
-    fleet, calls, spawned, _ = _fleet(tmp_path, vms=[
-        VmInfo("mf-web", "running", "local"),
-        VmInfo("mfsnap-web-clean", "stopped", "local"),
-    ])
+    fleet, calls, spawned, _ = _fleet(
+        tmp_path,
+        vms=[
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("mfsnap-web-clean", "stopped", "local"),
+        ],
+    )
     original_rename = fleet.tart.rename
 
     def fail_staged_rename(old, new):
@@ -1082,49 +1230,77 @@ def test_duplicate_clone_failure_still_resumes_source(tmp_path):
 
 
 def test_duplicate_stopped_source_boots_copy(tmp_path):
-    fleet, _, spawned, _ = _fleet(
-        tmp_path, vms=[VmInfo("mf-web", "stopped", "local")]
-    )
+    fleet, _, spawned, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "stopped", "local")])
     fleet.duplicate("web", "web2")
     assert ["tart", "run", "mf-web2", "--no-graphics"] in spawned
 
 
 def test_resources_parses_get(tmp_path):
     def run(argv):
-        return subprocess.CompletedProcess(argv, 0,
-            '{"CPU":6,"Memory":16384,"Disk":80,"Display":"1920x1080","State":"stopped"}', "")
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            '{"CPU":6,"Memory":16384,"Disk":80,"Display":"1920x1080","State":"stopped"}',
+            "",
+        )
+
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
-    assert fleet.resources("web") == {"cpu": 6, "memory_mb": 16384, "disk_gb": 80,
-                                      "display": "1920x1080", "state": "stopped"}
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
+    assert fleet.resources("web") == {
+        "cpu": 6,
+        "memory_mb": 16384,
+        "disk_gb": 80,
+        "display": "1920x1080",
+        "state": "stopped",
+    }
 
 
 def test_resources_missing_key_raises_runtime_error(tmp_path):
     def run(argv):
         return subprocess.CompletedProcess(argv, 0, "{}", "")
+
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     with pytest.raises(RuntimeError, match="unexpected tart get output"):
         fleet.resources("web")
 
 
 def test_set_resources_rejects_running(tmp_path):
     def run(argv):
-        return subprocess.CompletedProcess(argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+        return subprocess.CompletedProcess(
+            argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', ""
+        )
+
     from macfleet.leases import Leases
     import pytest
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     with pytest.raises(RuntimeError, match="stop the VM"):
         fleet.set_resources("web", cpu=8)
 
 
 def test_set_resources_sets_when_stopped(tmp_path):
     calls = []
+
     def run(argv):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+        return subprocess.CompletedProcess(
+            argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', ""
+        )
+
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     fleet.set_resources("web", cpu=8, memory=16384)
     assert calls[-1] == ["tart", "set", "mf-web", "--cpu", "8", "--memory", "16384"]
 
@@ -1134,8 +1310,12 @@ def test_connection_info(tmp_path):
         if argv[:2] == ["tart", "ip"]:
             return subprocess.CompletedProcess(argv, 0, "192.168.64.9\n", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
+
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     info = fleet.connection_info("web")
     assert info["ip"] == "192.168.64.9"
     assert info["ssh"] == "ssh admin@192.168.64.9"
@@ -1161,9 +1341,14 @@ def test_exec_returns_stdout_and_exit_code(tmp_path):
         assert argv[:3] == ["tart", "exec", "mf-web"]
         assert argv[3:] == ["/bin/sh", "-lc", "echo hi"]
         return subprocess.CompletedProcess(argv, 2, "hi\n", "")
+
     from macfleet.leases import Leases
-    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
-                  run_nocheck=nocheck, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+        run_nocheck=nocheck,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     assert fleet.exec("web", "echo hi") == {"stdout": "hi\n", "stderr": "", "exit_code": 2}
 
 
@@ -1241,15 +1426,18 @@ def test_list_vms_tolerates_tart_get_failure_for_one_vm(tmp_path):
     # it's retried on the next call instead of sticking with a bad value.
     def run(argv):
         if argv[:2] == ["tart", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(
-                [{"Name": "mf-web", "State": "running", "Source": "local"}]), "")
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps([{"Name": "mf-web", "State": "running", "Source": "local"}]), ""
+            )
         if argv[:2] == ["tart", "get"]:
             return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run,
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     rows = fleet.list_vms()
     row = next(r for r in rows if r["name"] == "mf-web")
     assert row["cpu"] is None and row["memory_mb"] is None and row["disk_gb"] is None
@@ -1265,8 +1453,14 @@ def test_list_vms_prunes_caches_for_externally_removed_vm(tmp_path):
     fleet._control_token_ips["mf-old"] = "192.168.64.4"
     fleet._health_cache["mf-old"] = (999999.0, True)
     fleet.list_vms()
-    for cache in (fleet._res_cache, fleet._res_cache_at, fleet._ip_cache,
-                  fleet._control_tokens, fleet._control_token_ips, fleet._health_cache):
+    for cache in (
+        fleet._res_cache,
+        fleet._res_cache_at,
+        fleet._ip_cache,
+        fleet._control_tokens,
+        fleet._control_token_ips,
+        fleet._health_cache,
+    ):
         assert "mf-old" not in cache
 
 
@@ -1282,19 +1476,28 @@ def test_set_resources_never_shrinks_disk(tmp_path):
     # fake get_config: stopped VM with 50GB disk; a shrink to 40 must be dropped
     def run(argv):
         if argv[:2] == ["tart", "get"]:
-            return subprocess.CompletedProcess(argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', "")
+            return subprocess.CompletedProcess(
+                argv, 0, '{"State":"stopped","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', ""
+            )
         if argv[:2] == ["tart", "set"]:
             assert "--disk-size" not in argv  # shrink dropped
         return subprocess.CompletedProcess(argv, 0, "", "")
+
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)
+    )
     fleet.set_resources("web", disk_size=40)  # would shrink -> must be dropped, no error
 
 
 def test_metrics_uses_persistent_guest_gateway(tmp_path, monkeypatch):
     from macfleet.leases import Leases
-    fleet = Fleet(tart=Tart(run=fake_runner(lambda argv: "")),
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        tart=Tart(run=fake_runner(lambda argv: "")),
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     expected = {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
     guest = type("Guest", (), {"metrics": lambda self: expected})()
     monkeypatch.setattr(fleet, "_guest_client", lambda name: guest)
@@ -1304,10 +1507,15 @@ def test_metrics_uses_persistent_guest_gateway(tmp_path, monkeypatch):
 
 def test_metrics_propagates_guest_error(tmp_path, monkeypatch):
     from macfleet.leases import Leases
-    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0))
+
+    fleet = Fleet(
+        run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+    )
     monkeypatch.setattr(
-        fleet, "_guest_client", lambda name: (_ for _ in ()).throw(RuntimeError("metrics unavailable"))
+        fleet,
+        "_guest_client",
+        lambda name: (_ for _ in ()).throw(RuntimeError("metrics unavailable")),
     )
     with pytest.raises(RuntimeError, match="metrics unavailable"):
         fleet.metrics("web")
@@ -1316,10 +1524,14 @@ def test_metrics_propagates_guest_error(tmp_path, monkeypatch):
 def test_activity_recent_delegates(tmp_path):
     from macfleet.activity import Activity
     from macfleet.leases import Leases
+
     act = Activity(str(tmp_path / "a.jsonl"), clock=lambda: 5.0)
     act.record("claude-code", "created", "web")
-    fleet = Fleet(run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
-                  leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0), activity=act)
+    fleet = Fleet(
+        run=lambda a: subprocess.CompletedProcess(a, 0, "", ""),
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        activity=act,
+    )
     r = fleet.activity_recent()
     assert r[0]["who"] == "claude-code" and r[0]["action"] == "created"
 
@@ -1328,9 +1540,13 @@ def test_nuke_rejects_golden_template():
     # `nuke("golden")` resolves to mf-golden (the clone source); deleting it would break
     # every future create. Reject via both the short and full name; nothing is deleted.
     seen = []
+
     def tart_run(argv):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+        return subprocess.CompletedProcess(
+            argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", ""
+        )
+
     fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
     for target in ("golden", "mf-golden"):
         with pytest.raises(RuntimeError, match="protected template"):
@@ -1349,10 +1565,12 @@ def test_golden_blocks_exec_ssh_computer_and_metrics(tmp_path, monkeypatch):
     # lifecycle mutations. No tart/ssh command should be issued for any of them.
     monkeypatch.setenv("MACFLEET_ALLOW_CONTROL", "1")
     fleet, calls, _, _ = _fleet(tmp_path)
-    for call in (lambda: fleet.exec("golden", "rm -rf /"),
-                 lambda: fleet.ssh("golden", "whoami"),
-                 lambda: fleet.computer("golden"),
-                 lambda: fleet.metrics("golden")):
+    for call in (
+        lambda: fleet.exec("golden", "rm -rf /"),
+        lambda: fleet.ssh("golden", "whoami"),
+        lambda: fleet.computer("golden"),
+        lambda: fleet.metrics("golden"),
+    ):
         with pytest.raises(RuntimeError, match="protected template"):
             call()
     assert calls == []
@@ -1370,19 +1588,39 @@ def test_snapshots_parse_hyphenated_vm_name(tmp_path):
     # A VM named `web-api` with label `clean` must parse as vm=web-api, label=clean —
     # split on the LAST hyphen (labels forbid '-').
     fleet, _, _, _ = _fleet(tmp_path, vms=[VmInfo("mfsnap-web-api-clean", "stopped", "local", 1.0)])
-    assert fleet.snapshots() == [{"id": "web-api-clean", "vm": "web-api", "label": "clean", "size": 1.0}]
+    assert fleet.snapshots() == [
+        {"id": "web-api-clean", "vm": "web-api", "label": "clean", "size": 1.0}
+    ]
 
 
 def test_create_rejects_invalid_name():
     seen = []
+
     def tart_run(argv):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", "")
+        return subprocess.CompletedProcess(
+            argv, 0, "[]" if argv[:2] == ["tart", "list"] else "", ""
+        )
+
     fleet = Fleet(tart=Tart(run=tart_run), spawn=seen.append)
     for bad in ("we/b", "a?b", "x#y", ""):
         with pytest.raises(RuntimeError, match="invalid VM name"):
             fleet.create(bad)
     assert not any(a[:2] == ["tart", "clone"] for a in seen)
+
+
+def test_snapshot_id_arguments_are_validated(tmp_path):
+    # Snapshot ids arrive from clients (API bodies, MCP arguments) and are interpolated into
+    # `mfsnap-<id>`, so they get the same treatment as a VM name — nothing reaches tart.
+    fleet, calls, _, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "running", "local")])
+    for bad in ("../mf-golden", "a b", "x/y", ""):
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.create("copy", from_snapshot=bad)
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.restore("web", bad)
+        with pytest.raises(RuntimeError, match="invalid snapshot id"):
+            fleet.delete_snapshot(bad)
+    assert not any(a[:2] in (["tart", "clone"], ["tart", "delete"]) for a in calls)
 
 
 def test_snapshot_rejects_hyphenated_label(tmp_path):
@@ -1404,22 +1642,34 @@ def _fleet_with_shares(tmp_path, shares):
             return subprocess.CompletedProcess(argv, 0, "[]", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, spawn=spawned.append,
-                  leases=Leases(str(tmp_path / "l.json"), clock=lambda: 0.0),
-                  shares=shares, clock=lambda: 0.0)
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=spawned.append,
+        leases=Leases(str(tmp_path / "l.json"), clock=lambda: 0.0),
+        shares=shares,
+        clock=lambda: 0.0,
+    )
     return fleet, calls, spawned
 
 
 def test_run_argv_appends_dir_flags(tmp_path):
     shares = Shares(str(tmp_path / "s.json"))
-    shares.set("mf-web", [
-        {"tag": "src", "host_path": "/h/src", "read_only": True},
-        {"tag": "out", "host_path": "/h/out", "read_only": False},
-    ])
+    shares.set(
+        "mf-web",
+        [
+            {"tag": "src", "host_path": "/h/src", "read_only": True},
+            {"tag": "out", "host_path": "/h/out", "read_only": False},
+        ],
+    )
     fleet, _, _ = _fleet_with_shares(tmp_path, shares)
     assert fleet._run_argv("mf-web") == [
-        "tart", "run", "mf-web", "--no-graphics",
-        "--dir=src:/h/src:ro", "--dir=out:/h/out",
+        "tart",
+        "run",
+        "mf-web",
+        "--no-graphics",
+        "--dir=src:/h/src:ro",
+        "--dir=out:/h/out",
     ]
 
 
@@ -1447,8 +1697,9 @@ def test_set_shares_validates_and_normalizes(tmp_path):
     with pytest.raises(RuntimeError, match="invalid share tag"):
         fleet.set_shares("web", [{"tag": "bad/tag", "host_path": str(d)}])
     with pytest.raises(RuntimeError, match="duplicate share tag"):
-        fleet.set_shares("web", [{"tag": "src", "host_path": str(d)},
-                                 {"tag": "src", "host_path": str(d)}])
+        fleet.set_shares(
+            "web", [{"tag": "src", "host_path": str(d)}, {"tag": "src", "host_path": str(d)}]
+        )
 
 
 def test_set_shares_rejects_golden(tmp_path):
@@ -1553,13 +1804,16 @@ def _reset_fleet(tmp_path, vms):
 
 
 def test_reset_fleet_deletes_vms_and_snapshots_but_keeps_golden(tmp_path):
-    fleet, tart = _reset_fleet(tmp_path, [
-        VmInfo("mf-golden", "suspended", "local"),
-        VmInfo("mf-web", "running", "local"),
-        VmInfo("mfsnap-web-v1", "stopped", "local"),
-        VmInfo("mfbackup-abc", "stopped", "local"),
-        VmInfo("mftmp-def", "stopped", "local"),
-    ])
+    fleet, tart = _reset_fleet(
+        tmp_path,
+        [
+            VmInfo("mf-golden", "suspended", "local"),
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("mfsnap-web-v1", "stopped", "local"),
+            VmInfo("mfbackup-abc", "stopped", "local"),
+            VmInfo("mftmp-def", "stopped", "local"),
+        ],
+    )
     result = fleet.reset_data("fleet")
     assert set(result["deleted"]) == {"mf-web", "mfsnap-web-v1", "mfbackup-abc", "mftmp-def"}
     assert "mf-golden" not in tart.deleted
@@ -1567,21 +1821,27 @@ def test_reset_fleet_deletes_vms_and_snapshots_but_keeps_golden(tmp_path):
 
 
 def test_reset_all_deletes_golden_too(tmp_path):
-    fleet, tart = _reset_fleet(tmp_path, [
-        VmInfo("mf-golden", "suspended", "local"),
-        VmInfo("mf-web", "running", "local"),
-    ])
+    fleet, tart = _reset_fleet(
+        tmp_path,
+        [
+            VmInfo("mf-golden", "suspended", "local"),
+            VmInfo("mf-web", "running", "local"),
+        ],
+    )
     result = fleet.reset_data("all")
     assert set(result["deleted"]) == {"mf-golden", "mf-web"}
     assert "mf-golden" in tart.deleted
 
 
 def test_reset_never_touches_foreign_vms(tmp_path):
-    fleet, tart = _reset_fleet(tmp_path, [
-        VmInfo("mf-web", "running", "local"),
-        VmInfo("ubuntu-ci", "running", "local"),
-        VmInfo("sonoma-base", "stopped", "local"),
-    ])
+    fleet, tart = _reset_fleet(
+        tmp_path,
+        [
+            VmInfo("mf-web", "running", "local"),
+            VmInfo("ubuntu-ci", "running", "local"),
+            VmInfo("sonoma-base", "stopped", "local"),
+        ],
+    )
     result = fleet.reset_data("all")
     assert result["deleted"] == ["mf-web"]
     assert tart.deleted == ["mf-web"]
@@ -1622,10 +1882,13 @@ def test_reset_leaves_operations_dir_alone(tmp_path):
 
 
 def test_reset_reports_failures_without_aborting(tmp_path):
-    fleet, tart = _reset_fleet(tmp_path, [
-        VmInfo("mf-a", "running", "local"),
-        VmInfo("mf-b", "running", "local"),
-    ])
+    fleet, tart = _reset_fleet(
+        tmp_path,
+        [
+            VmInfo("mf-a", "running", "local"),
+            VmInfo("mf-b", "running", "local"),
+        ],
+    )
     tart.delete_error = ("mf-a", "tart delete failed: busy")
     result = fleet.reset_data("fleet")
     assert result["deleted"] == ["mf-b"]

@@ -10,8 +10,9 @@ class FakeComputer:
 
 
 class FakeFleet:
-    def __init__(self, vms=None, healthy=("a",), computer_obj=None, computer_error=None,
-                 up_error=None):
+    def __init__(
+        self, vms=None, healthy=("a",), computer_obj=None, computer_error=None, up_error=None
+    ):
         self.tart = self
         self.calls = []
         self._vms = list(vms) if vms is not None else [VmInfo("mf-a", "running", "local")]
@@ -98,8 +99,13 @@ class FakeFleet:
         self.calls.append(("set_resources", name, cpu, memory, disk_size, display))
 
     def connection_info(self, name):
-        return {"ip": "1.2.3.4", "ssh": "ssh admin@1.2.3.4", "vnc": "open vnc://admin@1.2.3.4",
-                "guest_server": "http://1.2.3.4:8000", "exec": True}
+        return {
+            "ip": "1.2.3.4",
+            "ssh": "ssh admin@1.2.3.4",
+            "vnc": "open vnc://admin@1.2.3.4",
+            "guest_server": "http://1.2.3.4:8000",
+            "exec": True,
+        }
 
     def exec(self, name, command):
         return {"stdout": "ok", "exit_code": 0}
@@ -119,16 +125,24 @@ class FakeFleet:
         return {"cpu_pct": 25.5, "mem_used_mb": 8029, "mem_total_mb": 8192}
 
     def provisioning(self):
-        return {"b": {"name": "b",
-                      "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
-                      "done": False, "error": None}}
+        return {
+            "b": {
+                "name": "b",
+                "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
+                "done": False,
+                "error": None,
+            }
+        }
 
     def provision(self, name):
         if name != "web":
             return None
-        return {"name": "web",
-                "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
-                "done": False, "error": None}
+        return {
+            "name": "web",
+            "steps": [{"key": "boot", "label": "Boot guest", "status": "active"}],
+            "done": False,
+            "error": None,
+        }
 
 
 def test_list_vms_delegates_to_fleet():
@@ -139,7 +153,7 @@ def test_list_vms_delegates_to_fleet():
     assert r.status_code == 200
     assert r.json() == FakeFleet().list_vms()
     body = r.json()
-    assert body[0]["healthy"] is True   # running VM stays healthy
+    assert body[0]["healthy"] is True  # running VM stays healthy
     assert body[1]["healthy"] is False  # stopped VM stays unhealthy
 
 
@@ -154,8 +168,10 @@ def test_up_missing_golden_returns_409_with_cors():
     # `tart clone mf-golden ...` fails when the golden image isn't baked -> RuntimeError.
     # The app-level handler must turn it into a 409 that still carries the CORS header,
     # not a bare 500 (which drops CORS and shows up as an unhandled fetch error).
-    fake = FakeFleet(up_error=RuntimeError('tart clone mf-golden mf-test failed: does not exist'))
-    r = TestClient(build_app(fake)).post("/vms/test/up", headers={"Origin": "http://localhost:1420"})
+    fake = FakeFleet(up_error=RuntimeError("tart clone mf-golden mf-test failed: does not exist"))
+    r = TestClient(build_app(fake)).post(
+        "/vms/test/up", headers={"Origin": "http://localhost:1420"}
+    )
     assert r.status_code == 409
     assert r.headers.get("access-control-allow-origin") == "http://localhost:1420"
     assert "mf-golden" in r.json()["detail"]
@@ -215,14 +231,18 @@ def test_screenshot_success_returns_binary_png():
 
 
 def test_screenshot_disabled_returns_409():
-    fake = FakeFleet(computer_error=RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1"))
+    fake = FakeFleet(
+        computer_error=RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1")
+    )
     r = TestClient(build_app(fake)).post("/vms/web/screenshot")
     assert r.status_code == 409
 
 
 def test_create_from_snapshot_with_ttl():
     fake = FakeFleet()
-    r = TestClient(build_app(fake)).post("/vms", json={"name": "web", "from_snapshot": "base", "ttl": 60})
+    r = TestClient(build_app(fake)).post(
+        "/vms", json={"name": "web", "from_snapshot": "base", "ttl": 60}
+    )
     assert r.status_code == 200
     assert ("create", "web", "base", 60, None, None, None) in fake.calls
 
@@ -261,8 +281,12 @@ def test_suspend_resume_endpoints():
 def test_snapshot_endpoints():
     fake = FakeFleet()
     client = TestClient(build_app(fake))
-    assert client.post("/vms/web/snapshot", json={"label": "clean"}).json() == {"snapshot_id": "web-clean"}
-    assert client.get("/snapshots").json() == [{"id": "web-clean", "vm": "web", "label": "clean", "size": 1.0}]
+    assert client.post("/vms/web/snapshot", json={"label": "clean"}).json() == {
+        "snapshot_id": "web-clean"
+    }
+    assert client.get("/snapshots").json() == [
+        {"id": "web-clean", "vm": "web", "label": "clean", "size": 1.0}
+    ]
     assert client.delete("/snapshots/web-clean").json() == {"ok": True}
 
 
@@ -286,7 +310,10 @@ def test_connection_and_exec_endpoints():
     fake = FakeFleet()
     client = TestClient(build_app(fake))
     assert client.get("/vms/web/connection").json()["ssh"] == "ssh admin@1.2.3.4"
-    assert client.post("/vms/web/exec", json={"command": "uname"}).json() == {"stdout": "ok", "exit_code": 0}
+    assert client.post("/vms/web/exec", json={"command": "uname"}).json() == {
+        "stdout": "ok",
+        "exit_code": 0,
+    }
 
 
 def test_reap_endpoint():
@@ -310,10 +337,25 @@ def test_metrics_endpoint():
 
 def test_cors_allows_tauri_origin_and_denies_others():
     client = TestClient(build_app(FakeFleet()))
-    ok = client.get("/vms", headers={"Origin": "http://localhost:1420"})
-    assert ok.headers.get("access-control-allow-origin") == "http://localhost:1420"
+    for origin in ("http://127.0.0.1:1420", "http://localhost:1420", "tauri://localhost"):
+        ok = client.get("/vms", headers={"Origin": origin})
+        assert ok.headers.get("access-control-allow-origin") == origin
     bad = client.get("/vms", headers={"Origin": "https://evil.example"})
     assert bad.headers.get("access-control-allow-origin") is None
+
+
+def test_cors_allows_vite_loopback_preflight_with_token_header():
+    client = TestClient(build_app(FakeFleet(), token="secret"))
+    response = client.options(
+        "/vms",
+        headers={
+            "Origin": "http://127.0.0.1:1420",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-macfleet-token",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:1420"
 
 
 def test_token_required_on_mutating_route():
@@ -362,8 +404,11 @@ def test_put_shares_endpoint():
     client = TestClient(build_app(fake))
     body = {"shares": [{"tag": "src", "host_path": "/h", "read_only": True}]}
     assert client.put("/vms/web/shares", json=body).status_code == 200
-    assert ("set_shares", "web",
-            [{"tag": "src", "host_path": "/h", "read_only": True}]) in fake.calls
+    assert (
+        "set_shares",
+        "web",
+        [{"tag": "src", "host_path": "/h", "read_only": True}],
+    ) in fake.calls
 
 
 def test_restart_endpoint():
@@ -400,10 +445,14 @@ class FakeConfig:
         self.preset = name
 
     def read(self):
-        return {"default_preset": self.preset,
-                "presets": {"light": {"cpu": 2, "memory_gb": 4},
-                            "standard": {"cpu": 4, "memory_gb": 8},
-                            "heavy": {"cpu": 8, "memory_gb": 16}}}
+        return {
+            "default_preset": self.preset,
+            "presets": {
+                "light": {"cpu": 2, "memory_gb": 4},
+                "standard": {"cpu": 4, "memory_gb": 8},
+                "heavy": {"cpu": 8, "memory_gb": 16},
+            },
+        }
 
 
 def test_get_config_returns_default_and_presets():
@@ -436,20 +485,35 @@ def test_put_config_unknown_preset_is_409():
 
 def test_doctor_returns_checks(monkeypatch):
     import macfleet.api as api_mod
-    monkeypatch.setattr(api_mod, "run_checks", lambda _fleet: [
-        {"id": "arch", "label": "Apple silicon", "status": "ok", "detail": "arm64", "fix": None},
-    ])
+
+    monkeypatch.setattr(
+        api_mod,
+        "run_checks",
+        lambda _fleet: [
+            {
+                "id": "arch",
+                "label": "Apple silicon",
+                "status": "ok",
+                "detail": "arm64",
+                "fix": None,
+            },
+        ],
+    )
     client = TestClient(build_app(FakeFleet()))
     body = client.get("/doctor").json()
-    assert body == {"checks": [{"id": "arch", "label": "Apple silicon",
-                                "status": "ok", "detail": "arm64", "fix": None}]}
+    assert body == {
+        "checks": [
+            {"id": "arch", "label": "Apple silicon", "status": "ok", "detail": "arm64", "fix": None}
+        ]
+    }
 
 
 def test_reset_defaults_to_fleet_scope():
     fake = FakeFleet()
     seen = []
-    fake.reset_data = lambda scope: seen.append(scope) or {
-        "deleted": ["mf-a"], "failed": [], "removed_paths": []}
+    fake.reset_data = lambda scope: (
+        seen.append(scope) or {"deleted": ["mf-a"], "failed": [], "removed_paths": []}
+    )
     client = TestClient(build_app(fake))
     body = client.post("/data/reset", json={}).json()
     assert seen == ["fleet"]
@@ -459,8 +523,9 @@ def test_reset_defaults_to_fleet_scope():
 def test_reset_accepts_all_scope():
     fake = FakeFleet()
     seen = []
-    fake.reset_data = lambda scope: seen.append(scope) or {
-        "deleted": [], "failed": [], "removed_paths": []}
+    fake.reset_data = lambda scope: (
+        seen.append(scope) or {"deleted": [], "failed": [], "removed_paths": []}
+    )
     client = TestClient(build_app(fake))
     client.post("/data/reset", json={"scope": "all"})
     assert seen == ["all"]

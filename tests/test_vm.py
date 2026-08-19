@@ -8,6 +8,7 @@ def fake_runner(script):
     def run(argv):
         out = script(argv)
         return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+
     return run
 
 
@@ -18,10 +19,12 @@ def test_name_helpers():
 
 
 def test_list_parses_json():
-    payload = json.dumps([
-        {"Name": "mf-golden", "State": "stopped", "Source": "oci"},
-        {"Name": "mf-a", "State": "running", "Source": "local"},
-    ])
+    payload = json.dumps(
+        [
+            {"Name": "mf-golden", "State": "stopped", "Source": "oci"},
+            {"Name": "mf-a", "State": "running", "Source": "local"},
+        ]
+    )
     t = Tart(run=fake_runner(lambda argv: payload))
     assert t.list() == [
         VmInfo("mf-golden", "stopped", "oci"),
@@ -47,7 +50,12 @@ def _capture():
     def run(argv):
         calls.append(argv)
         if argv[:2] == ["tart", "get"]:
-            return subprocess.CompletedProcess(argv, 0, '{"CPU":4,"Memory":8192,"Disk":50,"Display":"1024x768","State":"stopped"}', "")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                '{"CPU":4,"Memory":8192,"Disk":50,"Display":"1024x768","State":"stopped"}',
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     return calls, run
@@ -76,7 +84,10 @@ def test_get_config_parses_json():
 
 def test_list_includes_size():
     def run(argv):
-        return subprocess.CompletedProcess(argv, 0, '[{"Name":"mf-a","State":"running","Source":"local","Size":"12.5"}]', "")
+        return subprocess.CompletedProcess(
+            argv, 0, '[{"Name":"mf-a","State":"running","Source":"local","Size":"12.5"}]', ""
+        )
+
     assert Tart(run=run).list()[0].size == 12.5
 
 

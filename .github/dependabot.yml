@@ -1,0 +1,36 @@
+# CI already audits every ecosystem (pip-audit, bun audit, cargo audit) but nothing opened
+# the bump PRs. Updates are grouped per ecosystem so a routine week is one PR per manifest
+# rather than a dozen; security updates still arrive on their own.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      engine:
+        patterns: ['*']
+
+  - package-ecosystem: bun
+    directory: /desktop
+    schedule:
+      interval: weekly
+    groups:
+      desktop:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /desktop/src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      rust:
+        patterns: ['*']

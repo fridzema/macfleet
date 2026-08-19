@@ -34,21 +34,29 @@ from macfleet.vm import (
     shortname,
     validate_label,
     validate_name,
+    validate_snapshot_id,
 )
 
 GUEST_USER = "admin"
 SERVER_PORT = 8000
 SSH_OPTS = [
-    "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=8",
+    "-o",
+    "StrictHostKeyChecking=accept-new",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=8",
 ]
 
 # Substrings that mark an SSH failure as a transient connection problem (guest still booting)
 # worth retrying — as opposed to a genuine nonzero exit from the remote command, which is not.
 _SSH_TRANSIENT = (
-    "connection refused", "connection timed out", "operation timed out",
-    "connection closed", "no route to host", "timed out",
+    "connection refused",
+    "connection timed out",
+    "operation timed out",
+    "connection closed",
+    "no route to host",
+    "timed out",
 )
 
 
@@ -60,8 +68,9 @@ def _spawn(argv: list[str]) -> "subprocess.Popen[bytes]":
     # exit — hard-stopping the entire fleet on every quit/dev-rebuild. VMs are a persistent
     # fleet (also driven by the CLI/MCP), so they must not die with the window. The handle is
     # returned so Fleet can reap it once the VM stops (see Fleet._boot).
-    return subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            start_new_session=True)
+    return subprocess.Popen(
+        argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+    )
 
 
 def _spawn_restore(argv: list[str]) -> "subprocess.Popen[bytes]":
@@ -72,8 +81,9 @@ def _spawn_restore(argv: list[str]) -> "subprocess.Popen[bytes]":
     long-lived successful `tart run`.
     """
     diagnostic = tempfile.TemporaryFile()
-    child = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=diagnostic,
-                             start_new_session=True)
+    child = subprocess.Popen(
+        argv, stdout=subprocess.DEVNULL, stderr=diagnostic, start_new_session=True
+    )
     child._macfleet_diagnostic = diagnostic  # type: ignore[attr-defined]
     return child
 
@@ -95,8 +105,12 @@ class GuestControl:
     HTTP `/cmd` endpoint. Keeps a tiny, dependency-free surface (screenshot/click/type/
     key) so the API and desktop don't depend on the heavy `cua-computer` client."""
 
-    def __init__(self, base_url: str, token: str | None = None,
-                 opener: Callable[..., Any] = urllib.request.urlopen):
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None = None,
+        opener: Callable[..., Any] = urllib.request.urlopen,
+    ):
         self._base = base_url.rstrip("/")
         self._token = token
         self._open = opener
@@ -136,8 +150,8 @@ class GuestControl:
         except (urllib.error.URLError, OSError) as exc:
             raise RuntimeError(f"computer-server unreachable: {exc}") from exc
 
-    def screenshot(self) -> bytes:
-        return self._get("/macfleet/screenshot")
+    def screenshot(self, timeout: float = 30) -> bytes:
+        return self._get("/macfleet/screenshot", timeout=timeout)
 
     def logs(self, lines: int = 100, cursor: int | None = None) -> dict:
         query = f"lines={lines}"
@@ -199,17 +213,21 @@ _RESET_STATE_FILES = ("state.json", "shares.json", "activity.jsonl")
 
 
 class Fleet:
-    def __init__(self, tart: Tart | None = None, run: Runner = _run,
-                 spawn: Callable[[list[str]], Any] = _spawn,
-                 run_nocheck: Runner = _run_nocheck,
-                 leases: Leases | None = None,
-                 clock: Callable[[], float] = time.time,
-                 activity: Activity | None = None,
-                 config: Config | None = None,
-                 shares: Shares | None = None,
-                 sleep: Callable[[float], None] = time.sleep,
-                 monotonic: Callable[[], float] = time.monotonic,
-                 operation_lock_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        tart: Tart | None = None,
+        run: Runner = _run,
+        spawn: Callable[[list[str]], Any] = _spawn,
+        run_nocheck: Runner = _run_nocheck,
+        leases: Leases | None = None,
+        clock: Callable[[], float] = time.time,
+        activity: Activity | None = None,
+        config: Config | None = None,
+        shares: Shares | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
+        operation_lock_dir: str | None = None,
+    ) -> None:
         self.tart = tart or Tart(run=run)
         self._run = run
         self._spawn = spawn
@@ -219,7 +237,9 @@ class Fleet:
         self._clock = clock
         self._sleep = sleep
         self._monotonic = monotonic
-        self._operation_lock_dir = Path(operation_lock_dir or self._leases.storage_dir) / "operations"
+        self._operation_lock_dir = (
+            Path(operation_lock_dir or self._leases.storage_dir) / "operations"
+        )
         self.activity = activity or Activity(default_activity_path())
         self.config = config or Config(default_config_path())
         self._res_cache: dict[str, dict] = {}
@@ -405,8 +425,11 @@ class Fleet:
         quit so the fleet freezes cleanly and resumes fast next launch. Best-effort: a hung
         or failing VM must not block the others. Returns the full names it suspended."""
         already = set(self._leases.suspended())
-        targets = [v.name for v in self.tart.list()
-                   if v.state == "running" and v.name != GOLDEN and v.name not in already]
+        targets = [
+            v.name
+            for v in self.tart.list()
+            if v.state == "running" and v.name != GOLDEN and v.name not in already
+        ]
         if not targets:
             return []
 
@@ -429,8 +452,14 @@ class Fleet:
     def _prov_init(self, full: str) -> None:
         steps = [{"key": k, "label": lbl, "status": "pending"} for k, lbl in _PROVISION_PHASES]
         with self._provision_lock:
-            self._provision[full] = {"name": shortname(full), "steps": steps, "done": False,
-                                     "error": None, "_started_at": self._clock(), "_done_at": None}
+            self._provision[full] = {
+                "name": shortname(full),
+                "steps": steps,
+                "done": False,
+                "error": None,
+                "_started_at": self._clock(),
+                "_done_at": None,
+            }
 
     def _prov_set(self, full: str, key: str, status: str) -> None:
         with self._provision_lock:
@@ -475,17 +504,24 @@ class Fleet:
     def _prune_provision(self, live_fulls: set[str]) -> None:
         now = self._clock()
         with self._provision_lock:
-            drop = [full for full, rec in self._provision.items()
-                    if (rec["_done_at"] is not None and now - rec["_done_at"] >= _PROVISION_LINGER)
-                    or (full not in live_fulls and now - rec["_started_at"] > _PROVISION_TTL)]
+            drop = [
+                full
+                for full, rec in self._provision.items()
+                if (rec["_done_at"] is not None and now - rec["_done_at"] >= _PROVISION_LINGER)
+                or (full not in live_fulls and now - rec["_started_at"] > _PROVISION_TTL)
+            ]
             for full in drop:
                 self._provision.pop(full, None)
 
     @staticmethod
     def _public_prov(rec: dict) -> dict:
         # Strip the internal `_`-prefixed bookkeeping so it never leaks into the API/SSE payload.
-        return {"name": rec["name"], "steps": [dict(s) for s in rec["steps"]],
-                "done": rec["done"], "error": rec["error"]}
+        return {
+            "name": rec["name"],
+            "steps": [dict(s) for s in rec["steps"]],
+            "done": rec["done"],
+            "error": rec["error"],
+        }
 
     def provisioning(self) -> dict[str, dict]:
         """Snapshot of every in-flight provisioning record, keyed by short name (SSE payload)."""
@@ -497,20 +533,35 @@ class Fleet:
             rec = self._provision.get(fullname(name))
             return self._public_prov(rec) if rec is not None else None
 
-    def create(self, name: str, from_snapshot: str | None = None,
-               ttl: float | None = None, cpu: int | None = None,
-               memory: int | None = None, disk: int | None = None) -> None:
+    def create(
+        self,
+        name: str,
+        from_snapshot: str | None = None,
+        ttl: float | None = None,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk: int | None = None,
+    ) -> None:
         target = ensure_mutable(name)
         validate_name(name)
+        if from_snapshot is not None:
+            validate_snapshot_id(from_snapshot)
         # Lock the destination only: clones from the same golden/snapshot source are safe to run
         # concurrently and fleet spin-up should not serialize on a shared read-only source.
         with self._locked_vms(target):
-            self._create_unlocked(name, from_snapshot=from_snapshot, ttl=ttl, cpu=cpu,
-                                  memory=memory, disk=disk)
+            self._create_unlocked(
+                name, from_snapshot=from_snapshot, ttl=ttl, cpu=cpu, memory=memory, disk=disk
+            )
 
-    def _create_unlocked(self, name: str, from_snapshot: str | None = None,
-                         ttl: float | None = None, cpu: int | None = None,
-                         memory: int | None = None, disk: int | None = None) -> None:
+    def _create_unlocked(
+        self,
+        name: str,
+        from_snapshot: str | None = None,
+        ttl: float | None = None,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk: int | None = None,
+    ) -> None:
         target = ensure_mutable(name)
         # One `tart list`, reused for both the reclaim check and the existence check.
         # Deliberately NOT a full self.reap(): reaping every expired lease here would make
@@ -525,7 +576,9 @@ class Fleet:
             except RuntimeError:
                 # Preserve the lease so the background reaper retries. Do not pretend the name
                 # is free: clone cleanup must never delete a target we failed to reclaim.
-                raise RuntimeError(f"expired VM {shortname(target)} could not be reclaimed") from None
+                raise RuntimeError(
+                    f"expired VM {shortname(target)} could not be reclaimed"
+                ) from None
             existing.discard(target)
             inventory.pop(target, None)
         # Init after the reclaim above (whose nuke would otherwise drop a fresh record).
@@ -570,19 +623,19 @@ class Fleet:
             source_name = f"mfsnap-{from_snapshot}" if from_snapshot else GOLDEN
             source = inventory.get(source_name)
             restoring_saved_state = (
-                existing_vm.state == "suspended" if existing_vm is not None
+                existing_vm.state == "suspended"
+                if existing_vm is not None
                 else source is not None and source.state == "suspended"
             )
-            self._resume_or_coldboot(
-                target, preserve_suspend_on_failure=restoring_saved_state
-            )
+            self._resume_or_coldboot(target, preserve_suspend_on_failure=restoring_saved_state)
         self._prov_set(target, "boot", "active")
         if ttl is not None:
             self._leases.record(target, ttl)
         self._invalidate_fleet(target)
 
-    def warm_golden(self, timeout: float = 180.0, poll: float = 3.0,
-                    sleep: Callable[[float], None] = time.sleep) -> bool:
+    def warm_golden(
+        self, timeout: float = 180.0, poll: float = 3.0, sleep: Callable[[float], None] = time.sleep
+    ) -> bool:
         """Boot mf-golden, wait for its guest server, then SUSPEND it — so every future
         create clones an already-booted image that resumes in ~2s instead of cold-booting
         macOS for ~30-60s (the dominant cost of `create`). One-time; re-run after re-baking
@@ -605,7 +658,11 @@ class Fleet:
         out = self._run(["sysctl", "-n", "hw.memsize", "hw.ncpu"]).stdout
         memsize, cpu_count = out.split()
         name = self._run(["hostname"]).stdout.strip()
-        return {"total_mem_gb": round(int(memsize) / 1024**3), "cpu_count": int(cpu_count), "name": name}
+        return {
+            "total_mem_gb": round(int(memsize) / 1024**3),
+            "cpu_count": int(cpu_count),
+            "name": name,
+        }
 
     def preset_resources(self, preset: str | None = None) -> dict:
         """Resolve a preset name (or the configured default) to create() kwargs. The table
@@ -618,7 +675,10 @@ class Fleet:
     def up(self, name: str, preset: str | None = None) -> None:
         self.create(name, **self.preset_resources(preset))
 
-    def reap(self, existing: list[VmInfo] | None = None) -> list[str]:
+    def reap(self) -> list[str]:
+        # Deliberately re-lists inside each VM's lock rather than taking a caller's inventory:
+        # a listing taken before a contended lock can be stale by the time the lock is held,
+        # and acting on it would delete a VM that was recreated under the same name.
         now = self._clock()
         reaped = []
         for full in self._leases.expired(now):
@@ -646,14 +706,20 @@ class Fleet:
             if self._fleet_cache is not None and now < self._fleet_cache[0]:
                 return [dict(vm) for vm in self._fleet_cache[1]]
         vms = self.tart.list()
-        reaped = set(self.reap(existing=vms))
+        reaped = set(self.reap())
         vms = [v for v in vms if v.name not in reaped]
         live_names = {v.name for v in vms}
         # The desktop API is long-lived while CLI/MCP clients can mutate Tart in separate
         # processes. Drop entries for names that disappeared so an externally recreated VM
         # cannot inherit stale IP, token, health, or resource data.
-        for cache in (self._res_cache, self._res_cache_at, self._ip_cache,
-                      self._control_tokens, self._control_token_ips, self._health_cache):
+        for cache in (
+            self._res_cache,
+            self._res_cache_at,
+            self._ip_cache,
+            self._control_tokens,
+            self._control_token_ips,
+            self._health_cache,
+        ):
             for stale in set(cache) - live_names:
                 cache.pop(stale, None)
         # Health-check running VMs concurrently — each check is a network round-trip to
@@ -668,8 +734,12 @@ class Fleet:
                 health[vm.name] = cached[1]
             else:
                 to_probe.append(vm)
-        uncached = [v for v in vms if v.name not in self._res_cache
-                    or now - self._res_cache_at.get(v.name, 0.0) >= _RESOURCE_CACHE_TTL]
+        uncached = [
+            v
+            for v in vms
+            if v.name not in self._res_cache
+            or now - self._res_cache_at.get(v.name, 0.0) >= _RESOURCE_CACHE_TTL
+        ]
         if to_probe or uncached:
             with ThreadPoolExecutor(max_workers=min(8, len(vms))) as pool:
                 if to_probe:
@@ -687,12 +757,17 @@ class Fleet:
                         self._res_cache_at[name] = now
         suspended = self._leases.suspended()
         expiries = self._leases.expiries()
-        result = [{"name": v.name,
-                   "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
-                   "source": v.source, "healthy": health.get(v.name, False),
-                   **({"lease_expires_at": expiries[v.name]} if v.name in expiries else {}),
-                   **self._res_cache.get(v.name, {"cpu": None, "memory_mb": None, "disk_gb": None})}
-                  for v in vms]
+        result = [
+            {
+                "name": v.name,
+                "state": "suspended" if (v.name in suspended and v.state == "running") else v.state,
+                "source": v.source,
+                "healthy": health.get(v.name, False),
+                **({"lease_expires_at": expiries[v.name]} if v.name in expiries else {}),
+                **self._res_cache.get(v.name, {"cpu": None, "memory_mb": None, "disk_gb": None}),
+            }
+            for v in vms
+        ]
         # Advance any in-flight create steppers from the state/health just computed, then sweep
         # completed/stale ones. Cheap: reuses `health`, adds no tart/guest calls.
         with self._provision_lock:
@@ -700,8 +775,9 @@ class Fleet:
         if tracked:
             states = {v.name: v.state for v in vms}
             for full in tracked:
-                self._advance_provision(full, states.get(full) == "running",
-                                        bool(health.get(full, False)))
+                self._advance_provision(
+                    full, states.get(full) == "running", bool(health.get(full, False))
+                )
             self._prune_provision(set(states))
         with self._cache_lock:
             self._fleet_cache = (now + 1.0, [dict(vm) for vm in result])
@@ -779,8 +855,11 @@ class Fleet:
                 deleted.append(v.name)
             except RuntimeError as exc:
                 failed.append({"name": v.name, "error": str(exc)})
-        return {"deleted": deleted, "failed": failed,
-                "removed_paths": self._reset_state_files(scope)}
+        return {
+            "deleted": deleted,
+            "failed": failed,
+            "removed_paths": self._reset_state_files(scope),
+        }
 
     def _reset_state_files(self, scope: str) -> list[str]:
         removed = []
@@ -860,21 +939,27 @@ class Fleet:
             tag = str(s.get("tag", ""))
             host_path = os.path.expanduser(str(s.get("host_path", "")))
             if not tag_re.fullmatch(tag):
-                raise RuntimeError(
-                    f"invalid share tag {tag!r}: use letters, digits, '.', '_', '-'")
+                raise RuntimeError(f"invalid share tag {tag!r}: use letters, digits, '.', '_', '-'")
             if tag in seen:
                 raise RuntimeError(f"duplicate share tag {tag!r}")
             seen.add(tag)
             if not os.path.isdir(host_path):
                 raise RuntimeError(f"shared folder not found: {host_path}")
-            normalized.append({"tag": tag, "host_path": host_path,
-                               "read_only": bool(s.get("read_only", True))})
+            normalized.append(
+                {"tag": tag, "host_path": host_path, "read_only": bool(s.get("read_only", True))}
+            )
         full = fullname(name)
         with self._locked_vms(full):
             self._shares.set(full, normalized)
 
-    def ssh(self, name: str, remote_cmd: str, retries: int = 3, backoff: float = 2.0,
-            sleep: Callable[[float], None] = time.sleep) -> str:
+    def ssh(
+        self,
+        name: str,
+        remote_cmd: str,
+        retries: int = 3,
+        backoff: float = 2.0,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> str:
         # Right after `up`, the guest is `running` but SSH is not yet answering for ~30s (see
         # README). Retry ONLY connection-level failures (ssh exits 255) — a nonzero exit from
         # the remote command itself is a real result and must surface immediately, not after
@@ -942,7 +1027,7 @@ class Fleet:
         out = []
         for v in self.tart.list():
             if v.name.startswith("mfsnap-"):
-                sid = v.name[len("mfsnap-"):]
+                sid = v.name[len("mfsnap-") :]
                 # Labels forbid '-' (validate_label), so the last '-' always separates the
                 # (possibly hyphenated) VM name from the label — split from the right.
                 vm, _, label = sid.rpartition("-")
@@ -950,15 +1035,14 @@ class Fleet:
         return out
 
     def delete_snapshot(self, snapshot_id: str) -> None:
+        validate_snapshot_id(snapshot_id)
         full = f"mfsnap-{snapshot_id}"
         with self._locked_vms(full):
             self.tart.delete(full)
 
     def computer(self, name: str) -> GuestControl:
         if os.environ.get("MACFLEET_ALLOW_CONTROL") != "1":
-            raise RuntimeError(
-                "computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only)."
-            )
+            raise RuntimeError("computer-use disabled — set MACFLEET_ALLOW_CONTROL=1 (VM-only).")
         return self._guest_client(name)
 
     def _guest_client(self, name: str) -> GuestControl:
@@ -968,9 +1052,7 @@ class Fleet:
         if token is None or self._control_token_ips.get(full) != ip:
             token = self.ssh(name, "cat ~/.macfleet-control-token").strip()
             if not token:
-                raise RuntimeError(
-                    "guest control token unavailable — re-bake the golden image"
-                )
+                raise RuntimeError("guest control token unavailable — re-bake the golden image")
             self._control_tokens[full] = token
             self._control_token_ips[full] = ip
         return GuestControl(f"http://{ip}:{SERVER_PORT}", token=token)
@@ -1017,9 +1099,7 @@ class Fleet:
                     )
             # Desktop duplicate semantics are "create and boot a copy" for both running and
             # stopped sources; otherwise the optimistic row waits forever for a stopped clone.
-            self._resume_or_coldboot(
-                dst, preserve_suspend_on_failure=source_has_saved_state
-            )
+            self._resume_or_coldboot(dst, preserve_suspend_on_failure=source_has_saved_state)
             self._invalidate_fleet(src)
             self._invalidate_fleet(dst)
 
@@ -1029,6 +1109,7 @@ class Fleet:
         installed, then removed. Works when the VM no longer exists (recreate)."""
         target = ensure_mutable(name)
         validate_name(name)
+        validate_snapshot_id(snapshot_id)
         snap = f"mfsnap-{snapshot_id}"
         with self._locked_vms(target, snap):
             self._restore_unlocked(name, snapshot_id)
@@ -1038,9 +1119,8 @@ class Fleet:
         snap = f"mfsnap-{snapshot_id}"
         vms = self.tart.list()
         names = {v.name for v in vms}
-        target_was_running = (
-            target not in self._leases.suspended()
-            and any(v.name == target and v.state == "running" for v in vms)
+        target_was_running = target not in self._leases.suspended() and any(
+            v.name == target and v.state == "running" for v in vms
         )
         if snap not in names:
             raise RuntimeError(f"snapshot {snapshot_id} not found")
@@ -1090,9 +1170,7 @@ class Fleet:
         self._forget_ip(target)
         self._leases.unsuspend(target)
         snapshot = next(v for v in vms if v.name == snap)
-        self._resume_or_coldboot(
-            target, preserve_suspend_on_failure=snapshot.state == "suspended"
-        )
+        self._resume_or_coldboot(target, preserve_suspend_on_failure=snapshot.state == "suspended")
         self._invalidate_fleet(target)
 
     def resources(self, name: str) -> dict:
@@ -1104,11 +1182,22 @@ class Fleet:
             except KeyError:
                 raise RuntimeError(f"unexpected tart get output: missing {key}") from None
 
-        return {"cpu": get("CPU"), "memory_mb": get("Memory"), "disk_gb": get("Disk"),
-                "display": get("Display"), "state": get("State")}
+        return {
+            "cpu": get("CPU"),
+            "memory_mb": get("Memory"),
+            "disk_gb": get("Disk"),
+            "display": get("Display"),
+            "state": get("State"),
+        }
 
-    def set_resources(self, name: str, cpu: int | None = None, memory: int | None = None,
-                      disk_size: int | None = None, display: str | None = None) -> None:
+    def set_resources(
+        self,
+        name: str,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk_size: int | None = None,
+        display: str | None = None,
+    ) -> None:
         full = ensure_mutable(name)
         with self._locked_vms(full):
             current = self.resources(name)
@@ -1116,17 +1205,20 @@ class Fleet:
                 raise RuntimeError("stop the VM before changing resources")
             if disk_size is not None and disk_size <= current["disk_gb"]:
                 disk_size = None  # tart set --disk-size is grow-only
-            self.tart.set_config(full, cpu=cpu, memory=memory,
-                                 disk_size=disk_size, display=display)
+            self.tart.set_config(full, cpu=cpu, memory=memory, disk_size=disk_size, display=display)
             self._res_cache.pop(full, None)
             self._res_cache_at.pop(full, None)
             self._invalidate_fleet(full)
 
     def connection_info(self, name: str) -> dict:
         ip = self.ip(name)
-        return {"ip": ip, "ssh": f"ssh {GUEST_USER}@{ip}",
-                "vnc": f"open vnc://{GUEST_USER}@{ip}",
-                "guest_server": f"http://{ip}:{SERVER_PORT}", "exec": True}
+        return {
+            "ip": ip,
+            "ssh": f"ssh {GUEST_USER}@{ip}",
+            "vnc": f"open vnc://{GUEST_USER}@{ip}",
+            "guest_server": f"http://{ip}:{SERVER_PORT}",
+            "exec": True,
+        }
 
     def exec(self, name: str, command: str) -> dict:
         ensure_mutable(name)
