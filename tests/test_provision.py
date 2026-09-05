@@ -29,6 +29,10 @@ def test_script_seeds_tcc_grants():
     assert "kTCCServiceAccessibility" in s
     assert 'sqlite3 "$TCC_DB"' in s
     assert "csrutil status" in s  # guarded on SIP being disabled
+    # macOS 15+ screen-capture reminder prompt: pre-approved per binary, not gated on SIP.
+    assert "ScreenCaptureApprovals.plist" in s
+    assert "kScreenCapturePrivacyHintDate" in s
+    assert s.index("PYS=(") < s.index("if csrutil status")
 
 
 def test_bake_steps_mention_tcc():

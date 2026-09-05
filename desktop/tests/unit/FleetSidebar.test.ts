@@ -242,6 +242,21 @@ describe('FleetSidebar — fleet rows', () => {
     expect(wrapper.text()).toContain('sidecar unreachable')
     wrapper.unmount()
   })
+
+  it('keeps the error visible above the rows when the fleet is not empty', async () => {
+    const listVms = vi
+      .spyOn(api, 'listVms')
+      .mockResolvedValue([{ name: 'mf-web', state: 'running', source: 'local', healthy: true }])
+    const wrapper = mount(FleetSidebar)
+    await flushPromises()
+    listVms.mockRejectedValue(new Error('sidecar unreachable'))
+    const store = useFleet()
+    await store.refresh()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="fleet-error"]').text()).toBe('Error: sidecar unreachable')
+    expect(wrapper.text()).toContain('web') // rows stay rendered beneath the banner
+    wrapper.unmount()
+  })
 })
 
 describe('FleetSidebar — snapshots', () => {

@@ -181,3 +181,15 @@ cargo audit --file src-tauri/Cargo.lock
 ```
 
 The final command intentionally shows the unfiltered Rust findings. The precise Python audit exports and existing Rust exception flags are recorded in `.github/workflows/ci.yml`.
+
+## Addendum: follow-up fixes (5 September 2026, later the same day)
+
+Verified on the same host with a disposable clone (`mf-relcheck2`, created and deleted; inventory and suspended set restored).
+
+- **Guest consent prompt (gate 2).** Root cause: replayd's per-binary `ScreenCaptureApprovals.plist` carries a `kScreenCapturePrivacyHintDate` with a 30-day policy. The golden was baked on 13 July, the hint expired on 12 August, so every clone since re-prompts. The provision script now pushes that date to 2099 for both python paths. Reproduced the dialog on a fresh clone, applied the new section, rebooted, screenshot clean. **Re-bake golden (`macfleet bake`) to carry the fix into clones.**
+- **Suspend race (gate 2, resume).** `tart suspend` returns before the VM leaves `running` (about ten seconds on this host). The engine now polls until `suspended` before resume, clone, or snapshot proceed. Previously a resume launched immediately after suspend hit `already running`.
+- **Warm resume on this host.** Plain `tart run` on a settled suspended VM fails with VZ error 12 (`failed to restore … invalid argument`), independent of macfleet. The cold-boot fallback is therefore expected here; it now logs the VZ diagnostic and records a `coldboot-fallback` activity entry. Speed claims of "resume in ~2s" were softened in the CLI, doctor, README, and bake steps. State-preserving resume remains unverified on this host/Tart combination.
+- **SSH readiness** is bounded by one wall-clock budget (60 s default) that also caps each subprocess, with an explicit "unreachable over SSH after Ns" error.
+- **Engine quit** signals open fleet streams on SIGTERM so the drain finishes in milliseconds; the regression test asserts no cancellation traceback and shutdown under four seconds.
+- **Failure toasts** carry the engine's reason; stop and delete failures now toast; the sidebar keeps the error banner visible when the fleet is not empty.
+- **Rust audit** exceptions moved to `desktop/src-tauri/.cargo/audit.toml` so `cargo audit` gives the same verdict locally and in CI.

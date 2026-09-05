@@ -319,8 +319,8 @@ launchctl load "$HOME/Library/LaunchAgents/com.macfleet.computerserver.plist"
 # no GUI/VNC step. The base image ships with SIP disabled, which makes the system
 # TCC.db writable; every VM cloned from the golden image inherits these grants.
 TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+PYS=("$HOME/cs-venv/bin/python" "$(readlink -f "$HOME/cs-venv/bin/python")")
 if csrutil status 2>/dev/null | grep -qi disabled; then
-  PYS=("$HOME/cs-venv/bin/python" "$(readlink -f "$HOME/cs-venv/bin/python")")
   for svc in kTCCServiceScreenCapture kTCCServiceAccessibility kTCCServicePostEvent; do
     for py in "${{PYS[@]}}"; do
       sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access \
@@ -333,6 +333,33 @@ if csrutil status 2>/dev/null | grep -qi disabled; then
 else
   echo "WARN: SIP enabled — TCC not seeded; grant Screen Recording + Accessibility by hand" >&2
 fi
+# 6. macOS 15+ ignores the TCC grant for the periodic *reminder* dialog: "python3.x is
+# requesting to bypass the system private window picker and directly access your screen and
+# audio". replayd tracks each binary in ScreenCaptureApprovals.plist with a
+# kScreenCapturePrivacyHintDate + kScreenCapturePrivacyHintPolicy (30 days); once that date
+# passes, every fresh clone draws the modal over the desktop and clicks land on it. Push the
+# hint date far into the future so no clone ever re-prompts.
+APPROVALS="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
+mkdir -p "$(dirname "$APPROVALS")"
+"$HOME/cs-venv/bin/python" - "$APPROVALS" "${{PYS[@]}}" <<'PY'
+import datetime, plistlib, sys
+path, *binaries = sys.argv[1:]
+far = datetime.datetime(2099, 1, 1)
+try:
+    with open(path, "rb") as fh:
+        data = plistlib.load(fh)
+except FileNotFoundError:
+    data = {{}}
+for binary in binaries:
+    entry = data.setdefault(binary, {{}})
+    entry["kScreenCaptureApprovalLastAlerted"] = far
+    entry["kScreenCapturePrivacyHintDate"] = far
+    entry["kScreenCapturePrivacyHintPolicy"] = 2**31 - 1
+    entry["kScreenCaptureAlertableUsageCount"] = 0
+with open(path, "wb") as fh:
+    plistlib.dump(data, fh)
+PY
+sudo killall cfprefsd replayd 2>/dev/null || true
 echo MACFLEET_PROVISIONED_OK
 """
 
@@ -341,10 +368,12 @@ def bake_steps() -> list[str]:
     return [
         "clone base image + boot",
         "ssh-copy-id admin@<ip>  (keyless SSH)",
-        "run the provision script (DNS + computer-server + launchd + TCC grants)",
+        "run the provision script (DNS + computer-server + launchd + TCC grants + "
+        "screen-capture reminder pre-approval)",
         "TCC (Accessibility + Screen Recording) is seeded automatically via sqlite — "
         "SIP is disabled in the base image, so no manual VNC step is needed; all clones "
         "inherit the grants",
         "macfleet warm  (boots golden, waits for the guest, then SUSPENDS it) — clones of a "
-        "suspended golden resume in ~2s instead of cold-booting macOS for ~30-60s",
+        "suspended golden resume from saved state instead of cold-booting macOS for ~30-60s "
+        "(the engine cold-boots automatically when VZ refuses the restore)",
     ]

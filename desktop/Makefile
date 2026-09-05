@@ -101,11 +101,8 @@ rust-format:
 
 rust-audit:
 	@command -v cargo-audit >/dev/null 2>&1 || { echo "cargo-audit not installed. Run: cargo install cargo-audit"; exit 1; }
-	# These advisories are confined to Linux's wayland-scanner build-time parser, which
-	# only consumes trusted protocol XML. Remove the ignores when that chain upgrades.
-	# rkyv is only a disabled rust_decimal feature recorded in the lockfile; it is absent
-	# from cargo tree --target all and is not compiled into the application.
-	cd src-tauri && cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0235
+	# Risk exceptions live in src-tauri/.cargo/audit.toml (shared with CI).
+	cd src-tauri && cargo audit
 
 rust-test:
 	cd src-tauri && cargo test
