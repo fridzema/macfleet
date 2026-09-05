@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
 
 from macfleet.connect import Fleet
 
@@ -38,12 +38,12 @@ def mcp_exec(fleet, name: str, command: str) -> dict:
     return result
 
 
-# --- FastMCP server -------------------------------------------------------------
+# --- MCP server -------------------------------------------------------------
 
 
-def build_server(fleet: Fleet | None = None) -> FastMCP:
+def build_server(fleet: Fleet | None = None) -> MCPServer:
     fleet = fleet or Fleet()
-    mcp = FastMCP("macfleet")
+    mcp = MCPServer("macfleet")
 
     @mcp.tool()
     def list_vms() -> list[dict]:

@@ -62,7 +62,7 @@ _SSH_TRANSIENT = (
 )
 
 
-def _spawn(argv: list[str]) -> "subprocess.Popen[bytes]":
+def _spawn(argv: list[str]) -> subprocess.Popen[bytes]:
     # start_new_session detaches the child into its own process group + session so it
     # OUTLIVES the engine. The desktop host spawns this engine in a process group and
     # SIGTERMs that whole group on quit (see desktop/src-tauri/src/lib.rs); without the
@@ -75,7 +75,7 @@ def _spawn(argv: list[str]) -> "subprocess.Popen[bytes]":
     )
 
 
-def _spawn_restore(argv: list[str]) -> "subprocess.Popen[bytes]":
+def _spawn_restore(argv: list[str]) -> subprocess.Popen[bytes]:
     """Spawn a resume attempt with diagnostics retained in an anonymous temporary file.
 
     The restore probe must distinguish the one known un-restorable VZ failure from unrelated

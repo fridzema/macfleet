@@ -26,8 +26,8 @@ dependencies = ["typer>=0.12", "fastapi>=0.111", "uvicorn>=0.30"]
 # Computer-use drives the in-guest cua-computer-server over HTTP (stdlib only), so it
 # needs no client library — just the MACFLEET_ALLOW_CONTROL=1 runtime gate.
 agent = ["anthropic>=0.40"]
-dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27", "pyinstaller==6.21.0"]
-mcp = ["mcp>=1.0"]
+dev = ["pytest>=8", "ruff>=0.16", "httpx>=0.27", "pyinstaller==6.22.2"]
+mcp = ["mcp>=2.0"]
 
 [project.urls]
 Homepage = "https://github.com/fridzema/macfleet"
@@ -59,3 +59,12 @@ packages = ["macfleet"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
+# Pinned explicitly. Ruff's implicit defaults widen between releases, so leaving this
+# unset means a routine version bump silently changes what "lint" means and breaks CI on
+# an unrelated pull request. E4/E7/E9 + F is ruff's long-standing default; I sorts
+# imports and UP keeps syntax at the target version, both fully autofixable.
+# Deliberately absent: BLE001 and SIM115 would flag the documented best-effort
+# `except Exception` paths and the restore-probe temp file that must outlive its function.
+select = ["E4", "E7", "E9", "F", "I", "UP"]

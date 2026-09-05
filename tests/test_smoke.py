@@ -1,6 +1,6 @@
-import macfleet
-
 from importlib.metadata import version
+
+import macfleet
 
 
 def test_version_present():

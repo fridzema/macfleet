@@ -1,8 +1,10 @@
+import subprocess
+
 from fastapi.testclient import TestClient
+
 from macfleet.api import build_app
 from macfleet.connect import Fleet
 from macfleet.vm import Tart
-import subprocess
 
 
 def fake_tart(name="mf-a"):

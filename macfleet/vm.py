@@ -25,9 +25,7 @@ SUBPROCESS_TIMEOUT = 300.0
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 
-def _run(
-    argv: list[str], timeout: float = SUBPROCESS_TIMEOUT
-) -> "subprocess.CompletedProcess[str]":
+def _run(argv: list[str], timeout: float = SUBPROCESS_TIMEOUT) -> subprocess.CompletedProcess[str]:
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
@@ -39,7 +37,7 @@ def _run(
 
 def _run_nocheck(
     argv: list[str], timeout: float = SUBPROCESS_TIMEOUT, max_bytes: int = MAX_OUTPUT_BYTES
-) -> "subprocess.CompletedProcess[str]":
+) -> subprocess.CompletedProcess[str]:
     # Like _run but never raises on a nonzero exit — used for `tart exec`, where a nonzero exit
     # is the guest command's result, not a tart failure. Reads via Popen + select so it can BOTH
     # bound runtime (a hang can't pin a worker) and cap captured stdout (a firehose can't OOM the

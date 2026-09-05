@@ -1,5 +1,6 @@
 # tests/test_api_control.py
 from fastapi.testclient import TestClient
+
 from macfleet.api import build_app
 from macfleet.vm import VmInfo
 

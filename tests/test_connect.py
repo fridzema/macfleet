@@ -1,14 +1,16 @@
-import json
 import io
+import json
 import subprocess
 import threading
 import time
 import urllib.error
 from contextlib import contextmanager
+
 import pytest
-from macfleet.config import Config
-from macfleet.connect import ssh_cmd, scp_push_cmd, Fleet, GuestControl, SSH_OPTS
+
 from macfleet.activity import Activity
+from macfleet.config import Config
+from macfleet.connect import SSH_OPTS, Fleet, GuestControl, scp_push_cmd, ssh_cmd
 from macfleet.leases import Leases
 from macfleet.shares import Shares
 from macfleet.vm import Tart, VmInfo
@@ -1416,8 +1418,9 @@ def test_set_resources_rejects_running(tmp_path):
             argv, 0, '{"State":"running","CPU":4,"Memory":8192,"Disk":50,"Display":"x"}', ""
         )
 
-    from macfleet.leases import Leases
     import pytest
+
+    from macfleet.leases import Leases
 
     fleet = Fleet(
         tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0)

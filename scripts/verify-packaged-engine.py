@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import secrets
 import signal
 import socket
@@ -16,6 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
 def main() -> None:

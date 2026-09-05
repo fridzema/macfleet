@@ -1,4 +1,4 @@
-from macfleet.provision import render_provision_script, bake_steps
+from macfleet.provision import bake_steps, render_provision_script
 
 
 def test_script_sets_public_dns():
@@ -82,7 +82,7 @@ def test_guest_dependencies_are_version_pinned():
 
 
 def test_plist_writes_log_file():
-    from macfleet.provision import render_provision_script, SERVER_LOG
+    from macfleet.provision import SERVER_LOG, render_provision_script
 
     s = render_provision_script()
     assert SERVER_LOG in s

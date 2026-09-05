@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).parents[1] / "scripts" / "verify-release-hardware.sh"
 
 

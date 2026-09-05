@@ -1,6 +1,8 @@
 import json
 import subprocess
+
 import pytest
+
 from macfleet.vm import Tart, VmInfo, _run, _run_nocheck, fullname, shortname
 
 
