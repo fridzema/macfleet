@@ -221,12 +221,16 @@ describe('fleet store — lifecycle mutations', () => {
     vi.spyOn(api, 'listVms').mockResolvedValue([])
   })
 
-  it('down surfaces API errors on error without toasting (no user-facing copy for it)', async () => {
-    vi.spyOn(api, 'down').mockRejectedValue(new Error('409'))
+  it('down surfaces API errors on error and toasts the engine reason', async () => {
+    vi.spyOn(api, 'down').mockRejectedValue(
+      new Error('POST /vms/web/down -> 409: mf-web is not running'),
+    )
     const s = useFleet()
     await s.down('web')
     expect(s.error).toContain('409')
-    expect(useToasts().toasts.value).toEqual([])
+    expect(useToasts().toasts.value.map((t) => t.msg)).toEqual([
+      'Failed to stop web: mf-web is not running',
+    ])
   })
 
   it('nuke calls api.nuke then refreshes', async () => {
@@ -237,12 +241,21 @@ describe('fleet store — lifecycle mutations', () => {
     expect(s.error).toBeNull()
   })
 
-  it('nuke surfaces API errors on error without toasting (no user-facing copy for it)', async () => {
-    vi.spyOn(api, 'nuke').mockRejectedValue(new Error('409'))
+  it('nuke surfaces API errors on error and toasts a status-only reason when there is no detail', async () => {
+    vi.spyOn(api, 'nuke').mockRejectedValue(new Error('DELETE /vms/web -> 409'))
     const s = useFleet()
     await s.nuke('web')
     expect(s.error).toContain('409')
-    expect(useToasts().toasts.value).toEqual([])
+    expect(useToasts().toasts.value.map((t) => t.msg)).toEqual(['Failed to delete web: HTTP 409'])
+  })
+
+  it('a non-HTTP failure (engine unreachable) toasts the raw error text', async () => {
+    vi.spyOn(api, 'suspend').mockRejectedValue(new TypeError('Failed to fetch'))
+    const s = useFleet()
+    await s.suspend('web')
+    expect(useToasts().toasts.value.map((t) => t.msg)).toEqual([
+      'Failed to suspend web: Failed to fetch',
+    ])
   })
 
   it('suspend calls api.suspend then refreshes', async () => {
@@ -732,13 +745,17 @@ describe('fleet store — resources cache', () => {
     expect(s.resources.web?.cpu).toBe(6)
   })
 
-  it('setResources toasts the generic failure message for a non-409 error', async () => {
-    vi.spyOn(api, 'setResources').mockRejectedValue(new Error('500'))
+  it('setResources toasts the failure with its reason for a non-409 error', async () => {
+    vi.spyOn(api, 'setResources').mockRejectedValue(
+      new Error('PATCH /vms/web/resources -> 500: disk resize failed'),
+    )
     const s = useFleet()
     await s.setResources('web', { cpu: 6 })
     expect(s.error).toContain('500')
     expect(
-      useToasts().toasts.value.some((t) => t.msg === 'Failed to update resources for web'),
+      useToasts().toasts.value.some(
+        (t) => t.msg === 'Failed to update resources for web: disk resize failed',
+      ),
     ).toBe(true)
   })
 })

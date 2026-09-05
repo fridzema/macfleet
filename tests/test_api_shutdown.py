@@ -62,10 +62,17 @@ else:
                 time.sleep(0.1)
         assert stream.readline().startswith(b"data:")
         # Deliberately leave the response open while the server receives SIGTERM.
+        started = time.monotonic()
         process.terminate()
         stdout, stderr = process.communicate(timeout=12)
+        elapsed = time.monotonic() - started
         assert "SUSPEND_ON_EXIT_COMPLETED" in stdout, stderr
         assert "Application shutdown complete" in stderr
+        # The stream ends itself on the exit signal, so the drain must not run to its
+        # five-second deadline and Uvicorn must not cancel the response mid-flight.
+        assert elapsed < 4, f"shutdown took {elapsed:.1f}s: {stderr}"
+        assert "CancelledError" not in stderr, stderr
+        assert "Traceback" not in stderr, stderr
     finally:
         if stream is not None:
             stream.close()

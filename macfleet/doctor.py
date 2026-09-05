@@ -65,7 +65,11 @@ def _golden_warm(_fleet: Any, vms: Any) -> CheckResult:
     for v in vms():
         if v.name == GOLDEN:
             if v.state == "suspended":
-                return "ok", "suspended — new VMs resume in ~2s", None
+                return (
+                    "ok",
+                    "suspended — new VMs resume from saved state (cold-boot if VZ restore fails)",
+                    None,
+                )
             return (
                 "warn",
                 f"state is {v.state!r} — new VMs will cold-boot (~30-60s)",

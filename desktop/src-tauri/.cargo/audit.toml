@@ -1,0 +1,15 @@
+# Risk exceptions for `cargo audit`. Mirrors the CI flags so a local run from
+# desktop/src-tauri gives the same verdict. Each entry must stay justified; drop it as
+# soon as upstream ships a compatible fix. Warnings (unmaintained/unsound/yanked) are
+# not suppressed and are expected in the output.
+[advisories]
+ignore = [
+    # quick-xml 0.39: only pulled by Linux's wayland-scanner build tool, which parses
+    # trusted protocol XML at compile time. Absent on macOS targets.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    # rkyv 0.7: optional rust_decimal feature recorded in Cargo.lock through
+    # tauri-plugin-log -> byte-unit. Not in `cargo tree --target all`, so never compiled.
+    # rust_decimal has no release on rkyv 0.8 yet.
+    "RUSTSEC-2026-0235",
+]

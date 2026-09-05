@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import pytest
 from macfleet.config import Config
 from macfleet.connect import ssh_cmd, scp_push_cmd, Fleet, GuestControl, SSH_OPTS
+from macfleet.activity import Activity
 from macfleet.leases import Leases
 from macfleet.shares import Shares
 from macfleet.vm import Tart, VmInfo
@@ -183,6 +184,11 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
 
     def run(argv):
         calls.append(argv)
+        if argv[:2] == ["tart", "suspend"]:
+            # Real tart flips the VM to `suspended` shortly after; the fleet polls for it.
+            listing[:] = [v for v in listing if v.name != argv[2]] + [
+                VmInfo(argv[2], "suspended", "local")
+            ]
         if argv[:2] == ["tart", "list"]:
             import json as j
 
@@ -226,11 +232,62 @@ def _fleet(tmp_path, vms=(), clock_val=1000.0):
 
 
 def test_suspend_resume(tmp_path):
-    fleet, calls, spawned, _ = _fleet(tmp_path)
+    fleet, calls, spawned, _ = _fleet(tmp_path, vms=[VmInfo("mf-web", "suspended", "")])
     fleet.suspend("web")
     fleet.resume("web")
     assert ["tart", "suspend", "mf-web"] in calls
     assert ["tart", "run", "mf-web", "--no-graphics"] in spawned
+
+
+def _settling_fleet(tmp_path, states):
+    """Fleet whose `tart get` walks through `states` (one per call) after `tart suspend`."""
+    calls = []
+    clock = {"now": 0.0}
+    remaining = list(states)
+
+    def run(argv):
+        calls.append(argv)
+        if argv[:2] == ["tart", "get"]:
+            state = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"State": state}), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        spawn=lambda a: None,
+        leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        monotonic=lambda: clock["now"],
+        sleep=lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+    return fleet, calls, clock
+
+
+def test_suspend_waits_until_tart_reports_suspended(tmp_path):
+    # `tart suspend` returns before VZ finishes writing memory; the VM reads `running`
+    # for several seconds. Resume/clone/snapshot must not start until it settles.
+    fleet, calls, clock = _settling_fleet(tmp_path, ["running", "running", "suspended"])
+    fleet.suspend("web")
+    assert ["tart", "suspend", "mf-web"] in calls
+    assert [c for c in calls if c[:2] == ["tart", "get"]] == [
+        ["tart", "get", "mf-web", "--format", "json"]
+    ] * 3
+    assert clock["now"] == 1.0  # two polls apart
+    assert fleet._leases.suspended() == {"mf-web"}
+
+
+def test_suspend_gives_up_when_the_vm_never_settles(tmp_path):
+    fleet, _, clock = _settling_fleet(tmp_path, ["running"])
+    with pytest.raises(RuntimeError, match="did not finish suspending"):
+        fleet.suspend("web")
+    assert clock["now"] >= 120.0
+    assert fleet._leases.suspended() == set()
+
+
+def test_suspend_fails_fast_when_the_vm_stops_instead(tmp_path):
+    fleet, _, _ = _settling_fleet(tmp_path, ["running", "stopped"])
+    with pytest.raises(RuntimeError, match="entered 'stopped'"):
+        fleet.suspend("web")
 
 
 class _Child:
@@ -266,6 +323,7 @@ def _resume_fleet(tmp_path, child):
         run=run,
         spawn=spawn,
         leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
+        activity=Activity(str(tmp_path / "activity.jsonl")),
         clock=lambda: 0.0,
         monotonic=lambda: tick["now"],
         sleep=lambda seconds: tick.__setitem__("now", tick["now"] + seconds),
@@ -290,6 +348,9 @@ def test_watcher_cold_boots_when_the_vz_restore_fails(tmp_path):
     fleet._coldboot_if_restore_failed("mf-web", argv, child)
     assert argv in spawns  # cold boot
     assert ["tart", "stop", "mf-web"] in calls  # un-restorable suspend discarded
+    # The fallback is invisible in the fleet list (the VM just ends up Running), so it must
+    # leave a trace the user can find.
+    assert [e["action"] for e in fleet.activity.recent()] == ["coldboot-fallback"]
 
 
 def test_resume_completes_restore_recovery_before_returning(tmp_path):
@@ -636,19 +697,58 @@ def test_ssh_waits_for_boot_ip(tmp_path, missing):
     assert len(attempts) == 4
 
 
-def test_ssh_missing_ip_exhausts_retry_budget(tmp_path):
+def test_ssh_missing_ip_exhausts_wall_clock_budget(tmp_path):
     attempts = []
     sleeps = []
+    clock = {"now": 100.0}
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
 
     def run(argv):
         attempts.append(argv)
         raise RuntimeError("tart ip mf-web failed: no IP address found")
 
-    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json")))
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        leases=Leases(str(tmp_path / "s.json")),
+        monotonic=lambda: clock["now"],
+    )
     with pytest.raises(RuntimeError, match="no IP address found"):
-        fleet.ssh("web", "whoami", retries=3, sleep=sleeps.append)
+        fleet.ssh("web", "whoami", timeout=6.0, sleep=sleep)
+    # t=100, 102, 104 attempted; a fourth would land after the 106 deadline.
     assert len(attempts) == 3
     assert sleeps == [2.0, 2.0]
+
+
+def test_ssh_slow_attempts_consume_the_budget(tmp_path):
+    """A hung ssh eats wall-clock time, not just one attempt: 30 slow tries must not run."""
+    attempts = []
+    clock = {"now": 0.0}
+
+    def run(argv):
+        attempts.append(argv)
+        if argv[0] == "ssh":
+            clock["now"] += 25.0  # each connection attempt hangs until ConnectTimeout
+            raise RuntimeError("ssh: connect to host: Operation timed out")
+        return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
+
+    fleet = Fleet(
+        tart=Tart(run=run),
+        run=run,
+        leases=Leases(str(tmp_path / "s.json")),
+        monotonic=lambda: clock["now"],
+    )
+    with pytest.raises(RuntimeError, match="unreachable over SSH after 60s.*timed out"):
+        fleet.ssh(
+            "web",
+            "whoami",
+            timeout=60.0,
+            sleep=lambda s: clock.__setitem__("now", clock["now"] + s),
+        )
+    assert len([a for a in attempts if a[0] == "ssh"]) == 3
 
 
 @pytest.mark.parametrize("detail", ["some-command: not found", "no IP address found"])
@@ -677,6 +777,10 @@ def test_warm_golden_suspends_when_guest_becomes_healthy(tmp_path, monkeypatch):
 
     def run(argv):
         calls.append(argv)
+        if argv[:2] == ["tart", "get"]:
+            suspended = ["tart", "suspend", "mf-golden"] in calls
+            state = "suspended" if suspended else "running"
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"State": state}), "")
         if argv[:2] == ["tart", "list"]:
             return subprocess.CompletedProcess(
                 argv,

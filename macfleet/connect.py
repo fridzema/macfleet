@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import logging
 import os
 import re
 import subprocess
@@ -24,6 +25,7 @@ from macfleet.leases import Leases, default_state_path
 from macfleet.shares import Shares, default_shares_path
 from macfleet.vm import (
     GOLDEN,
+    SUBPROCESS_TIMEOUT,
     Runner,
     Tart,
     VmInfo,
@@ -199,9 +201,13 @@ _PROVISION_TTL = 180.0
 # failure preserves that state. This is synchronous so a short-lived CLI worker cannot disappear
 # before recovery executes.
 _RESTORE_PROBE_SECONDS = 15.0
+_SUSPEND_SETTLE_SECONDS = 120.0
+_SUSPEND_SETTLE_POLL = 0.5
 _IP_CACHE_TTL = 15.0
 _RESOURCE_CACHE_TTL = 30.0
 _RESTORE_FAILURE_MARKERS = ("failed to restore", "invalid argument")
+
+logger = logging.getLogger(__name__)
 
 # Everything macfleet owns in tart's store. Anything without one of these prefixes belongs
 # to the user and must never be touched by a reset.
@@ -305,10 +311,27 @@ class Fleet:
             return None
         return {"cpu": c.get("CPU"), "memory_mb": c.get("Memory"), "disk_gb": c.get("Disk")}
 
+    def _suspend_settled(self, full: str, timeout: float = _SUSPEND_SETTLE_SECONDS) -> None:
+        """`tart suspend` returns as soon as the request is accepted; the VM stays `running`
+        while VZ writes memory to disk (about ten seconds on real hardware). Every caller
+        acts on the saved state next — resume, clone, snapshot — so wait for `suspended`
+        here or those operations race a half-written state file."""
+        self.tart.suspend(full)
+        deadline = self._monotonic() + timeout
+        while True:
+            state = self._state(full)
+            if state == "suspended":
+                return
+            if state != "running":
+                raise RuntimeError(f"{full} entered {state!r} instead of suspending")
+            if self._monotonic() >= deadline:
+                raise RuntimeError(f"{full} did not finish suspending within {timeout:.0f}s")
+            self._sleep(_SUSPEND_SETTLE_POLL)
+
     def suspend(self, name: str) -> None:
         full = ensure_mutable(name)
         with self._locked_vms(full):
-            self.tart.suspend(full)
+            self._suspend_settled(full)
             self._forget_ip(full)
             self._leases.suspend(full)
             self._invalidate_fleet(full)
@@ -407,13 +430,19 @@ class Fleet:
                 diagnostic.close()
         # Never destroy saved state for a generic early launch failure. Only Tart's known VZ
         # restore signature proves that the state itself is unusable.
+        detail = " ".join(message.split())[-500:]
         if all(marker in message for marker in _RESTORE_FAILURE_MARKERS):
+            # Retain the evidence: the UI shows resume as if it were warm, so the activity
+            # feed and engine log are the only places a cold-boot fallback is visible.
+            logger.warning("%s: saved state unrestorable, cold-booting: %s", full, detail)
+            self.activity.record("engine", "coldboot-fallback", shortname(full))
             try:
                 self.tart.stop(full)  # drop the un-restorable saved state
             except RuntimeError:
                 pass
             self._boot(argv)  # cold boot
         elif preserve_suspend_on_failure:
+            logger.warning("%s: resume launch failed, saved state kept: %s", full, detail)
             # resume() optimistically cleared this marker when it launched Tart. Restore it when
             # the launch failed without consuming the saved state, so the UI remains truthful and
             # a later resume can retry.
@@ -436,7 +465,7 @@ class Fleet:
         def _suspend(full: str) -> str | None:
             try:
                 with self._locked_vms(full):
-                    self.tart.suspend(full)
+                    self._suspend_settled(full)
                     self._forget_ip(full)
                     self._leases.suspend(full)
                     self._invalidate_fleet(full)
@@ -637,7 +666,7 @@ class Fleet:
         self, timeout: float = 180.0, poll: float = 3.0, sleep: Callable[[float], None] = time.sleep
     ) -> bool:
         """Boot mf-golden, wait for its guest server, then SUSPEND it — so every future
-        create clones an already-booted image that resumes in ~2s instead of cold-booting
+        create clones an already-booted image that resumes in seconds instead of cold-booting
         macOS for ~30-60s (the dominant cost of `create`). One-time; re-run after re-baking
         golden. Returns True once golden is suspended-warm, False if the guest never became
         reachable within `timeout` (golden left running so it can be inspected)."""
@@ -648,7 +677,7 @@ class Fleet:
         deadline = self._clock() + timeout
         while self._clock() < deadline:
             if self.status("golden"):
-                self.tart.suspend(GOLDEN)
+                self._suspend_settled(GOLDEN)
                 self._forget_ip(GOLDEN)
                 return True
             sleep(poll)
@@ -956,15 +985,27 @@ class Fleet:
         self,
         name: str,
         remote_cmd: str,
-        retries: int = 30,
+        timeout: float = 60.0,
         backoff: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> str:
         # Cold boots can take 30–60s to acquire an IP and start SSH. Retry discovery and
-        # connection-level failures. Remote command failures must surface immediately.
-        # Re-resolve the IP between tries in case it changed on reboot.
+        # connection-level failures until one wall-clock deadline expires, so a hung `ssh`
+        # cannot multiply the wait: each subprocess is bounded by the remaining budget.
+        # Remote command failures must surface immediately. Re-resolve the IP between tries
+        # in case it changed on reboot.
         ensure_mutable(name)
-        for attempt in range(retries):
+        deadline = self._monotonic() + timeout
+
+        def retry_or_raise(exc: RuntimeError) -> None:
+            if self._monotonic() + backoff >= deadline:
+                raise RuntimeError(
+                    f"{fullname(name)} unreachable over SSH after {timeout:.0f}s: {exc}"
+                ) from exc
+            self._forget_ip(fullname(name))
+            sleep(backoff)
+
+        while True:
             try:
                 try:
                     ip = self.ip(name)
@@ -975,19 +1016,17 @@ class Fleet:
                         s in str(exc).lower() for s in ("no ip address found", "has no ip yet")
                     ):
                         raise
-                    if attempt + 1 >= retries:
-                        raise
-                    self._forget_ip(fullname(name))
-                    sleep(backoff)
+                    retry_or_raise(exc)
                     continue
-                return self._run(ssh_cmd(ip, remote_cmd)).stdout
+                argv = ssh_cmd(ip, remote_cmd)
+                if self._run is _run:
+                    remaining = max(1.0, deadline - self._monotonic())
+                    return _run(argv, timeout=min(SUBPROCESS_TIMEOUT, remaining)).stdout
+                return self._run(argv).stdout
             except RuntimeError as exc:
-                transient = any(s in str(exc).lower() for s in _SSH_TRANSIENT)
-                if not transient or attempt + 1 >= retries:
+                if not any(s in str(exc).lower() for s in _SSH_TRANSIENT):
                     raise
-                self._forget_ip(fullname(name))
-                sleep(backoff)
-        raise RuntimeError("unreachable")  # loop either returns or raises
+                retry_or_raise(exc)
 
     def status(self, name: str) -> bool:
         # Short timeout: this runs on every /vms poll, so a slow/contended guest must
@@ -1021,7 +1060,7 @@ class Fleet:
             source_has_saved_state = was_suspended
             if was_running:
                 try:
-                    self.tart.suspend(src)
+                    self._suspend_settled(src)
                     source_has_saved_state = True
                 except RuntimeError:
                     self.tart.stop(src)  # clean-disk fallback if the image can't suspend
@@ -1096,7 +1135,7 @@ class Fleet:
             source_has_saved_state = was_suspended
             if was_running:
                 try:
-                    self.tart.suspend(src)
+                    self._suspend_settled(src)
                     source_has_saved_state = True
                 except RuntimeError:
                     self.tart.stop(src)

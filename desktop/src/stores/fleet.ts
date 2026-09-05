@@ -79,6 +79,19 @@ function healthSmoother() {
 export const useFleet = defineStore('fleet', () => {
   const { add: toast } = useToasts()
 
+  // Failure toasts carry the engine's reason, not just the verb: "Failed to suspend web"
+  // alone leaves the user guessing whether to retry, wait, or fix something. The API client
+  // throws `METHOD /path -> 409: <detail>`; keep the detail (or the status when there is none).
+  function failReason(e: unknown): string {
+    const text = e instanceof Error ? e.message : String(e)
+    const match = /-> (\d{3})(?:: (.*))?$/s.exec(text)
+    if (!match) return text
+    return match[2]?.trim() || `HTTP ${match[1]}`
+  }
+  function failToast(msg: string, e: unknown): void {
+    toast(`${msg}: ${failReason(e)}`, '⚠')
+  }
+
   const vms = ref<Vm[]>([])
   const snapshots = ref<Snapshot[]>([])
   const host = ref<HostInfo | null>(null)
@@ -151,7 +164,7 @@ export const useFleet = defineStore('fleet', () => {
       entry = { cmd, out: `${stdout}${separator}${stderr}`, code: exit_code }
     } catch (e) {
       entry = { cmd, out: String(e), code: null }
-      toast(`Failed to run command on ${name}`, '⚠')
+      failToast(`Failed to run command on ${name}`, e)
     }
     terminalHistory.value = {
       ...terminalHistory.value,
@@ -174,7 +187,7 @@ export const useFleet = defineStore('fleet', () => {
       toast('Shared folders saved', '✓')
     } catch (e) {
       error.value = String(e)
-      toast(`Failed to save shared folders for ${name}`, '⚠')
+      failToast(`Failed to save shared folders for ${name}`, e)
     }
   }
   async function restart(name: string): Promise<void> {
@@ -184,7 +197,7 @@ export const useFleet = defineStore('fleet', () => {
       await refresh()
     } catch (e) {
       error.value = String(e)
-      toast(`Failed to restart ${name}`, '⚠')
+      failToast(`Failed to restart ${name}`, e)
     }
   }
 
@@ -209,12 +222,8 @@ export const useFleet = defineStore('fleet', () => {
       await fetchResources(name)
     } catch (e) {
       error.value = String(e)
-      toast(
-        String(e).includes('409')
-          ? 'Stop the VM to change resources'
-          : `Failed to update resources for ${name}`,
-        '⚠',
-      )
+      if (String(e).includes('409')) toast('Stop the VM to change resources', '⚠')
+      else failToast(`Failed to update resources for ${name}`, e)
     }
   }
 
@@ -304,19 +313,19 @@ export const useFleet = defineStore('fleet', () => {
   }
 
   // Surface API failures on `error` rather than rejecting into the caller's event
-  // handler (which Vue reports as an unhandled error). `errorToast`, when given, is
-  // shown to the user too — used by mutations the user directly triggered.
-  async function run(fn: () => Promise<unknown>, errorToast?: string): Promise<void> {
+  // handler (which Vue reports as an unhandled error). `errorToast` is shown to the user
+  // with the engine's reason, so a failed mutation is never silent.
+  async function run(fn: () => Promise<unknown>, errorToast: string): Promise<void> {
     try {
       await fn()
       await refresh()
     } catch (e) {
       error.value = String(e)
-      if (errorToast) toast(errorToast, '⚠')
+      failToast(errorToast, e)
     }
   }
-  const down = (name: string) => run(() => api.down(name))
-  const nuke = (name: string) => run(() => api.nuke(name))
+  const down = (name: string) => run(() => api.down(name), `Failed to stop ${name}`)
+  const nuke = (name: string) => run(() => api.nuke(name), `Failed to delete ${name}`)
 
   // Fan out a per-VM op with a concurrency cap so a bulk action doesn't spawn a burst of
   // tart subprocesses (the load that made the fleet flap). One refresh + one summary toast.
@@ -363,7 +372,7 @@ export const useFleet = defineStore('fleet', () => {
       await refreshSnapshots()
     } catch (e) {
       error.value = String(e)
-      toast('Failed to delete snapshot', '⚠')
+      failToast('Failed to delete snapshot', e)
     }
   }
 
@@ -375,7 +384,7 @@ export const useFleet = defineStore('fleet', () => {
       toast('Restored', '✓')
     } catch (e) {
       error.value = String(e)
-      toast(`Failed to restore ${name}`, '⚠')
+      failToast(`Failed to restore ${name}`, e)
     }
   }
 
@@ -387,7 +396,7 @@ export const useFleet = defineStore('fleet', () => {
       toast('Snapshot saved', '✓')
     } catch (e) {
       error.value = String(e)
-      toast(`Failed to snapshot ${name}`, '⚠')
+      failToast(`Failed to snapshot ${name}`, e)
     }
   }
 
@@ -405,7 +414,7 @@ export const useFleet = defineStore('fleet', () => {
     } catch (e) {
       error.value = String(e)
       clearPending([newName])
-      toast(`Failed to duplicate ${name}`, '⚠')
+      failToast(`Failed to duplicate ${name}`, e)
     }
   }
 
@@ -486,7 +495,7 @@ export const useFleet = defineStore('fleet', () => {
         leaseExpiries = nextExpiries
         announcedLeaseExpiries.delete(name)
       }
-      toast(`Failed to create ${name}`, '⚠')
+      failToast(`Failed to create ${name}`, e)
     }
   }
 

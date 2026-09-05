@@ -280,7 +280,11 @@ onUnmounted(() => {
       <p v-if="!store.loaded" class="px-2 py-2 text-xs text-[var(--text-faint)]">
         Connecting to engine…
       </p>
-      <p v-else-if="!rows.length && store.error" class="px-2 py-2 text-xs text-[var(--red)]">
+      <p
+        v-else-if="store.error"
+        data-test="fleet-error"
+        class="px-2 py-2 text-xs break-words text-[var(--red)]"
+      >
         {{ store.error }}
       </p>
       <p

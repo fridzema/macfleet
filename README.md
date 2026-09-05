@@ -76,7 +76,9 @@ scripts/bake.sh
 This clones the base image, boots it, copies your SSH key in, and runs the guest
 provisioning (public DNS, authenticated `cua-computer-server` gateway, launchd, and
 TCC grants). After verification it warm-suspends the golden image automatically, so
-new VMs resume in a few seconds instead of cold-booting macOS.
+new VMs resume from its saved state instead of cold-booting macOS. When the host's
+Virtualization framework refuses a restore, the engine cold-boots instead and records a
+`coldboot-fallback` entry in the activity feed.
 
 ## CLI usage
 

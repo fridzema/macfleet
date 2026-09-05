@@ -110,7 +110,7 @@ describe('TerminalTab', () => {
     )
 
     expect(wrapper.find('[data-test="term-code"]').classes()).toContain('text-[var(--red)]')
-    expect(useToasts().toasts.value.map((t) => t.msg)).toContain('Failed to run command on web')
+    expect(useToasts().toasts.value.map((t) => t.msg)).toContain('Failed to run command on web: HTTP 500')
     wrapper.unmount()
   })
 

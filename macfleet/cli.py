@@ -99,11 +99,11 @@ def bake() -> None:
 
 @app.command()
 def warm() -> None:
-    """Boot mf-golden, wait for the guest, then suspend it so new VMs resume in ~2s
-    instead of cold-booting. One-time (re-run after re-baking golden)."""
+    """Boot mf-golden, wait for the guest, then suspend it so new VMs resume from saved
+    state instead of cold-booting (falls back to a cold boot when VZ cannot restore). One-time (re-run after re-baking golden)."""
     typer.echo("Warming mf-golden (boot + wait for guest, then suspend)…")
     if _fleet().warm_golden():
-        typer.echo("mf-golden is warm — new VMs now resume in ~2s")
+        typer.echo("mf-golden is warm — new VMs now resume from its saved state")
     else:
         typer.echo("golden guest never became reachable; left running for inspection")
         raise typer.Exit(1)
@@ -199,20 +199,17 @@ def serve(port: int = 8765) -> None:
     """Start the local API for the desktop app."""
     import os
 
-    import uvicorn
-
-    from macfleet.api import build_app
+    from macfleet.api import build_app, run_server
 
     token, generated = _resolve_api_token(os.environ.get("MACFLEET_API_TOKEN"))
     if generated:
         typer.echo(f"API token (send as X-Macfleet-Token): {token}", err=True)
-    uvicorn.run(
+    run_server(
         build_app(
             token=token, suspend_vms_on_exit=os.environ.get("MACFLEET_SUSPEND_VMS_ON_EXIT") == "1"
         ),
         host="127.0.0.1",
         port=port,
-        timeout_graceful_shutdown=5,
     )
 
 

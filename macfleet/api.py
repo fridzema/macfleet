@@ -124,6 +124,7 @@ def build_app(
                     logger.exception("reap backstop failed")
 
         task = asyncio.create_task(_reap_loop())
+        _app.state.loop = asyncio.get_running_loop()
         try:
             yield
         finally:
@@ -140,6 +141,10 @@ def build_app(
     api = FastAPI(
         title="macfleet", lifespan=lifespan, dependencies=[Depends(_guard)] if token else None
     )
+    # Set by run_server() on SIGTERM/SIGINT so long-lived streams end themselves and Uvicorn's
+    # connection drain completes immediately instead of cancelling them at its deadline.
+    closing = asyncio.Event()
+    api.state.closing = closing
     api.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -189,7 +194,7 @@ def build_app(
 
         async def events() -> AsyncIterator[str]:
             previous = ""
-            while not await request.is_disconnected():
+            while not closing.is_set() and not await request.is_disconnected():
                 try:
                     current = json.dumps(await _fleet_snapshot(fleet), separators=(",", ":"))
                     if current != previous:
@@ -197,7 +202,11 @@ def build_app(
                         yield f"data: {current}\n\n"
                 except Exception as exc:
                     yield f"event: error\ndata: {json.dumps(str(exc))}\n\n"
-                await asyncio.sleep(2)
+                try:
+                    await asyncio.wait_for(closing.wait(), timeout=2)
+                except TimeoutError:
+                    continue
+                return  # engine shutting down: close the stream cleanly
 
         return StreamingResponse(
             events(),
@@ -371,3 +380,22 @@ def build_app(
         return {"ok": True}
 
     return api
+
+
+def run_server(app: FastAPI, *, host: str, port: int) -> None:
+    """Serve `app` with Uvicorn, closing fleet streams on the first exit signal.
+
+    Uvicorn drains open connections before it runs lifespan shutdown (where suspend-on-exit
+    lives). Signalling the SSE generators first lets that drain finish in milliseconds; the
+    five-second cap remains as a backstop for any other in-flight response.
+    """
+    import uvicorn
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig: int, frame: object) -> None:
+            loop = getattr(app.state, "loop", None)
+            if loop is not None:
+                loop.call_soon_threadsafe(app.state.closing.set)
+            super().handle_exit(sig, frame)
+
+    Server(uvicorn.Config(app, host=host, port=port, timeout_graceful_shutdown=5)).run()

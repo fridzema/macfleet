@@ -60,14 +60,6 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: cargo install cargo-audit --locked
-      # quick-xml 0.39 is only pulled by Linux's wayland-scanner build tool, which parses
-      # trusted protocol XML at compile time; no newer compatible scanner exists yet.
-      # rkyv 0.7 is an optional rust_decimal feature recorded in Cargo.lock through
-      # tauri-plugin-log -> byte-unit. It is absent from `cargo tree --target all`, so no
-      # vulnerable rkyv code is compiled into macfleet; rust_decimal has no compatible
-      # release on rkyv 0.8 yet.
-      - run: >-
-          cargo audit --file src-tauri/Cargo.lock
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
-          --ignore RUSTSEC-2026-0235
+      # Risk exceptions and their justification live in src-tauri/.cargo/audit.toml.
+      - run: cargo audit
+        working-directory: desktop/src-tauri
