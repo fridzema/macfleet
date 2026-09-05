@@ -1,5 +1,10 @@
 # macfleet
 
+[![CI](https://github.com/fridzema/macfleet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fridzema/macfleet/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/fridzema/macfleet?sort=semver)](https://github.com/fridzema/macfleet/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20silicon)-lightgrey.svg)](#prerequisites)
+
 A fleet of disposable macOS VMs on a single Apple-silicon host, managed over SSH and
 driven with computer use ([trycua](https://github.com/trycua)'s `cua-computer-server`).
 Spin up N named VMs cloned from one provisioned golden image, SSH in for scripted
@@ -239,8 +244,8 @@ part of CI because hosted runners do not provide Virtualization.framework VM cap
 
 ## Design docs
 
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) — design spec.
-- [`docs/superpowers/plans/`](docs/superpowers/plans/) — implementation plan.
+- [`docs/design-brief.md`](docs/design-brief.md) — the interface brief the desktop app is built to.
+- [`docs/design/`](docs/design/) — the design comp that brief was drawn from.
 
 ## Contributing
 

@@ -1,5 +1,10 @@
-.superpowers/
 .venv/
+
+# Local agent/editor config and internal working notes
+.claude/
+.superpowers/
+docs/superpowers/
+docs/release-readiness-*.md
 __pycache__/
 node_modules/
 dist/
