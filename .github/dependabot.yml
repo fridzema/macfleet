@@ -26,6 +26,12 @@ updates:
     groups:
       desktop:
         patterns: ['*']
+    ignore:
+      # typescript-eslint does not support the TypeScript 7 API yet, so a TS 7 bump
+      # breaks `bun run lint`. Drop this entry once it does.
+      # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: typescript
+        versions: ['>=7']
 
   - package-ecosystem: cargo
     directory: /desktop/src-tauri
