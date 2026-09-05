@@ -125,7 +125,6 @@ come with tests against the injectable fakes rather than a real VM.
 | `desktop/src/`       | Vue 3 frontend                                            |
 | `desktop/src-tauri/` | Rust host (window, tray, engine sidecar supervision)      |
 | `desktop/tests/`     | Vitest unit tests + Playwright e2e                        |
-| `docs/`              | Design brief and interface comp                           |
 
 ## Reporting issues
 

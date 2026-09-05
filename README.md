@@ -242,11 +242,6 @@ release check with `make verify-hardware`; it creates only `mf-releasecheck`,
 with those names, and cleans up after itself. It remains a manual release gate rather than
 part of CI because hosted runners do not provide Virtualization.framework VM capacity.
 
-## Design docs
-
-- [`docs/design-brief.md`](docs/design-brief.md) — the interface brief the desktop app is built to.
-- [`docs/design/`](docs/design/) — the design comp that brief was drawn from.
-
 ## Contributing
 
 Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
