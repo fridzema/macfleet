@@ -101,7 +101,7 @@ rust-format:
 
 rust-audit:
 	@command -v cargo-audit >/dev/null 2>&1 || { echo "cargo-audit not installed. Run: cargo install cargo-audit"; exit 1; }
-	# Risk exceptions live in src-tauri/.cargo/audit.toml (shared with CI).
+	# Runs unfiltered; accepted advisories (none today) go in src-tauri/.cargo/audit.toml.
 	cd src-tauri && cargo audit
 
 rust-test:

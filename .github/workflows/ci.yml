@@ -60,6 +60,7 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: cargo install cargo-audit --locked
-      # Risk exceptions and their justification live in src-tauri/.cargo/audit.toml.
+      # Runs unfiltered: there are currently no accepted advisories. If one becomes
+      # unavoidable, record it in src-tauri/.cargo/audit.toml with the reason, not here.
       - run: cargo audit
         working-directory: desktop/src-tauri
