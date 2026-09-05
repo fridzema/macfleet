@@ -1,6 +1,6 @@
 [package]
 name = "macfleet-desktop"
-version = "0.5.0" # x-release-please-version
+version = "0.5.1" # x-release-please-version
 description = "macfleet desktop application"
 edition = "2021"
 
