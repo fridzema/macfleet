@@ -956,18 +956,31 @@ class Fleet:
         self,
         name: str,
         remote_cmd: str,
-        retries: int = 3,
+        retries: int = 30,
         backoff: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> str:
-        # Right after `up`, the guest is `running` but SSH is not yet answering for ~30s (see
-        # README). Retry ONLY connection-level failures (ssh exits 255) — a nonzero exit from
-        # the remote command itself is a real result and must surface immediately, not after
-        # three slow retries. Re-resolve the IP between tries in case it changed on reboot.
+        # Cold boots can take 30–60s to acquire an IP and start SSH. Retry discovery and
+        # connection-level failures. Remote command failures must surface immediately.
+        # Re-resolve the IP between tries in case it changed on reboot.
         ensure_mutable(name)
         for attempt in range(retries):
             try:
-                return self._run(ssh_cmd(self.ip(name), remote_cmd)).stdout
+                try:
+                    ip = self.ip(name)
+                except RuntimeError as exc:
+                    # Tart reports either an empty result or an error before DHCP is ready.
+                    # Scope this check to discovery so remote command output cannot trigger it.
+                    if not any(
+                        s in str(exc).lower() for s in ("no ip address found", "has no ip yet")
+                    ):
+                        raise
+                    if attempt + 1 >= retries:
+                        raise
+                    self._forget_ip(fullname(name))
+                    sleep(backoff)
+                    continue
+                return self._run(ssh_cmd(ip, remote_cmd)).stdout
             except RuntimeError as exc:
                 transient = any(s in str(exc).lower() for s in _SSH_TRANSIENT)
                 if not transient or attempt + 1 >= retries:

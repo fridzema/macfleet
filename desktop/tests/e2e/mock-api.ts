@@ -38,13 +38,18 @@ function vmName(route: Route): string {
  * Wires a small stateful fake of the engine's REST API (127.0.0.1:8765) so e2e specs can
  * drive real user journeys (create, snapshot, delete, exec, ...) against the mocked
  * network layer instead of a live macOS VM engine. Every route macfleet's UI actually
- * calls during these journeys is covered; anything unmocked is left to Playwright's
- * default (which errors loudly rather than hitting a real server).
+ * calls during these journeys is covered; unmocked API traffic is aborted so tests
+ * cannot accidentally reach a real engine running on the host.
  */
 export async function mockApi(
   page: Page,
   initial: { vms?: MockVm[]; snapshots?: MockSnapshot[] } = {},
 ): Promise<MockApiState> {
+  // Register first: later, specific routes take precedence over this safety net.
+  await page.route(
+    (url) => url.protocol.startsWith('http') && url.origin !== 'http://127.0.0.1:1420',
+    (route) => route.abort(),
+  )
   const state: MockApiState = {
     vms: initial.vms ?? [],
     snapshots: initial.snapshots ?? [],
@@ -137,7 +142,15 @@ export async function mockApi(
     return route.fulfill({ json: { ok: true } })
   })
 
-  await page.route('**/vms/*/screenshot', (route) => route.fulfill({ json: { png_b64: 'QUJD' } }))
+  await page.route('**/vms/*/screenshot', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    }),
+  )
   await page.route('**/vms/*/logs**', (route) =>
     route.fulfill({ json: { lines: 'boot ok\nserver up' } }),
   )

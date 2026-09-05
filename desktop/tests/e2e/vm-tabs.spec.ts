@@ -12,6 +12,7 @@ test.describe('selecting a VM renders each of the 5 tabs', () => {
 
   test('Screen tab shows the polled screenshot', async ({ page }) => {
     await expect(page.getByTestId('shot')).toBeVisible()
+    await expect(page.getByTestId('shot')).toHaveJSProperty('naturalWidth', 1)
   })
 
   test('Terminal tab runs a command against the mocked exec endpoint', async ({ page }) => {
