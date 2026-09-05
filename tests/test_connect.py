@@ -617,13 +617,48 @@ def test_ssh_retries_transient_connection_error(tmp_path):
     assert attempts["n"] == 3
 
 
-def test_ssh_does_not_retry_command_failure(tmp_path):
+@pytest.mark.parametrize("missing", ["", "no IP address found"])
+def test_ssh_waits_for_boot_ip(tmp_path, missing):
+    attempts = []
+
+    def run(argv):
+        if argv[:2] == ["tart", "ip"]:
+            attempts.append(argv)
+            if len(attempts) < 4:
+                if missing:
+                    raise RuntimeError(f"tart ip mf-web failed: {missing}")
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json")))
+    assert fleet.ssh("web", "whoami", sleep=lambda _: None) == "ok\n"
+    assert len(attempts) == 4
+
+
+def test_ssh_missing_ip_exhausts_retry_budget(tmp_path):
+    attempts = []
+    sleeps = []
+
+    def run(argv):
+        attempts.append(argv)
+        raise RuntimeError("tart ip mf-web failed: no IP address found")
+
+    fleet = Fleet(tart=Tart(run=run), run=run, leases=Leases(str(tmp_path / "s.json")))
+    with pytest.raises(RuntimeError, match="no IP address found"):
+        fleet.ssh("web", "whoami", retries=3, sleep=sleeps.append)
+    assert len(attempts) == 3
+    assert sleeps == [2.0, 2.0]
+
+
+@pytest.mark.parametrize("detail", ["some-command: not found", "no IP address found"])
+def test_ssh_does_not_retry_command_failure(tmp_path, detail):
     attempts = {"n": 0}
 
     def run(argv):
         if argv[0] == "ssh":
             attempts["n"] += 1
-            raise RuntimeError("ssh mf-web whoami failed: some-command: not found")
+            raise RuntimeError(f"ssh mf-web whoami failed: {detail}")
         return subprocess.CompletedProcess(argv, 0, "192.168.64.9", "")
 
     fleet = Fleet(
@@ -632,7 +667,7 @@ def test_ssh_does_not_retry_command_failure(tmp_path):
         spawn=lambda a: None,
         leases=Leases(str(tmp_path / "s.json"), clock=lambda: 0.0),
     )
-    with pytest.raises(RuntimeError, match="not found"):
+    with pytest.raises(RuntimeError, match=detail):
         fleet.ssh("web", "whoami", sleep=lambda _: None)
     assert attempts["n"] == 1  # a real command failure surfaces immediately, no retry
 

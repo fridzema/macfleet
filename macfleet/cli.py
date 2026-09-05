@@ -212,6 +212,7 @@ def serve(port: int = 8765) -> None:
         ),
         host="127.0.0.1",
         port=port,
+        timeout_graceful_shutdown=5,
     )
 
 

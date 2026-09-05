@@ -22,6 +22,9 @@ def main() -> None:
         ),
         host="127.0.0.1",
         port=args.port,
+        # Fleet SSE connections are long-lived. Drain them before lifespan shutdown
+        # so suspend-on-exit runs instead of waiting until the native host kills us.
+        timeout_graceful_shutdown=5,
     )
 
 

@@ -55,6 +55,7 @@ jobs:
       - run: bun run test:e2e
       - run: bun run build
       - run: bun run build:engine
+      - run: uv run --project .. python ../scripts/verify-packaged-engine.py src-tauri/binaries/macfleet-engine/macfleet-engine
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
