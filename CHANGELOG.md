@@ -3,6 +3,35 @@
 All notable changes to macfleet are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-09-05
+
+Release-readiness fixes from the 0.5.0 verification pass. Unsigned build.
+
+### Fixed
+
+- Native quit no longer hangs on an open fleet event stream: streams close on
+  the exit signal and suspend-on-exit runs within seconds.
+- Suspend waits until Tart reports the VM as suspended, so resume, clone, and
+  snapshot no longer race a half-written state file.
+- A failed VZ restore is logged with its diagnostic and recorded as a
+  `coldboot-fallback` activity entry instead of silently cold-booting.
+- SSH readiness during cold boot retries missing-IP discovery under one
+  wall-clock budget that also bounds each connection attempt.
+- Guest provisioning pre-approves the helper in replayd's screen-capture
+  approvals, so clones no longer show the macOS screen-recording reminder
+  (re-bake golden to pick this up).
+- Failure toasts include the engine's reason; stop and delete failures now
+  toast; the sidebar keeps its error banner visible with a non-empty fleet.
+- Browser tests use a valid PNG screenshot fixture and abort unmocked requests.
+- Vulnerable JavaScript tooling dependencies updated within existing ranges.
+
+### Changed
+
+- Packaged engine is smoke-tested over real HTTP in CI after the sidecar build.
+- Rust audit exceptions moved to `desktop/src-tauri/.cargo/audit.toml`.
+- "Resume in ~2s" wording softened: warm resume depends on the host's
+  Virtualization framework accepting the restore.
+
 ## [0.5.0] - 2026-08-19
 
 Settings, diagnostics, and a real menu-bar app: the engine gained a config
